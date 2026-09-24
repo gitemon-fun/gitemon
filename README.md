@@ -3,14 +3,14 @@
 Every GitHub developer, hatched into a pixel creature on one shared map — **[gitemon.fun](https://gitemon.fun)**.
 
 - **Hatch.** Every developer already exists as a wild Gitemon, built from public GitHub data.
-- **Catch.** Sign in with GitHub and catch the developers you admire. Worked together for real? It's a *bonded* catch.
+- **Catch.** Sign in with GitHub and catch the developers you admire. Worked together for real? It's a _bonded_ catch.
 - **Claim.** When someone you caught signs in, you both get a friendship buff.
 - **Belong.** Your home is your language's biome. Found a town, and be seen from the far zoom.
 
 ## The rules, in one paragraph
 
 Power is not size. A Gitemon never grows because of raw volume. Only work other people confirmed
-counts — pull requests merged into *their* repos, reviews you gave, stars others gave you — and
+counts — pull requests merged into _their_ repos, reviews you gave, stars others gave you — and
 every stat is log-scaled with a ceiling. Commits to your own repos count for nothing on their own,
 so AI-generated volume changes nothing either. The whole scorer is a pure function in
 [`packages/scorer`](packages/scorer/src/index.ts); read it, and send a PR if you think it's unfair.
@@ -21,15 +21,15 @@ if you turned that setting on.
 
 ## Layout
 
-| Path | What |
-|---|---|
-| `packages/shared` | types, the world grid, deterministic hashing |
-| `packages/ingest` | fetches a public GitHub snapshot (GraphQL) |
-| `packages/scorer` | snapshot → stats, level, type, species, form (pure, tested) |
+| Path                    | What                                                                  |
+| ----------------------- | --------------------------------------------------------------------- |
+| `packages/shared`       | types, the world grid, deterministic hashing                          |
+| `packages/ingest`       | fetches a public GitHub snapshot (GraphQL)                            |
+| `packages/scorer`       | snapshot → stats, level, type, species, form (pure, tested)           |
 | `packages/creature-gen` | deterministic pixel sprites + a tiny PNG encoder; CC0 placeholder art |
-| `apps/api` | Cloudflare Worker (Hono): pages, API, auth, images — D1 + R2 |
-| `apps/web` | the map (Svelte + canvas) |
-| `scripts` | trusted-fetcher jobs: seed, drain |
+| `apps/api`              | Cloudflare Worker (Hono): pages, API, auth, images — D1 + R2          |
+| `apps/web`              | the map (Svelte + canvas)                                             |
+| `scripts`               | trusted-fetcher jobs: seed, drain                                     |
 
 ## Run it
 
