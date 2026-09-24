@@ -76,17 +76,33 @@ export function villageRect(t: TypeId) {
 }
 
 /**
- * Candidate wild slots for a user, in probe order. Deterministic: the first free one wins,
- * so a Gitemon lands in the same place every time the world is rebuilt in the same order.
+ * Candidate wild slots for a user, in probe order. Wild Gitemon pack densely around the town ring
+ * and the populated band grows outward with the biome's population, so neighbours are visible at
+ * street zoom. Only one colour of a checkerboard is used, so sprites never touch.
+ * Deterministic for a given (user, population).
  */
-export function* wildCandidates(t: TypeId, userId: number): Generator<{ x: number; y: number }> {
+export function* wildCandidates(
+  t: TypeId,
+  userId: number,
+  population = 0,
+): Generator<{ x: number; y: number }> {
   const o = biomeOrigin(t);
+  const inner = TOWN_MAX - TOWN_MIN;
+  const need = population * 2.5 + 200;
+  let r = 1;
+  while (r < TOWN_MIN && ((inner + 2 * r) ** 2 - inner ** 2) / 2 < need) r++;
   let h = hash32(`slot:${userId}`);
-  for (let i = 0; i < 4096; i++) {
-    const lx = h % BIOME;
-    const ly = Math.floor(h / BIOME) % BIOME;
-    if (zoneOf(lx, ly) === 'wild') yield { x: o.x + lx, y: o.y + ly };
+  let yielded = 0;
+  for (let i = 0; i < 200_000; i++) {
+    const lo = TOWN_MIN - r;
+    const span = inner + 2 * r;
+    const lx = lo + (h % span);
+    const ly = lo + (Math.floor(h / span) % span);
     h = hash32(`slot:${userId}:${i}`);
+    if ((lx + ly) % 2 !== 0 || zoneOf(lx, ly) !== 'wild') continue;
+    yield { x: o.x + lx, y: o.y + ly };
+    // every 48 offers that were all taken: the band is crowded, widen it
+    if (++yielded % 48 === 0 && r < TOWN_MIN) r = Math.min(TOWN_MIN, r + 4);
   }
 }
 

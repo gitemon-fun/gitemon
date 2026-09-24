@@ -6,6 +6,7 @@ import { limits } from './env.js';
 import { decrypt, encrypt, randomId, sign, verify } from './crypto.js';
 import { byId, ingest, now } from './world.js';
 import { claim, isReal } from './game.js';
+import { messagePage } from './pages.js';
 
 /**
  * Sign-in: WorkOS User Management with GitHub as the only provider (binding: WorkOS, never
@@ -36,6 +37,18 @@ export async function loginRedirect(c: Context<AppEnv>) {
   u.searchParams.set('response_type', 'code');
   u.searchParams.set('provider', 'GitHubOAuth');
   u.searchParams.set('state', state);
+  // Until sign-in is fully configured in WorkOS, show our own page instead of WorkOS's error page.
+  const probe = await fetch(u.toString(), { redirect: 'manual' });
+  const to = probe.headers.get('location') ?? '';
+  if (probe.status >= 400 || to.startsWith('https://error.workos.com'))
+    return c.html(
+      messagePage(
+        503,
+        'Sign-in opens soon',
+        'Signing in with GitHub is being switched on right now. Catching, claiming and towns open the moment it is. The map and every profile already work.',
+      ),
+      503,
+    );
   return c.redirect(u.toString(), 302);
 }
 

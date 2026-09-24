@@ -23,32 +23,38 @@ export async function internal<T>(path: string, body?: unknown): Promise<T> {
   return (await r.json()) as T;
 }
 
-/** Fetch snapshots for logins and push them in batches. Returns logins that do not exist. */
+const CONCURRENCY = Number(process.env.GITEMON_CONCURRENCY ?? 6);
+
+/** Fetch snapshots (a few in parallel) and push them in small batches. Returns logins that do not exist. */
 export async function pump(logins: string[], log = (s: string) => process.stderr.write(s)) {
   const missing: string[] = [];
-  let batch: Snapshot[] = [];
+  const batch: Snapshot[] = [];
+  let paused: Promise<void> | null = null;
   const flush = async () => {
-    if (!batch.length) return;
-    await internal('/internal/ingest', { snapshots: batch });
-    batch = [];
+    while (batch.length) await internal('/internal/ingest', { snapshots: batch.splice(0, 6) });
   };
-  for (const login of logins) {
-    try {
-      const s = await fetchSnapshot(login, GH);
-      if ('notFound' in s) missing.push(login);
-      else batch.push(s);
-      log('.');
-    } catch (e) {
-      if (e instanceof GitHubError && e.rateLimited) {
-        log('R');
-        await flush();
-        await sleep(60_000);
-        continue;
+  const queue = [...logins];
+  const worker = async () => {
+    for (let login = queue.shift(); login; login = queue.shift()) {
+      if (paused) await paused;
+      try {
+        const s = await fetchSnapshot(login, GH);
+        if ('notFound' in s) missing.push(login);
+        else batch.push(s);
+        log('.');
+      } catch (e) {
+        if (e instanceof GitHubError && e.rateLimited) {
+          log('R');
+          queue.unshift(login);
+          paused ??= sleep(60_000).then(() => void (paused = null));
+          continue;
+        }
+        log('x');
       }
-      log('x');
+      if (batch.length >= 6) await flush();
     }
-    if (batch.length >= 10) await flush();
-  }
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   await flush();
   if (missing.length) await internal('/internal/missing', { logins: missing });
   return missing;

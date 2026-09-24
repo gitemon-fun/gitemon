@@ -37,8 +37,8 @@ describe('world layout', () => {
 
   it('wild slots are stable, inside the biome, and in the wild zone', () => {
     const o = biomeOrigin('tide');
-    const a = [...take(wildCandidates('tide', 42), 5)];
-    const b = [...take(wildCandidates('tide', 42), 5)];
+    const a = [...take(wildCandidates('tide', 42, 300), 5)];
+    const b = [...take(wildCandidates('tide', 42, 300), 5)];
     expect(a).toEqual(b);
     for (const c of a) {
       expect(biomeAt(c.x, c.y)).toBe('tide');

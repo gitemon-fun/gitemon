@@ -98,7 +98,11 @@ export async function findSlot(
     const s = await firstFree(db, rectCandidates(villageRect(t1), id), skip);
     if (s) return s;
   }
-  return firstFree(db, wildCandidates(t1, id), skip);
+  const pop = await db
+    .prepare('SELECT COUNT(*) AS n FROM gitemon WHERE t1 = ?')
+    .bind(t1)
+    .first<{ n: number }>();
+  return firstFree(db, wildCandidates(t1, id, pop?.n ?? 0), skip);
 }
 
 /** Move a Gitemon to a new home. Retries on the rare unique-slot race. */

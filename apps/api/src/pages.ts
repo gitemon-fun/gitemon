@@ -39,6 +39,7 @@ footer a{color:var(--dim);margin-right:14px}
 `;
 
 export function layout(o: {
+  noindex?: boolean;
   title: string;
   description: string;
   path: string;
@@ -49,7 +50,7 @@ export function layout(o: {
   const url = `https://gitemon.fun${o.path}`;
   const img = o.image ?? 'https://gitemon.fun/og-default.png';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">${o.noindex ? '<meta name="robots" content="noindex">' : ''}
 <title>${esc(o.title)}</title><meta name="description" content="${esc(o.description)}">
 <link rel="canonical" href="${url}"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.png" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta property="og:type" content="website"><meta property="og:site_name" content="Gitemon"><meta property="og:url" content="${url}">
@@ -113,6 +114,7 @@ export function pendingPage(login: string) {
     title: `${login} — not in the world yet · Gitemon`,
     description: 'This developer has not appeared on the Gitemon map yet.',
     path: `/${login}`,
+    noindex: true,
     body: `<section class="card"><h1>${esc(login)}</h1><p class="sub">This Gitemon has not hatched yet. We asked for it just now — it usually appears within a few minutes.</p>
 <div class="btns"><a class="btn primary" href="/auth/login?next=/map?focus=${encodeURIComponent(login)}">Sign in with GitHub to hatch yours now</a><a class="btn" href="/map">Open the map</a></div></section>`,
   });
@@ -125,6 +127,7 @@ export function messagePage(status: number, title: string, text: string) {
     path: '/',
     body: `<section class="card"><h1>${esc(title)}</h1><p class="sub">${esc(text)}</p><div class="btns"><a class="btn primary" href="/map">Open the map</a><a class="btn" href="/">Home</a></div></section>`,
     status: String(status),
+    noindex: true,
   });
 }
 
