@@ -24,7 +24,17 @@ import {
   profilePage,
   termsPage,
 } from './pages.js';
-import { byId, byLogin, ingest, isStale, MAP_COLS, now, toMap, type Row } from './world.js';
+import {
+  byId,
+  byLogin,
+  ingest,
+  isStale,
+  MAP_COLS,
+  now,
+  toMap,
+  worldCount,
+  type Row,
+} from './world.js';
 
 const VERSION = '1.0.0';
 const app = new Hono<AppEnv>();
@@ -279,9 +289,7 @@ app.get('/api/notable', (c) =>
     const g = [...perBiome.flatMap((r) => r.results), ...mostCaught.results, ...shiny.results]
       .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
       .map(toMap);
-    const total = await c.env.DB.prepare(
-      'SELECT COUNT(*) AS n FROM gitemon WHERE hidden = 0',
-    ).first<{ n: number }>();
+    const total = { n: await worldCount(c.env.DB) };
     return c.json({ g, towns: towns.results, total: total?.n ?? 0 });
   }),
 );
@@ -554,10 +562,7 @@ async function spa(c: Context<AppEnv>) {
 
 app.get('/', async (c) =>
   edgeCached(c, 300, async () => {
-    const n = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM gitemon WHERE hidden = 0').first<{
-      n: number;
-    }>();
-    return new Response(homePage(n?.n ?? 0), {
+    return new Response(homePage(await worldCount(c.env.DB)), {
       headers: { 'content-type': 'text/html; charset=utf-8' },
     });
   }),

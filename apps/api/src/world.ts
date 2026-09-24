@@ -99,7 +99,7 @@ export async function findSlot(
     if (s) return s;
   }
   const pop = await db
-    .prepare('SELECT COUNT(*) AS n FROM gitemon WHERE t1 = ?')
+    .prepare('SELECT n FROM biome_pop WHERE t1 = ?')
     .bind(t1)
     .first<{ n: number }>();
   return firstFree(db, wildCandidates(t1, id, pop?.n ?? 0), skip);
@@ -183,6 +183,7 @@ export async function ingest(db: D1Database, snap: Snapshot): Promise<Row> {
       )
       .run();
     // Main language changed and it lives outside a town: move it to its new biome.
+    if (existing.t1 !== cols.t1) await movePop(db, existing.t1, cols.t1);
     if (existing.t1 !== cols.t1 && existing.town_id == null) {
       await relocate(
         db,
@@ -227,6 +228,7 @@ export async function ingest(db: D1Database, snap: Snapshot): Promise<Row> {
           now(),
         )
         .run();
+      await movePop(db, null, cols.t1);
       return (await byId(db, snap.userId))!;
     } catch (e) {
       if (!String(e).includes('UNIQUE')) throw e;
@@ -234,6 +236,26 @@ export async function ingest(db: D1Database, snap: Snapshot): Promise<Row> {
     }
   }
   throw new Error('no slot after retries');
+}
+
+async function movePop(db: D1Database, from: TypeId | null, to: TypeId) {
+  const stmts = [
+    db
+      .prepare(
+        'INSERT INTO biome_pop (t1, n) VALUES (?, 1) ON CONFLICT(t1) DO UPDATE SET n = n + 1',
+      )
+      .bind(to),
+  ];
+  if (from)
+    stmts.push(db.prepare('UPDATE biome_pop SET n = MAX(0, n - 1) WHERE t1 = ?').bind(from));
+  await db.batch(stmts);
+}
+
+export async function worldCount(db: D1Database): Promise<number> {
+  const r = await db
+    .prepare('SELECT COALESCE(SUM(n), 0) AS n FROM biome_pop')
+    .first<{ n: number }>();
+  return r?.n ?? 0;
 }
 
 export function toMap(r: Row): MapGitemon {

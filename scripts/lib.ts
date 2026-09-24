@@ -10,6 +10,17 @@ if (!GH || !KEY) throw new Error('GITHUB_TOKEN and GITEMON_INTERNAL_KEY are requ
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function internal<T>(path: string, body?: unknown): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await internalOnce<T>(path, body);
+    } catch (e) {
+      if (attempt >= 4) throw e;
+      await sleep(5_000 * attempt);
+    }
+  }
+}
+
+async function internalOnce<T>(path: string, body?: unknown): Promise<T> {
   const r = await fetch(ORIGIN + path, {
     method: body ? 'POST' : 'GET',
     headers: {
