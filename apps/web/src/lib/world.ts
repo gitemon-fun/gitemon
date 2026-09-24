@@ -128,9 +128,12 @@ export class WorldView {
   }
 
   flyTo(x: number, y: number, s = 40) {
+    const target = Math.min(MAX_S, s);
+    // On phones the info sheet covers the lower half: keep the creature in the upper part.
+    const lift = this.w < 760 ? (this.h * 0.2) / target : 0;
     this.anim = {
       x: x + 0.5,
-      y: y + 0.5,
+      y: y + 0.5 + lift,
       s: Math.min(MAX_S, s),
       t0: performance.now(),
       from: { x: this.x, y: this.y, s: this.s },
@@ -372,6 +375,7 @@ export class WorldView {
       ctx.stroke();
     }
     // town plots
+    ctx.lineWidth = 1.5;
     for (const town of this.towns) {
       const r = plotRect(town.biome, town.plot);
       const [tx, ty] = this.toScreen(r.x, r.y);
