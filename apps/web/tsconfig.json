@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["svelte"],
+    "paths": { "@gitemon/art": ["../../packages/creature-gen/src/art-entry.ts"] },
+    "noUncheckedIndexedAccess": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.svelte"]
+}

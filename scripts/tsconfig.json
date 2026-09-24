@@ -1,0 +1,4 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "paths": { "@gitemon/art": ["../packages/creature-gen/src/art-entry.ts"] } }
+}

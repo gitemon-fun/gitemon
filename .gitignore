@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+.env*
+*.log
+.DS_Store
+# intent + design tree is local-only (never pushed)
+.claude/
+# private art set is copied in at deploy time, never committed here
+packages/creature-gen/art-real/
+scripts/.cache/
+apps/api/wrangler.deploy.toml
+# brand images are generated at deploy from the private art set
+apps/web/public/favicon.svg
+apps/web/public/favicon.png
+apps/web/public/apple-touch-icon.png
+apps/web/public/og-default.png

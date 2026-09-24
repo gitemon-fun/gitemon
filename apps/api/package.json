@@ -1,0 +1,22 @@
+{
+  "name": "@gitemon/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@gitemon/creature-gen": "workspace:*",
+    "@gitemon/ingest": "workspace:*",
+    "@gitemon/scorer": "workspace:*",
+    "@gitemon/shared": "workspace:*",
+    "hono": "^4.9.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest"
+  }
+}
