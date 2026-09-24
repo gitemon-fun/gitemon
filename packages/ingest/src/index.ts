@@ -69,7 +69,9 @@ async function gql<T>(token: string, query: string, variables: object, f: Fetche
   if (!res.ok) throw new GitHubError(`github ${res.status}`, res.status);
   const body = (await res.json()) as { data?: T; errors?: { type?: string; message: string }[] };
   const errs = (body.errors ?? []).filter((e) => e.type !== 'NOT_FOUND');
-  if (errs.some((e) => e.type === 'RATE_LIMITED')) throw new GitHubError('rate limited', 403, true);
+  // Primary and secondary (search) limits both arrive as GraphQL errors, not always typed.
+  if (errs.some((e) => e.type === 'RATE_LIMITED' || /rate limit/i.test(e.message)))
+    throw new GitHubError('rate limited', 403, true);
   if (errs.length && !body.data) throw new GitHubError(errs.map((e) => e.message).join('; '), 502);
   return body.data as T;
 }

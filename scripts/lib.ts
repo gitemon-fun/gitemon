@@ -34,7 +34,7 @@ async function internalOnce<T>(path: string, body?: unknown): Promise<T> {
   return (await r.json()) as T;
 }
 
-const CONCURRENCY = Number(process.env.GITEMON_CONCURRENCY ?? 6);
+const CONCURRENCY = Number(process.env.GITEMON_CONCURRENCY ?? 3);
 
 /** Fetch snapshots (a few in parallel) and push them in small batches. Returns logins that do not exist. */
 export async function pump(logins: string[], log = (s: string) => process.stderr.write(s)) {
