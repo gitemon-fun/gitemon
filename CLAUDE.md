@@ -15,7 +15,7 @@
 
 - **Slug:** `gitemon` · **Repo:** `gitemon-fun/gitemon` (public, AGPL-3.0) + `gitemon-fun/gitemon-art` (private)
 - **URL:** https://gitemon.fun
-- **Stack:** pnpm monorepo · SvelteKit + PixiJS (web) · Hono on Cloudflare Workers (api) · D1 / KV / R2 / Queues · WorkOS AuthKit (GitHub only)
+- **Stack:** pnpm monorepo · Svelte 5 SPA + Canvas 2D (map) · one Hono Worker (pages, API, images, assets) · D1 + R2 · WorkOS (GitHub only)
 
 ## Hard rules
 
@@ -36,8 +36,9 @@
 
 - Ingest fetches a public GitHub snapshot (GraphQL) → D1.
 - `packages/scorer` (pure) turns it into stats, type, species, form.
-- `packages/creature-gen` composites a deterministic sprite → R2.
-- The map API serves chunks per zoom level; PixiJS draws them.
+- `packages/creature-gen` composes a deterministic 24×24 sprite — in the browser for the map, in the Worker for profile images and share cards.
+- The map API serves 32×32 chunks, per-biome dots and a notable list; a canvas draws them.
+- A trusted fetcher (`scripts/drain.ts`, on a timer) hatches requested developers and refreshes stale ones through `/internal/*`.
 - Signed-in players catch, claim, keep a Dex, join towns.
 
 ## Authoritative decisions (mirror — ledger is `…/DECISIONS.md`)
