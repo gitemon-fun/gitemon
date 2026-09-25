@@ -41,7 +41,16 @@ const HI_RES = 4; // island pre-render scale for the town band
 type Dot = [number, number, number, number];
 type Band = 'world' | 'town' | 'street';
 
-const rnd = (a: string, x: number, y: number) => hash32(`${a}:${x},${y}`) / 4294967296;
+/** Seeded 0..1 per tile. FNV alone correlates neighbouring tiles, so finish with an avalanche mix. */
+const rnd = (a: string, x: number, y: number) => {
+  let h = hash32(`${a}:${x},${y}`);
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x7feb352d);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x846ca68b);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+};
 
 /** Coarse value noise for organic island edges. */
 function noise(seed: string, x: number, y: number, cell = 9) {
