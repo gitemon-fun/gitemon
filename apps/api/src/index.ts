@@ -303,6 +303,34 @@ app.get('/api/notable', (c) =>
   }),
 );
 
+/** Gitemon City: the world's most notable, for the central plaza. */
+app.get('/api/top', (c) =>
+  edgeCached(c, 300, async () => {
+    const limit = Math.min(120, Math.max(1, Number(c.req.query('limit') ?? 48) | 0));
+    const rows = await c.env.DB.prepare(
+      `SELECT ${MAP_COLS} FROM gitemon WHERE hidden = 0 AND machine = 0 ORDER BY notable DESC, id LIMIT ?`,
+    )
+      .bind(limit)
+      .all<Row>();
+    return c.json({ g: rows.results.map(toMap) });
+  }),
+);
+
+/** Gitemon City: a district's residents, most notable first. */
+app.get('/api/district/:t', async (c) => {
+  const t = c.req.param('t') as TypeId;
+  if (!TYPES.includes(t)) return c.json({ error: 'bad-district' }, 400);
+  return edgeCached(c, 300, async () => {
+    const limit = Math.min(1500, Math.max(1, Number(c.req.query('limit') ?? 600) | 0));
+    const rows = await c.env.DB.prepare(
+      `SELECT ${MAP_COLS} FROM gitemon WHERE t1 = ? AND hidden = 0 ORDER BY notable DESC, id LIMIT ?`,
+    )
+      .bind(t, limit)
+      .all<Row>();
+    return c.json({ g: rows.results.map(toMap) });
+  });
+});
+
 app.get('/api/find', async (c) => {
   const login = (c.req.query('login') ?? '').trim().replace(/^@/, '');
   if (!isValidLogin(login)) return c.json({ error: 'bad-login' }, 400);
@@ -577,6 +605,7 @@ app.get('/og/:file', async (c) => {
 // ---- pages ----------------------------------------------------------------------------------------------
 
 const SPA = new Set(['/map', '/dex', '/towns', '/me']);
+const CITY = new Set(['/city']);
 
 async function spa(c: Context<AppEnv>) {
   const res = await c.env.STATIC.fetch(new Request(new URL('/app.html', c.req.url)));
@@ -599,6 +628,13 @@ app.get('/terms', (c) => html(c, termsPage(), 200, 3600));
 app.get('*', async (c) => {
   const path = c.req.path;
   if (SPA.has(path)) return spa(c);
+  if (CITY.has(path)) {
+    const res = await c.env.STATIC.fetch(new Request(new URL('/city.html', c.req.url)));
+    return new Response(res.body, {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
+    });
+  }
   if (path.includes('.') || path.startsWith('/assets/')) {
     const res = await c.env.STATIC.fetch(c.req.raw);
     if (res.status !== 404) return res;
