@@ -461,8 +461,8 @@ app.use('/internal/*', async (c, next) => {
 app.post('/internal/ingest', async (c) => {
   const { snapshots } = await c.req.json<{ snapshots: Snapshot[] }>();
   const done: string[] = [];
-  // D1 allows 50 queries per request on the Workers free plan; one ingest uses ~6.
-  for (const s of snapshots.slice(0, 6)) {
+  // D1 allows 50 queries per request on the Workers free plan; one ingest uses ~6; CPU limit is 10 ms.
+  for (const s of snapshots.slice(0, 3)) {
     if (s?.v !== 1 || !Number.isInteger(s.userId) || !isValidLogin(s.login)) continue;
     await ingest(c.env.DB, s);
     await c.env.DB.prepare('DELETE FROM pending WHERE login = ?').bind(s.login).run();

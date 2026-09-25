@@ -93,13 +93,30 @@ export function* wildCandidates(
   while (r < TOWN_MIN && ((inner + 2 * r) ** 2 - inner ** 2) / 2 < need) r++;
   let h = hash32(`slot:${userId}`);
   let yielded = 0;
-  for (let i = 0; i < 200_000; i++) {
-    const lo = TOWN_MIN - r;
+  for (let i = 0; i < 20_000; i++) {
+    // Sample straight from the band around the town square (four strips), no rejection loop.
     const span = inner + 2 * r;
-    const lx = lo + (h % span);
-    const ly = lo + (Math.floor(h / span) % span);
+    const strip = r * span;
+    const side = r * inner;
+    let k = h % (2 * strip + 2 * side);
     h = hash32(`slot:${userId}:${i}`);
-    if ((lx + ly) % 2 !== 0 || zoneOf(lx, ly) !== 'wild') continue;
+    let lx: number;
+    let ly: number;
+    if (k < strip) {
+      lx = TOWN_MIN - r + (k % span);
+      ly = TOWN_MIN - r + Math.floor(k / span);
+    } else if ((k -= strip) < strip) {
+      lx = TOWN_MIN - r + (k % span);
+      ly = TOWN_MAX + Math.floor(k / span);
+    } else if ((k -= strip) < side) {
+      lx = TOWN_MIN - r + (k % r);
+      ly = TOWN_MIN + Math.floor(k / r);
+    } else {
+      k -= side;
+      lx = TOWN_MAX + (k % r);
+      ly = TOWN_MIN + Math.floor(k / r);
+    }
+    if ((lx + ly) % 2 !== 0) continue;
     yield { x: o.x + lx, y: o.y + ly };
     // every 48 offers that were all taken: the band is crowded, widen it
     if (++yielded % 48 === 0 && r < TOWN_MIN) r = Math.min(TOWN_MIN, r + 4);

@@ -42,7 +42,7 @@ export async function pump(logins: string[], log = (s: string) => process.stderr
   const batch: Snapshot[] = [];
   let paused: Promise<void> | null = null;
   const flush = async () => {
-    while (batch.length) await internal('/internal/ingest', { snapshots: batch.splice(0, 6) });
+    while (batch.length) await internal('/internal/ingest', { snapshots: batch.splice(0, 3) });
   };
   const queue = [...logins];
   const worker = async () => {
