@@ -1,11 +1,11 @@
 # CLAUDE.md — Gitemon
 
-**Project:** `gitemon-fun/gitemon` — every GitHub developer as a collectible pixel creature on one shared map, for developers who want to be seen and to belong.
+**Project:** `gitemon-fun/gitemon` — every GitHub developer as a collectible pixel creature in one shared city (Gitemon City), for developers who want to be seen and to belong.
 
 > **Read first:** `.claude/ai_context/` is the **source of truth for intent + design, kept in sync
 > with the code** (drift is a bug, fixed in the same change).
-> Entry: `.claude/ai_context/development/v1/implementation/00_INDEX.md` · Live cursor: `…/STATUS.md`
-> · Blueprint: `…/v1/GRANDPLAN.md` · Locked decisions: `…/DECISIONS.md` · Raw intent:
+> Entry: `.claude/ai_context/development/v2/implementation/00_INDEX.md` · Live cursor: `…/STATUS.md`
+> · Blueprint: `…/v2/GRANDPLAN.md` · Locked decisions: `…/DECISIONS.md` · Raw intent:
 > `.claude/ai_context/raw_materials/` · Methodology: `.claude/FRAMEWORK.md`.
 > **When docs disagree, `DECISIONS.md` wins.**
 > ⚠ This file is tracked in a **public** repo. It must stay safe-as-public: no internal paths beyond
@@ -15,7 +15,7 @@
 
 - **Slug:** `gitemon` · **Repo:** `gitemon-fun/gitemon` (public, AGPL-3.0) + `gitemon-fun/gitemon-art` (private)
 - **URL:** https://gitemon.fun
-- **Stack:** pnpm monorepo · Svelte 5 SPA + Canvas 2D (map) · one Hono Worker (pages, API, images, assets) · D1 + R2 · WorkOS (GitHub only)
+- **Stack:** pnpm monorepo · Svelte 5 SPA + Three.js (Gitemon City) · one Hono Worker (pages, API, images, assets) · D1 + R2 · WorkOS (GitHub only)
 
 ## Hard rules
 
@@ -37,7 +37,8 @@
 - Ingest fetches a public GitHub snapshot (GraphQL) → D1.
 - `packages/scorer` (pure) turns it into stats, type, species, form.
 - `packages/creature-gen` composes a deterministic 24×24 sprite — in the browser for the map, in the Worker for profile images and share cards.
-- The map API serves 32×32 chunks, per-biome dots and a notable list; a canvas draws them.
+- `packages/shared` `layout()` derives the city (plaza, 18 districts, streets, lots, spots) from populations; `/api/city` serves every resident (edge-cached) and the client places them by rank: plaza, district squares, house doors, streets.
+- Hometown: the fetcher parses the public GitHub `location` with a generated GeoNames lookup (`scripts/geo-build.ts`) and sends it in the snapshot; `/world` ranks countries and cities.
 - A trusted fetcher (`scripts/drain.ts`, on a timer) hatches requested developers and refreshes stale ones through `/internal/*`.
 - Signed-in players catch, claim, keep a Dex, join towns.
 
