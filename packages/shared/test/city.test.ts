@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BIOME_ORDER, layout, PLAZA_R, CANAL_OUT } from '../src/index.js';
+import { BIOME_ORDER, layout, PLAZA_R, CANAL_OUT, WALK } from '../src/index.js';
 
 const pops = Object.fromEntries(BIOME_ORDER.map((t, i) => [t, 50 + i * 90]));
 
@@ -38,5 +38,20 @@ describe('city layout', () => {
       }
     }
     expect(worst).toBe(Infinity);
+  });
+
+  it('never walks a resident into a building', () => {
+    let hits = 0;
+    for (const l of city.lots) {
+      const r = Math.min(l.w, l.depth) / 2 - 0.3;
+      for (const s of city.spots[l.d]!) {
+        if (!s.tx && !s.tz) continue;
+        for (const k of [-1, 1]) {
+          const d = Math.hypot(s.x + s.tx * WALK * k - l.x, s.z + s.tz * WALK * k - l.z);
+          if (d < r) hits++;
+        }
+      }
+    }
+    expect(hits).toBe(0);
   });
 });

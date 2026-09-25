@@ -7,7 +7,9 @@
     TYPE_INFO,
     layout,
     type MapGitemon,
+    type Shape,
     type Stats,
+    type TypeId,
   } from '@gitemon/shared';
   import { api, type Detail } from '../lib/api';
   import { CityScene, type Placed } from './scene';
@@ -17,10 +19,8 @@
   let picked = $state<Placed | null>(null);
   let detail = $state<Detail | null>(null);
   let status = $state('Building the city…');
-  let placedAll: Placed[] = [];
+  let count = $state(0);
   const statKeys = Object.keys(STAT_MEANING) as (keyof Stats)[];
-  // the slice shows the plaza + one district (GRANDPLAN v2, build file 02)
-  const SLICE: (typeof BIOME_ORDER)[number] = 'forge';
 
   async function select(p: Placed | null) {
     picked = p;
@@ -30,45 +30,96 @@
     if (r.status === 200 && picked?.g.id === p.g.id) detail = r.data;
   }
 
+  /** [id, login, t1, t2, shape, form, shiny, level, claimed, aura] from /api/city */
+  type Row = [
+    number,
+    string,
+    TypeId,
+    TypeId | null,
+    Shape,
+    1 | 2 | 3,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const fromRow = (r: Row): MapGitemon => ({
+    id: r[0],
+    login: r[1],
+    x: 0,
+    y: 0,
+    t1: r[2],
+    t2: r[3],
+    sh: r[4],
+    f: r[5],
+    s: r[6] ? 1 : 0,
+    lv: r[7],
+    st: r[8] ? 'c' : 'w',
+    a: r[9] ? 1 : 0,
+  });
+
+  /**
+   * Placement (GRANDPLAN v2 §5): the world's most notable stand on the central plaza; each
+   * district's own best fill its square; claimed players live at a house door; everyone else
+   * lines the streets outward by rank. Agents never stand on the plaza.
+   */
+  function place(all: MapGitemon[]) {
+    const pops: Partial<Record<TypeId, number>> = {};
+    for (const g of all) pops[g.t1] = (pops[g.t1] ?? 0) + 1;
+    const plazaN = Math.max(24, Math.min(190, Math.round(all.length / 40)));
+    const city = layout(pops, plazaN);
+    const placed: Placed[] = [];
+    let onPlaza = 0;
+    const next = new Map<TypeId, number>();
+    const nextDoor = new Map<TypeId, number>();
+    for (const g of all) {
+      if (onPlaza < plazaN && g.t1 !== 'machine' && city.plaza[onPlaza]) {
+        placed.push({ g, spot: city.plaza[onPlaza++]! });
+        continue;
+      }
+      const d = BIOME_ORDER.indexOf(g.t1);
+      if (g.st === 'c') {
+        const k = nextDoor.get(g.t1) ?? 0;
+        const door = city.doors[d]?.[k];
+        if (door) {
+          nextDoor.set(g.t1, k + 1);
+          placed.push({ g, spot: door });
+          continue;
+        }
+      }
+      const k = next.get(g.t1) ?? 0;
+      const spot = city.spots[d]?.[k];
+      if (!spot) continue;
+      next.set(g.t1, k + 1);
+      placed.push({ g, spot });
+    }
+    return { city, placed };
+  }
+
   onMount(() => {
     scene = new CityScene(host, (p) => select(p));
     (async () => {
-      const [n, top, dist] = await Promise.all([
-        api.notable(),
-        fetch('/api/top?limit=60').then((r) => r.json() as Promise<{ g: MapGitemon[] }>),
-        fetch(`/api/district/${SLICE}?limit=1500`).then(
-          (r) => r.json() as Promise<{ g: MapGitemon[] }>,
-        ),
-      ]);
-      const city = layout(n.data.pops as Record<string, number>);
+      const r = await fetch('/api/city');
+      if (!r.ok) {
+        status = 'The city could not load. Try again in a minute.';
+        return;
+      }
+      const all = ((await r.json()) as { g: Row[] }).g.map(fromRow);
+      const { city, placed } = place(all);
       scene!.build(city);
-      const placed: Placed[] = [];
-      const inPlaza = new Set<number>();
-      top.g.forEach((g, i) => {
-        const spot = city.plaza[i];
-        if (!spot) return;
-        placed.push({ g, spot });
-        inPlaza.add(g.id);
-      });
-      const d = BIOME_ORDER.indexOf(SLICE);
-      const spots = city.spots[d];
-      dist.g
-        .filter((g) => !inPlaza.has(g.id))
-        .forEach((g, i) => {
-          if (spots[i]) placed.push({ g, spot: spots[i] });
-        });
-      placedAll = placed;
       scene!.setCreatures(placed);
       scene!.fitCity(city.radius);
+      count = placed.length;
       status = '';
       const focus = new URLSearchParams(location.search).get('focus');
       const hit = focus
         ? placed.find((p) => p.g.login.toLowerCase() === focus.toLowerCase())
         : null;
       if (hit) {
-        scene!.flyTo(hit.spot.x, hit.spot.z, 3.2);
-        scene!.select(hit);
-        select(hit);
+        const held = scene!.hold(hit);
+        scene!.flyTo(held.spot.x, held.spot.z, 3.2);
+        scene!.select(held);
+        select(held);
       } else scene!.flyTo(0, 0, 1.3);
     })();
     return () => scene?.destroy();
@@ -87,7 +138,7 @@
 
 <header class="bar">
   <a class="brand" href="/">Gitemon City</a>
-  <span class="dim small">Preview · the plaza and Magma Fields</span>
+  <span class="dim small">{count ? `${count.toLocaleString('en')} Gitemon live here` : ''}</span>
   <a class="btn" href="/map">Old map</a>
 </header>
 
@@ -109,7 +160,9 @@
         ? 'On the central plaza'
         : picked.spot.kind === 'square'
           ? `${TYPE_INFO[picked.g.t1].biome} square`
-          : TYPE_INFO[picked.g.t1].biome}
+          : picked.spot.kind === 'door'
+            ? `Lives in ${TYPE_INFO[picked.g.t1].biome}`
+            : TYPE_INFO[picked.g.t1].biome}
     </p>
     <p class="lv">Lv {picked.g.lv}</p>
     <p class="chips">

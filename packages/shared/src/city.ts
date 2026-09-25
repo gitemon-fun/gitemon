@@ -19,8 +19,11 @@ export const RING0 = 49; // first ring road
 export const BAND = 26; // distance between ring roads
 export const ROAD = 5; // road width
 export const AVENUE = 7; // radial avenue width
-export const MAX_BANDS = 14;
-const SPACING = 2.3;
+export const MAX_BANDS = 24;
+/** how far a street resident walks either way from its spot */
+export const WALK = 3.6;
+const SPACING = 2.9;
+const SQUARE_SPACING = 3.3;
 const ROWS = [ROAD / 2 + 1.1, ROAD / 2 + 2.5];
 
 export type SpotKind = 'plaza' | 'square' | 'street' | 'door';
@@ -31,6 +34,9 @@ export interface Spot {
   /** district index into BIOME_ORDER, or -1 for the plaza */
   d: number;
   kind: SpotKind;
+  /** walking direction along the sidewalk (unit vector); 0,0 = stands still */
+  tx: number;
+  tz: number;
 }
 
 export interface Lot {
@@ -44,6 +50,8 @@ export interface Lot {
   h: number;
   d: number;
   house: boolean;
+  /** which road the front faces: 1 = the inner ring road, -1 = the outer one */
+  face: 1 | -1;
 }
 
 export interface Road {
@@ -98,10 +106,10 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
     // spots, square first
     const list: Spot[] = [];
     const sq: Spot[] = [];
-    for (let gx = -sqR + 1.5; gx <= sqR - 1.5; gx += SPACING)
-      for (let gz = -sqR + 1.5; gz <= sqR - 1.5; gz += SPACING) {
+    for (let gx = -sqR + 1.5; gx <= sqR - 1.5; gx += SQUARE_SPACING)
+      for (let gz = -sqR + 1.5; gz <= sqR - 1.5; gz += SQUARE_SPACING) {
         if (Math.hypot(gx, gz) < 5) continue; // landmark
-        sq.push({ x: sx + gx, z: sz + gz, d, kind: 'square' });
+        sq.push({ x: sx + gx, z: sz + gz, d, kind: 'square', tx: 0, tz: 0 });
       }
     sq.sort((p, q) => Math.hypot(p.x - sx, p.z - sz) - Math.hypot(q.x - sx, q.z - sz));
     list.push(...sq);
@@ -127,7 +135,7 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
             const a = a0 + 0.02 + ((s + 0.5) / n) * (WEDGE - 0.04);
             if (Math.abs(a - am) < 0.02) continue;
             const [x, z] = polar(rr, a);
-            street.push({ x, z, d, kind: 'street', r: rr });
+            street.push({ x, z, d, kind: 'street', r: rr, tx: -Math.sin(a), tz: Math.cos(a) });
           }
         }
       }
@@ -146,7 +154,7 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
               const [x0, z0] = polar(r, a);
               const x = x0 - Math.sin(a) * perp;
               const z = z0 + Math.cos(a) * perp;
-              street.push({ x, z, d, kind: 'street', r });
+              street.push({ x, z, d, kind: 'street', r, tx: Math.cos(a), tz: Math.sin(a) });
             }
           }
       }
@@ -173,10 +181,10 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
             const house = k >= 2 && row === 0 && rnd(seed + 'h') < 0.45;
             const downtown = Math.max(0, 1 - k / 6);
             const h = house ? 4.5 : 5 + rnd(seed) * 9 + downtown * 7;
-            lots.push({ x, z, w: (arcLen / n) * 0.82, depth, rot: -a, h, d, house });
+            lots.push({ x, z, w: (arcLen / n) * 0.82, depth, rot: -a, h, d, house, face });
             if (house) {
               const [dx, dz] = polar(rC - (depth / 2 + 1.2) * face, a);
-              door.push({ x: dx, z: dz, d, kind: 'door' });
+              door.push({ x: dx, z: dz, d, kind: 'door', tx: 0, tz: 0 });
             }
           }
         }
@@ -209,19 +217,34 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
         kind: 'street',
       });
     street.sort((p, q) => p.r - q.r);
-    list.push(...street.map(({ x, z, d: dd, kind }) => ({ x, z, d: dd, kind })));
+    list.push(...street.map(({ x, z, d: dd, kind, tx, tz }) => ({ x, z, d: dd, kind, tx, tz })));
     spots.push(list);
     doors.push(door);
   });
 
-  // plaza rings, inner first (the monument stands in the middle)
+  // plaza rings, inner first (the monument stands in the middle); plaza residents stroll their ring
   const plaza: Spot[] = [];
-  for (let r = 9; r <= PLAZA_R - 2 && plaza.length < plazaTarget * 4; r += 3.1) {
-    const n = Math.floor((Math.PI * 2 * r) / 3);
+  for (let r = 9; r <= PLAZA_R - 3 && plaza.length < plazaTarget * 2; r += 3.4) {
+    const n = Math.floor((Math.PI * 2 * r) / 4.2);
     for (let s = 0; s < n; s++) {
-      const [x, z] = polar(r, (s / n) * Math.PI * 2 + r);
-      plaza.push({ x, z, d: -1, kind: 'plaza' });
+      const a = (s / n) * Math.PI * 2 + r;
+      const [x, z] = polar(r, a);
+      plaza.push({ x, z, d: -1, kind: 'plaza', tx: -Math.sin(a), tz: Math.cos(a) });
     }
   }
+  // nobody stands on a ruler line: a small seeded offset along the walk (or anywhere, when standing)
+  const loosen = (sp: Spot, k: string) => {
+    const u = rnd(`jx${k}`) - 0.5;
+    const v = rnd(`jz${k}`) - 0.5;
+    if (sp.tx || sp.tz) {
+      sp.x += sp.tx * u * SPACING * 0.7 - sp.tz * v * 0.5;
+      sp.z += sp.tz * u * SPACING * 0.7 + sp.tx * v * 0.5;
+    } else {
+      sp.x += u * 1.1;
+      sp.z += v * 1.1;
+    }
+  };
+  plaza.forEach((sp, i) => loosen(sp, `p${i}`));
+  spots.forEach((list, d) => list.forEach((sp, i) => loosen(sp, `${d}:${i}`)));
   return { districts, roads, lots, plaza, spots, doors, radius };
 }

@@ -331,6 +331,22 @@ app.get('/api/district/:t', async (c) => {
   });
 });
 
+/**
+ * Gitemon City: every resident, most notable first, as plain arrays (cheap to serialise under the
+ * free plan's CPU limit): [id, login, t1, t2, shape, form, shiny, level, claimed, aura].
+ */
+app.get('/api/city', (c) =>
+  edgeCached(c, 600, async () => {
+    const rows = await c.env.DB.prepare(
+      `SELECT id, login, t1, t2, shape, form, shiny, level, status = 'claimed', COALESCE(aura_until > ?, 0)
+       FROM gitemon WHERE hidden = 0 ORDER BY notable DESC, id LIMIT 40000`,
+    )
+      .bind(now())
+      .raw();
+    return c.json({ g: rows });
+  }),
+);
+
 app.get('/api/find', async (c) => {
   const login = (c.req.query('login') ?? '').trim().replace(/^@/, '');
   if (!isValidLogin(login)) return c.json({ error: 'bad-login' }, 400);

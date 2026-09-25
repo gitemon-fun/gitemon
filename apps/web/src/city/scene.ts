@@ -9,56 +9,19 @@ import {
   TYPE_INFO,
   hash32,
   type City,
-  type MapGitemon,
-  type Spot,
   type TypeId,
 } from '@gitemon/shared';
-import { creatureGeometry, creatureMaterial } from './creatures';
+import { Crowd, type Placed } from './crowd';
+import { DISTRICT_STYLE, archetype } from './buildings';
 
 /**
  * Gitemon City renderer (GRANDPLAN v2 §3, §7): Transit-style low-poly blocks under a fixed
- * isometric camera with 4 snap rotations. Buildings and creatures are instanced; the scene only
- * re-renders when something changes.
+ * isometric camera with 4 snap rotations. Buildings are instanced per district style; the crowd is
+ * one instanced draw of pixel sprites (crowd.ts). Frames are capped at 30 fps, and the loop idles
+ * when nothing moves on screen or the tab is hidden.
  */
 
-interface Style {
-  ground: string;
-  walls: string[];
-  roof: string;
-  tree: [string, string];
-}
-
-const STYLE: Partial<Record<TypeId, Style>> = {
-  forge: {
-    ground: '#5a4a44',
-    walls: ['#3b302c', '#4a3c37', '#2f2724'],
-    roof: '#ff7a2e',
-    tree: ['#2a2220', '#ff9a4a'],
-  },
-};
-function style(t: TypeId): Style {
-  const s = STYLE[t];
-  if (s) return s;
-  const c = TYPE_INFO[t].colors;
-  const tone = (hex: string, l: number) => {
-    const col = new THREE.Color(hex);
-    const hsl = { h: 0, s: 0, l: 0 };
-    col.getHSL(hsl);
-    col.setHSL(hsl.h, hsl.s * 0.45, l);
-    return '#' + col.getHexString();
-  };
-  return {
-    ground: tone(c[0], 0.62),
-    walls: [tone(c[1], 0.86), tone(c[0], 0.8), '#efe9df'],
-    roof: tone(c[0], 0.5),
-    tree: ['#6b4a2e', tone(c[0], 0.42)],
-  };
-}
-
-export interface Placed {
-  g: MapGitemon;
-  spot: Spot;
-}
+export type { Placed };
 
 export class CityScene {
   readonly renderer: THREE.WebGLRenderer;
@@ -70,7 +33,9 @@ export class CityScene {
   zoom = 1;
   private dirty = true;
   private raf = 0;
-  private creatures: { mesh: THREE.InstancedMesh; list: Placed[] }[] = [];
+  private crowd: Crowd | null = null;
+  private clock = 0;
+  private last = 0;
   private ring: THREE.Mesh;
   private pointers = new Map<number, { x: number; y: number }>();
   private pinch: { d: number; z: number } | null = null;
@@ -150,7 +115,6 @@ export class CityScene {
   rotate(step: number) {
     this.turn = (this.turn + step + 4) % 4;
     this.yaw = Math.PI / 4 + (this.turn * Math.PI) / 2;
-    this.faceCreatures();
     this.dirty = true;
   }
 
@@ -247,28 +211,55 @@ export class CityScene {
   }
 
   private pick(px: number, py: number) {
+    const c = this.crowd;
     const r = this.renderer.domElement.getBoundingClientRect();
-    const ndc = new THREE.Vector2(
-      ((px - r.left) / r.width) * 2 - 1,
-      -((py - r.top) / r.height) * 2 + 1,
-    );
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(ndc, this.camera);
-    const hits = ray.intersectObjects(
-      this.creatures.map((c) => c.mesh),
-      false,
-    );
-    const hit = hits[0];
-    if (hit && hit.instanceId != null) {
-      const set = this.creatures.find((c) => c.mesh === hit.object)!;
-      const p = set.list[hit.instanceId];
-      this.select(p);
-      this.onPick(p);
-      return;
+    if (c) {
+      // nearest resident on screen whose sprite covers the tap (sprites are upright standees)
+      const v = new THREE.Vector3();
+      const top = new THREE.Vector3();
+      let best = -1;
+      let bestD = Infinity;
+      const grow = this.grow;
+      for (let i = 0; i < c.size; i++) {
+        c.positionOf(i, this.clock, v);
+        const h = c.heightOf(i, grow) * this.upScale * 0.55;
+        top.copy(v).setY(h);
+        v.setY(h * 0.45).project(this.camera);
+        top.project(this.camera);
+        const sx = ((v.x + 1) / 2) * r.width + r.left;
+        const sy = ((1 - v.y) / 2) * r.height + r.top;
+        const rad = Math.max(14, Math.abs(((top.y - v.y) / 2) * r.height) * 1.3);
+        const d = Math.hypot(sx - px, sy - py);
+        // prefer the one nearest the camera when sprites overlap
+        const score = d / rad - v.z * 0.001;
+        if (d < rad && score < bestD) {
+          bestD = score;
+          best = i;
+        }
+      }
+      if (best >= 0) {
+        c.stop(best, this.clock);
+        const p = c.at(best);
+        this.select(p);
+        this.onPick(p);
+        return;
+      }
     }
     // tapping the ground zooms toward it
     const g = this.groundAt(px, py);
     if (g) this.flyTo(g.x, g.z, Math.min(4, this.zoom * 2.2));
+  }
+
+  /** stop a resident where it is (used for ?focus=login) and return where it stopped */
+  hold(p: Placed): Placed {
+    const c = this.crowd;
+    if (!c) return p;
+    for (let i = 0; i < c.size; i++)
+      if (c.at(i) === p) {
+        c.stop(i, this.clock);
+        return c.at(i);
+      }
+    return p;
   }
 
   select(p: Placed | null) {
@@ -292,7 +283,7 @@ export class CityScene {
     // island-less ground: a big soft disc, then each district's wedge
     flat(new THREE.CircleGeometry(city.radius + 60, 96), '#d9d2c3', -0.2);
     for (const d of city.districts) {
-      const st = style(d.t);
+      const st = DISTRICT_STYLE[d.t];
       // RingGeometry's theta runs counter-clockwise in its own plane; after rotating flat, angle -> -angle
       flat(
         new THREE.RingGeometry(CANAL_OUT, RING0 + d.bands * 26 + 4, 12, 1, -d.a1, d.a1 - d.a0),
@@ -353,66 +344,32 @@ export class CityScene {
   }
 
   private buildBuildings(city: City, g: THREE.Group) {
-    const box = new THREE.BoxGeometry(1, 1, 1);
-    box.translate(0, 0.5, 0);
-    const towers = city.lots.filter((l) => !l.house);
-    const houses = city.lots.filter((l) => l.house);
+    // one instanced archetype per district style (buildings.ts): cosy low-rise, facing its road
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
     const col = new THREE.Color();
-    const body = new THREE.InstancedMesh(
-      box,
-      new THREE.MeshLambertMaterial({ flatShading: true }),
-      towers.length + houses.length,
-    );
-    const roofTop = new THREE.InstancedMesh(
-      box,
-      new THREE.MeshLambertMaterial({ flatShading: true }),
-      towers.length,
-    );
-    const pyramid = new THREE.ConeGeometry(0.72, 1, 4);
-    pyramid.rotateY(Math.PI / 4);
-    pyramid.translate(0, 0.5, 0);
-    const roofs = new THREE.InstancedMesh(
-      pyramid,
-      new THREE.MeshLambertMaterial({ flatShading: true }),
-      houses.length,
-    );
-    let i = 0;
-    towers.forEach((l, k) => {
-      const st = style(city.districts[l.d].t);
-      q.setFromAxisAngle(up, l.rot + Math.PI / 2);
-      m.compose(new THREE.Vector3(l.x, 0, l.z), q, new THREE.Vector3(l.w, l.h, l.depth));
-      body.setMatrixAt(i, m);
-      body.setColorAt(i++, col.set(st.walls[hash32(`w${k}`) % st.walls.length]));
-      m.compose(
-        new THREE.Vector3(l.x, l.h, l.z),
-        q,
-        new THREE.Vector3(l.w * 0.92, 0.6, l.depth * 0.92),
-      );
-      roofTop.setMatrixAt(k, m);
-      roofTop.setColorAt(k, col.set(st.roof));
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    city.districts.forEach((d, di) => {
+      const lots = city.lots.filter((l) => l.d === di);
+      if (!lots.length) return;
+      const mesh = new THREE.InstancedMesh(archetype(DISTRICT_STYLE[d.t]), mat, lots.length);
+      lots.forEach((l, k) => {
+        const a = Math.atan2(l.z, l.x);
+        // the front (+z of the archetype) looks at the road it faces
+        q.setFromAxisAngle(up, Math.atan2(-Math.cos(a) * l.face, -Math.sin(a) * l.face));
+        const h = hash32(`b${di}:${k}`);
+        const sw = l.w * (0.78 + (h % 12) / 100);
+        const sd = l.depth * (0.8 + ((h >>> 4) % 10) / 100);
+        // storeys: houses stay small, downtown (taller lots) gets a little more height
+        const sy = l.house ? 6 : 6.4 + (l.h - 5) * 0.3 + ((h >>> 8) % 10) / 8;
+        m.compose(new THREE.Vector3(l.x, 0, l.z), q, new THREE.Vector3(sw, sy, sd));
+        mesh.setMatrixAt(k, m);
+        const t = 0.9 + ((h >>> 12) % 16) / 100;
+        mesh.setColorAt(k, col.setRGB(t, t, t));
+      });
+      g.add(mesh);
     });
-    houses.forEach((l, k) => {
-      const st = style(city.districts[l.d].t);
-      q.setFromAxisAngle(up, l.rot + Math.PI / 2);
-      m.compose(
-        new THREE.Vector3(l.x, 0, l.z),
-        q,
-        new THREE.Vector3(l.w * 0.8, l.h, l.depth * 0.8),
-      );
-      body.setMatrixAt(i, m);
-      body.setColorAt(i++, col.set('#f1e7d3'));
-      m.compose(
-        new THREE.Vector3(l.x, l.h, l.z),
-        q,
-        new THREE.Vector3(l.w * 1.05, 3.4, l.depth * 1.05),
-      );
-      roofs.setMatrixAt(k, m);
-      roofs.setColorAt(k, col.set(st.roof));
-    });
-    g.add(body, roofTop, roofs);
   }
 
   private buildDecor(city: City, g: THREE.Group) {
@@ -436,6 +393,19 @@ export class CityScene {
       ])
         spots.push({ x: x + sx * (r + 1.2), z: z + sz * (r + 1.2), t: d.t });
     }
+    // yard trees behind some lots, so blocks read as gardens, not a parking lot of boxes
+    city.lots.forEach((l, k) => {
+      const h = hash32(`yard${k}`);
+      if (h % 5 > 1) return;
+      const a = Math.atan2(l.z, l.x);
+      const back = (l.depth / 2 + 0.4) * l.face;
+      const side = ((h >>> 3) % 2 ? 1 : -1) * l.w * 0.42;
+      spots.push({
+        x: l.x + Math.cos(a) * back - Math.sin(a) * side,
+        z: l.z + Math.sin(a) * back + Math.cos(a) * side,
+        t: city.districts[l.d]!.t,
+      });
+    });
     const m = new THREE.Matrix4();
     const col = new THREE.Color();
     const tr = new THREE.InstancedMesh(
@@ -453,14 +423,14 @@ export class CityScene {
       m.makeScale(sc, sc, sc).setPosition(s.x, 0, s.z);
       tr.setMatrixAt(k, m);
       cr.setMatrixAt(k, m);
-      const st = s.t ? style(s.t) : null;
+      const st = s.t ? DISTRICT_STYLE[s.t] : null;
       tr.setColorAt(k, col.set(st ? st.tree[0] : '#6b4a2e'));
       cr.setColorAt(k, col.set(st ? st.tree[1] : '#5fa84a'));
     });
     g.add(tr, cr);
     // district landmarks: an obelisk with a glowing cap in the district's colour
     for (const d of city.districts) {
-      const st = style(d.t);
+      const st = { walls: [DISTRICT_STYLE[d.t].wall] };
       const ob = new THREE.Mesh(
         new THREE.CylinderGeometry(0.9, 1.6, 12, 4),
         new THREE.MeshLambertMaterial({ color: st.walls[0], flatShading: true }),
@@ -495,81 +465,36 @@ export class CityScene {
   // ---- creatures -------------------------------------------------------------------------------------
 
   setCreatures(placed: Placed[]) {
-    for (const c of this.creatures) {
-      this.scene.remove(c.mesh);
-      c.mesh.dispose();
+    if (this.crowd) {
+      this.scene.remove(this.crowd.sprites, this.crowd.shadows);
+      this.crowd.dispose();
     }
-    this.creatures = [];
-    const groups = new Map<string, Placed[]>();
-    for (const p of placed) {
-      const k = `${p.g.t1}:${p.g.t2 ?? ''}:${p.g.f}:${p.g.sh}:${p.g.s}`;
-      let arr = groups.get(k);
-      if (!arr) groups.set(k, (arr = []));
-      arr.push(p);
-    }
-    for (const list of groups.values()) {
-      const rep = { ...list[0].g, id: 1 };
-      const mesh = new THREE.InstancedMesh(creatureGeometry(rep), creatureMaterial, list.length);
-      // individual variation: a small per-creature tint (the shared geometry has one colourway)
-      const tint = new THREE.Color();
-      list.forEach((p, k) => {
-        const h = hash32(`tint:${p.g.id}`);
-        const l = 0.86 + (h % 29) / 100;
-        tint.setRGB(l * (0.97 + ((h >>> 5) % 7) / 100), l, l * (0.97 + ((h >>> 9) % 7) / 100));
-        mesh.setColorAt(k, tint);
-      });
-      mesh.userData.list = list;
-      this.creatures.push({ mesh, list });
-      this.scene.add(mesh);
-    }
-    // blob shadows, one instanced mesh for all
-    const blob = new THREE.CircleGeometry(0.8, 12);
-    blob.rotateX(-Math.PI / 2);
-    const shadows = new THREE.InstancedMesh(
-      blob,
-      new THREE.MeshBasicMaterial({
-        color: '#000000',
-        transparent: true,
-        opacity: 0.22,
-        depthWrite: false,
-      }),
-      placed.length,
-    );
-    const m = new THREE.Matrix4();
-    placed.forEach((p, k) => {
-      const s = p.g.f === 3 ? 1.35 : p.g.f === 2 ? 1.05 : 0.85;
-      m.makeScale(s, 1, s).setPosition(p.spot.x, 0.07, p.spot.z);
-      shadows.setMatrixAt(k, m);
-    });
-    shadows.userData.shadow = true;
-    this.creatures.push({ mesh: shadows, list: [] });
-    this.scene.add(shadows);
-    this.faceCreatures();
+    this.crowd = new Crowd(placed);
+    this.scene.add(this.crowd.shadows, this.crowd.sprites);
+    this.dirty = true;
   }
 
-  private faceCreatures() {
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    for (const c of this.creatures) {
-      if (!c.list.length) continue;
-      c.list.forEach((p, k) => {
-        // face the camera, with a small individual turn
-        const jitter = ((p.g.id % 17) - 8) * 0.04;
-        q.setFromAxisAngle(up, -this.yaw + Math.PI / 2 + jitter);
-        m.compose(new THREE.Vector3(p.spot.x, 0, p.spot.z), q, new THREE.Vector3(1.6, 1.6, 1.6));
-        c.mesh.setMatrixAt(k, m);
-      });
-      c.mesh.instanceMatrix.needsUpdate = true;
-      c.mesh.computeBoundingSphere();
-    }
-    this.dirty = true;
+  /** sprites grow a little when zoomed far out, so the crowd still reads (Transit does the same) */
+  private get grow() {
+    return Math.max(1, Math.min(3.2, 1.1 / this.zoom));
+  }
+  /** upright sprites are foreshortened by the camera pitch; stretch them back to true proportions */
+  private get upScale() {
+    return Math.hypot(1, 1.55) / 1;
   }
 
   // ---- loop --------------------------------------------------------------------------------------------
 
-  private loop = () => {
+  private loop = (now = 0) => {
     this.raf = requestAnimationFrame(this.loop);
+    if (document.hidden) return;
+    // walkers only matter when they are big enough to see: animate at street and district zoom
+    const animate = this.crowd && this.zoom > 0.45;
+    if (!animate && !this.dirty && !this.anim) return;
+    if (now - this.last < 32) return; // ~30 fps is plenty for a city and kind to phones
+    const dt = Math.min(0.1, (now - this.last) / 1000);
+    this.last = now;
+    if (animate) this.clock += dt;
     if (this.anim) {
       const k = Math.min(1, (performance.now() - this.anim.t0) / 700);
       const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
@@ -578,11 +503,13 @@ export class CityScene {
         Math.log(this.anim.z0) + (Math.log(this.anim.z1) - Math.log(this.anim.z0)) * e,
       );
       if (k >= 1) this.anim = null;
-      this.dirty = true;
     }
-    if (!this.dirty) return;
     this.dirty = false;
     this.placeCamera();
+    if (this.crowd) {
+      const right = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      this.crowd.update(this.clock, right, this.grow, this.upScale);
+    }
     this.renderer.render(this.scene, this.camera);
   };
 }
