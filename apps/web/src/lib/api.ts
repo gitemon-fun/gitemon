@@ -43,7 +43,10 @@ async function post<T>(url: string, body?: unknown): Promise<{ status: number; d
 
 export const api = {
   me: () => get<{ player: Me | null }>('/api/me'),
-  notable: () => get<{ g: MapGitemon[]; towns: Town[]; total: number }>('/api/notable'),
+  notable: () =>
+    get<{ g: MapGitemon[]; towns: Town[]; total: number; pops: Record<string, number> }>(
+      '/api/notable',
+    ),
   chunk: (cx: number, cy: number) => get<{ g: MapGitemon[] }>(`/api/chunk/${cx}/${cy}`),
   biome: (t: string) => get<{ d: [number, number, number, number][] }>(`/api/biome/${t}`),
   find: (login: string) =>

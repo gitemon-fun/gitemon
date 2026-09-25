@@ -290,7 +290,16 @@ app.get('/api/notable', (c) =>
       .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
       .map(toMap);
     const total = { n: await worldCount(c.env.DB) };
-    return c.json({ g, towns: towns.results, total: total?.n ?? 0 });
+    const pops = await c.env.DB.prepare('SELECT t1, n FROM biome_pop').all<{
+      t1: string;
+      n: number;
+    }>();
+    return c.json({
+      g,
+      towns: towns.results,
+      total: total?.n ?? 0,
+      pops: Object.fromEntries(pops.results.map((r) => [r.t1, r.n])),
+    });
   }),
 );
 
@@ -469,6 +478,23 @@ app.post('/internal/ingest', async (c) => {
     done.push(s.login);
   }
   return c.json({ ok: true, done });
+});
+
+/** Re-score from stored snapshots after a scorer change (no GitHub calls). */
+app.post('/internal/rescore', async (c) => {
+  const after = Number(c.req.query('after') ?? 0);
+  const rows = await c.env.DB.prepare(
+    'SELECT snapshot FROM gitemon WHERE id > ? AND scorer_version < ? ORDER BY id LIMIT 4',
+  )
+    .bind(after, SCORER_VERSION)
+    .all<{ snapshot: string }>();
+  let last = after;
+  for (const r of rows.results) {
+    const snap = JSON.parse(r.snapshot) as Snapshot;
+    await ingest(c.env.DB, snap);
+    last = snap.userId;
+  }
+  return c.json({ done: rows.results.length, last });
 });
 
 app.post('/internal/missing', async (c) => {

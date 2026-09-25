@@ -1,5 +1,5 @@
 import { hash32, rng, TYPE_INFO, type Shape, type TypeId } from '@gitemon/shared';
-import { HALF, SIZE, type ArtSet } from './art.js';
+import { HALF, SIZE, decodePx, type ArtSet, type PixelSprite } from './art.js';
 
 export interface SpriteParams {
   id: number;
@@ -139,6 +139,8 @@ const PATTERNS: Record<TypeId, (x: number, y: number) => boolean> = {
 // ---- composition ------------------------------------------------------------------------------
 
 export function compose(art: ArtSet, p: SpriteParams): Sprite {
+  const drawn = art.species?.[`${p.t1}-${p.f}`] ?? art.species?.[`${p.t1}-1`];
+  if (drawn) return composeSpecies(drawn, p);
   const rand = rng(hash32(`sprite:${p.id}`));
   const tpl = art.shapes[p.sh];
   // 1. resolve the half template (seeded '?' cells) into a full grid of codes
@@ -251,4 +253,98 @@ export function toRgba(sp: Sprite, scale = 1): Uint8ClampedArray<ArrayBuffer> {
       out[o + 3] = 255;
     }
   return out;
+}
+
+// ---- designed species (DECISIONS D25) -----------------------------------------------------------
+
+/** Canvas for designed species: the creature (≤48 px) plus room for accessories. */
+export const SPECIES_CANVAS = 80;
+
+/** Small drawn accessories that show the work-shape. Codes index ACC_COLORS. */
+const ACC_COLORS = [
+  '#000000',
+  '#1e1a24',
+  '#8a5a36',
+  '#b8c0c8',
+  '#f2c94c',
+  '#7fd4ff',
+  '#3fa060',
+  '#ff6fb5',
+  '#35e0d0',
+];
+const ACCESSORY: Record<
+  Shape,
+  { rows: string[]; anchor: 'right' | 'left' | 'top' | 'leftLow' | 'topWide' }
+> = {
+  builder: {
+    anchor: 'right',
+    rows: ['11111', '13331', '13331', '11211', '..2..', '..2..', '..2..', '..2..', '..1..'],
+  },
+  reviewer: {
+    anchor: 'left',
+    rows: ['.111.', '15551', '15551', '15551', '.111.', '...21', '....2'],
+  },
+  maintainer: { anchor: 'top', rows: ['1.1.1', '14141', '14441', '11111'] },
+  steady: { anchor: 'leftLow', rows: ['11111', '16661', '16461', '16661', '.161.', '..1..'] },
+  polyglot: { anchor: 'topWide', rows: ['8.....7.....4', '.............', '...8.....4...'] },
+};
+
+function shiftHex(hex: string, dh: number, dl = 0): string {
+  const [h, s, l] = toHsl(hexToRgb(hex));
+  if (l < 0.16) return hex; // keep outlines and pupils
+  return fromHsl(h + dh, s, Math.max(0, Math.min(1, l + dl)));
+}
+
+function composeSpecies(src: PixelSprite, p: SpriteParams): Sprite {
+  const N = SPECIES_CANVAS;
+  const idx = decodePx(src);
+  // individual variation: a small seeded hue/lightness jitter; shiny = a whole other colourway
+  const hv = hash32(`hue:${p.id}`);
+  const dh = p.s ? 150 + (hv % 60) : ((hv % 21) - 10) * 1.2;
+  const dl = p.s ? 0.04 : (((hv >>> 8) % 9) - 4) * 0.01;
+  const palette = ['#000000', ...src.palette.slice(1).map((c) => shiftHex(c, dh, dl))];
+  const accBase = palette.length;
+  palette.push(...ACC_COLORS.slice(1));
+  const px = new Uint8Array(N * N);
+  const ox = Math.floor((N - src.w) / 2);
+  const oy = N - src.h - 1;
+  let x0 = N,
+    y0 = N,
+    x1 = 0,
+    y1 = 0;
+  for (let y = 0; y < src.h; y++)
+    for (let x = 0; x < src.w; x++) {
+      const v = idx[y * src.w + x]!;
+      if (!v) continue;
+      px[(oy + y) * N + ox + x] = v;
+      x0 = Math.min(x0, ox + x);
+      x1 = Math.max(x1, ox + x);
+      y0 = Math.min(y0, oy + y);
+      y1 = Math.max(y1, oy + y);
+    }
+  const acc = ACCESSORY[p.sh];
+  const aw = acc.rows[0]!.length;
+  const ah = acc.rows.length;
+  const midY = Math.floor((y0 + y1) / 2);
+  const [ax, ay] =
+    acc.anchor === 'right'
+      ? [Math.min(N - aw, x1 - 1), midY - 2]
+      : acc.anchor === 'left'
+        ? [Math.max(0, x0 - aw + 2), midY - 1]
+        : acc.anchor === 'leftLow'
+          ? [Math.max(0, x0 - 2), y1 - ah - 1]
+          : acc.anchor === 'top'
+            ? [Math.floor((x0 + x1 - aw) / 2), Math.max(0, y0 - ah + 1)]
+            : [Math.floor((x0 + x1 - aw) / 2), Math.max(0, y0 - ah - 2)];
+  acc.rows.forEach((row, ry) => {
+    for (let rx = 0; rx < row.length; rx++) {
+      const ch = row[rx]!;
+      if (ch === '.') continue;
+      const x = ax + rx;
+      const y = ay + ry;
+      if (x < 0 || y < 0 || x >= N || y >= N) continue;
+      px[y * N + x] = accBase + Number(ch) - 1;
+    }
+  });
+  return { size: N, px, palette };
 }

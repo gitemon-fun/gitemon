@@ -16,4 +16,6 @@ export default defineConfig({
   plugins: [svelte()],
   resolve: { alias: { '@gitemon/art': existsSync(real) ? real : placeholder } },
   build: { rollupOptions: { input: 'app.html' }, target: 'es2022' },
+  // local development talks to the live API
+  server: { proxy: { '/api': { target: 'https://gitemon.fun', changeOrigin: true } } },
 });

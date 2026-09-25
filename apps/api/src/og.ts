@@ -113,16 +113,17 @@ export function ogPng(o: OgInput, artSet: ArtSet = art): Uint8Array {
   ];
   const c = new Canvas(W, H, 0);
   c.rect(0, H - 44, W, 44, 1);
-  // sprite x8
-  const S = 8;
+  // sprite scaled to about 192 px
+  const N = sp.size;
+  const S = Math.max(1, Math.floor(192 / N));
   const sx = 36;
-  const sy = Math.floor((H - 44 - SIZE * S) / 2);
-  for (let y = 0; y < SIZE; y++)
-    for (let x = 0; x < SIZE; x++) {
-      const v = sp.px[y * SIZE + x]!;
+  const sy = Math.floor((H - 44 - N * S) / 2);
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const v = sp.px[y * N + x]!;
       if (v) c.rect(sx + x * S, sy + y * S, S, S, OFF + v);
     }
-  const tx = sx + SIZE * S + 28;
+  const tx = sx + N * S + 28;
   const maxW = W - tx - 24;
   const login = o.login;
   const ls = Canvas.width(login, 4) <= maxW ? 4 : Canvas.width(login, 3) <= maxW ? 3 : 2;
@@ -142,12 +143,14 @@ export function ogPng(o: OgInput, artSet: ArtSet = art): Uint8Array {
   return encodeIndexedPng(W, H, c.px, palette, false, 6);
 }
 
+/** `scale` is in units of the old 24 px sprite, so ?s=8 still means about 192 px. */
 export function spritePng(p: SpriteParams, scale: number): Uint8Array {
   const sp = compose(art, p);
-  const n = SIZE * scale;
+  const k = Math.max(1, Math.round((scale * SIZE) / sp.size));
+  const n = sp.size * k;
   const out = new Uint8Array(n * n);
   for (let y = 0; y < n; y++)
     for (let x = 0; x < n; x++)
-      out[y * n + x] = sp.px[Math.floor(y / scale) * SIZE + Math.floor(x / scale)]!;
+      out[y * n + x] = sp.px[Math.floor(y / k) * sp.size + Math.floor(x / k)]!;
   return encodeIndexedPng(n, n, out, sp.palette);
 }

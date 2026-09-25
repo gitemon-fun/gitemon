@@ -17,7 +17,7 @@ import {
  *   - every stat is log-scaled and capped, so volume stops paying early.
  * AI use is neither detected nor punished (D7); agent accounts are tagged `machine`.
  */
-export const SCORER_VERSION = 1;
+export const SCORER_VERSION = 2;
 
 /** Tuning knobs (DECISIONS: tune-at-build, locked after the sample run). */
 export const TUNING = {
@@ -27,8 +27,14 @@ export const TUNING = {
   renownAt100: 100000,
   rangePerLang: 12,
   weights: { might: 0.32, insight: 0.22, renown: 0.2, grit: 0.16, range: 0.1 },
-  form2: { mergedToOthers: 1, level: 20 },
-  form3: { repoStars: 1000, mergedToOthers: 200, reviews: 300 },
+  /**
+   * Evolution by rarity (DECISIONS D26): cut-offs are level percentiles of the live world
+   * (8,309 Gitemon, 2026-09-25): Form 3 = top 5 % (Lv 85+), Form 2 = next 25 % (Lv 61+).
+   * Both also need at least one pull request merged into someone else's repo.
+   */
+  form2Level: 61,
+  form3Level: 85,
+  formMinMerged: 1,
   dualTypeRatio: 0.25,
   polyglotLangs: 6,
   /** minimum confirmed weight for a language to count toward Range and Polyglot */
@@ -112,14 +118,10 @@ function shapeOf(st: Stats, langCount: number): Shape {
 }
 
 function formOf(s: Snapshot, level: number): 1 | 2 | 3 {
-  const f2 = s.mergedToOthers.count >= TUNING.form2.mergedToOthers && level >= TUNING.form2.level;
-  if (!f2) return 1;
-  const topRepo = Math.max(0, ...s.repos.filter((r) => !r.fork).map((r) => r.stars));
-  const f3 =
-    topRepo >= TUNING.form3.repoStars ||
-    s.mergedToOthers.count >= TUNING.form3.mergedToOthers ||
-    s.contrib.reviews >= TUNING.form3.reviews;
-  return f3 ? 3 : 2;
+  if (s.mergedToOthers.count < TUNING.formMinMerged) return 1;
+  if (level >= TUNING.form3Level) return 3;
+  if (level >= TUNING.form2Level) return 2;
+  return 1;
 }
 
 export function isShiny(userId: number): boolean {

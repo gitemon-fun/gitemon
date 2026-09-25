@@ -77,7 +77,7 @@
       if (r.status === 202) say('That Gitemon is hatching. Try again in a few minutes.');
       else if (r.data.g) {
         view?.upsert(r.data.g);
-        view?.flyTo(r.data.g.x, r.data.g.y, 44);
+        view?.flyTo(r.data.g.x, r.data.g.y, 22);
         if (view) view.selected = r.data.g;
         select(r.data.g);
         panel = null;
@@ -153,8 +153,8 @@
     await Promise.all([loadMe(), loadTowns()]);
     const n = await api.notable();
     view?.invalidate();
-    view?.setNotable(n.data.g, n.data.towns);
-    if (me) view?.flyTo(me.x, me.y, 36);
+    view?.setNotable(n.data.g, n.data.towns, n.data.pops);
+    if (me) view?.flyTo(me.x, me.y, 18);
   }
 
   async function signOut() {
@@ -176,14 +176,14 @@
     (async () => {
       const [n] = await Promise.all([api.notable(), loadMe()]);
       total = n.data.total;
-      view!.setNotable(n.data.g, n.data.towns);
+      view!.setNotable(n.data.g, n.data.towns, n.data.pops);
       loaded = true;
       const focus = new URLSearchParams(location.search).get('focus');
       if (focus) {
         query = focus;
         await search();
       } else if (me && !me.hidden) {
-        view!.flyTo(me.x, me.y, 36);
+        view!.flyTo(me.x, me.y, 18);
       }
     })();
     return () => view?.destroy();
@@ -333,7 +333,7 @@
               onclick={() => {
                 panel = null;
                 history.pushState({}, '', '/map');
-                view?.flyTo(d.x, d.y, 44);
+                view?.flyTo(d.x, d.y, 22);
                 if (view) view.selected = d;
                 select(d);
               }}

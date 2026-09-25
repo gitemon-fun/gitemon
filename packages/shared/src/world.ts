@@ -75,6 +75,15 @@ export function villageRect(t: TypeId) {
   return { x: o.x + VILLAGE_MIN, y: o.y + VILLAGE_MIN, w: VILLAGE, h: VILLAGE };
 }
 
+/** How far (in tiles) the populated wild band reaches beyond the town square, for a population. */
+export function bandRadius(population: number): number {
+  const inner = TOWN_MAX - TOWN_MIN;
+  const need = population * 2.5 + 200;
+  let r = 1;
+  while (r < TOWN_MIN && ((inner + 2 * r) ** 2 - inner ** 2) / 2 < need) r++;
+  return r;
+}
+
 /**
  * Candidate wild slots for a user, in probe order. Wild Gitemon pack densely around the town ring
  * and the populated band grows outward with the biome's population, so neighbours are visible at
@@ -88,9 +97,7 @@ export function* wildCandidates(
 ): Generator<{ x: number; y: number }> {
   const o = biomeOrigin(t);
   const inner = TOWN_MAX - TOWN_MIN;
-  const need = population * 2.5 + 200;
-  let r = 1;
-  while (r < TOWN_MIN && ((inner + 2 * r) ** 2 - inner ** 2) / 2 < need) r++;
+  let r = bandRadius(population);
   let h = hash32(`slot:${userId}`);
   let yielded = 0;
   for (let i = 0; i < 20_000; i++) {

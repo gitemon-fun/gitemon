@@ -58,3 +58,31 @@ describe('creature-gen', () => {
     expect([...png.slice(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
   });
 });
+
+describe('designed species', () => {
+  const sp = {
+    w: 4,
+    h: 4,
+    palette: ['#000000', '#ff0000', '#101010'],
+    px: btoa(String.fromCharCode(0, 1, 1, 0, 1, 2, 2, 1, 1, 1, 1, 1, 0, 1, 1, 0)),
+  };
+  const art = { ...placeholderArt, species: { 'forge-1': sp } };
+  it('uses the drawn species when present, on the bigger canvas', () => {
+    const s = compose(art, { id: 5, t1: 'forge', t2: null, sh: 'maintainer', f: 1, s: 0 });
+    expect(s.size).toBe(80);
+    expect(s.px.some((v) => v === 1)).toBe(true);
+  });
+  it('falls back to form 1 art, and to procedural art for unknown types', () => {
+    expect(compose(art, { id: 5, t1: 'forge', t2: null, sh: 'builder', f: 3, s: 0 }).size).toBe(80);
+    expect(compose(art, { id: 5, t1: 'tide', t2: null, sh: 'builder', f: 1, s: 0 }).size).toBe(
+      SIZE,
+    );
+  });
+  it('shiny changes colours but not pixels; outlines stay dark', () => {
+    const a = compose(art, { id: 9, t1: 'forge', t2: null, sh: 'steady', f: 1, s: 0 });
+    const b = compose(art, { id: 9, t1: 'forge', t2: null, sh: 'steady', f: 1, s: 1 });
+    expect([...a.px]).toEqual([...b.px]);
+    expect(a.palette[1]).not.toBe(b.palette[1]);
+    expect(b.palette[2]).toBe('#101010');
+  });
+});

@@ -17,10 +17,10 @@ export function sprite(
   if (c) return c;
   const sp = compose(art, { id: g.id, t1: g.t1, t2: g.t2, sh: g.sh, f: g.f, s: g.s });
   c = document.createElement('canvas');
-  c.width = SIZE;
-  c.height = SIZE;
+  c.width = sp.size;
+  c.height = sp.size;
   const ctx = c.getContext('2d')!;
-  ctx.putImageData(new ImageData(toRgba(sp), SIZE, SIZE), 0, 0);
+  ctx.putImageData(new ImageData(toRgba(sp), sp.size, sp.size), 0, 0);
   if (cache.size > 4000) cache.delete(cache.keys().next().value!);
   cache.set(k, c);
   return c;

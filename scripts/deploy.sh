@@ -9,7 +9,7 @@ ART_SRC="../gitemon-art/index.ts"
 ART_ALIAS="../../packages/creature-gen/src/art-entry.ts"
 if [[ -f $ART_SRC ]]; then
   mkdir -p packages/creature-gen/art-real
-  cp "$ART_SRC" packages/creature-gen/art-real/index.ts
+  cp ../gitemon-art/*.ts packages/creature-gen/art-real/
   ART_ALIAS="../../packages/creature-gen/art-real/index.ts"
   echo "art: real set"
 else

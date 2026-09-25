@@ -141,17 +141,34 @@ describe('scorer', () => {
     expect(poly.shape).toBe('polyglot');
   });
 
-  it('evolution needs real milestones', () => {
-    const f1 = score(snap({ contrib: { activeWeeks: 52, reviews: 50 } }));
-    expect(f1.form).toBe(1); // no merged PR into someone else's repo
-    const f3 = score(
+  it('evolution is rare and needs work other people accepted', () => {
+    const noMerged = score(
       snap({
-        contrib: { activeWeeks: 52, reviews: 350 },
-        mergedToOthers: { count: 250, langs: { Go: 250 }, owners: [] },
-        repos: [{ name: 'lib', stars: 5000, lang: 'Go', fork: false }],
+        contrib: { activeWeeks: 52, reviews: 800 },
+        repos: [{ name: 'x', stars: 90000, lang: 'Go', fork: false }],
       }),
     );
-    expect(f3.form).toBe(3);
+    expect(noMerged.form).toBe(1);
+    const top = score(
+      snap({
+        contrib: { activeWeeks: 52, reviews: 700 },
+        mergedToOthers: {
+          count: 900,
+          langs: { Go: 500, Rust: 200, Python: 100, C: 100 },
+          owners: [],
+        },
+        repos: [{ name: 'lib', stars: 90000, lang: 'Go', fork: false }],
+      }),
+    );
+    expect(top.level).toBeGreaterThanOrEqual(TUNING.form3Level);
+    expect(top.form).toBe(3);
+    const mid = score(
+      snap({
+        contrib: { activeWeeks: 30 },
+        mergedToOthers: { count: 3, langs: { Go: 3 }, owners: [] },
+      }),
+    );
+    expect(mid.form).toBe(1);
   });
 
   it('shiny is about 1 in 256 and fixed per user', () => {
