@@ -105,7 +105,7 @@ export const TYPE_INFO: Record<TypeId, TypeInfo> = {
   forge: {
     id: 'forge',
     name: 'Forge',
-    biome: 'Ember Crags',
+    biome: 'Magma Fields',
     langs: ['Rust', 'Zig'],
     ground: '#3a2622',
     colors: ['#e0612f', '#f2a541', '#7a2b1c'],
@@ -113,7 +113,7 @@ export const TYPE_INFO: Record<TypeId, TypeInfo> = {
   iron: {
     id: 'iron',
     name: 'Iron',
-    biome: 'Foundry Flats',
+    biome: 'Iron Foundry',
     langs: ['C', 'C++', 'Assembly', 'Cuda', 'Objective-C++'],
     ground: '#34383d',
     colors: ['#8d99a6', '#c9d1d9', '#4a525b'],
@@ -129,7 +129,7 @@ export const TYPE_INFO: Record<TypeId, TypeInfo> = {
   spark: {
     id: 'spark',
     name: 'Spark',
-    biome: 'Static Plains',
+    biome: 'Storm Plains',
     langs: ['JavaScript', 'CoffeeScript'],
     ground: '#3a3620',
     colors: ['#f2d024', '#fff3a8', '#8a6d10'],
@@ -137,7 +137,7 @@ export const TYPE_INFO: Record<TypeId, TypeInfo> = {
   prism: {
     id: 'prism',
     name: 'Prism',
-    biome: 'Glass Highlands',
+    biome: 'Crystal Highlands',
     langs: ['TypeScript'],
     ground: '#1f2b3d',
     colors: ['#3b7de0', '#9cc3ff', '#1d3f78'],
@@ -153,7 +153,7 @@ export const TYPE_INFO: Record<TypeId, TypeInfo> = {
   frost: {
     id: 'frost',
     name: 'Frost',
-    biome: 'Brew Tundra',
+    biome: 'Frost Tundra',
     langs: ['Java', 'Kotlin', 'Scala', 'Groovy', 'Clojure'],
     ground: '#2c3440',
     colors: ['#bfe3f2', '#ffffff', '#5b89a6'],
@@ -169,7 +169,7 @@ export const TYPE_INFO: Record<TypeId, TypeInfo> = {
   moss: {
     id: 'moss',
     name: 'Moss',
-    biome: 'Elephant Marsh',
+    biome: 'Miasma Marsh',
     langs: ['PHP', 'Hack', 'Blade'],
     ground: '#2a2f3d',
     colors: ['#7a86c9', '#c3c9ef', '#3b4378'],
@@ -185,7 +185,7 @@ export const TYPE_INFO: Record<TypeId, TypeInfo> = {
   rune: {
     id: 'rune',
     name: 'Rune',
-    biome: 'Lambda Peaks',
+    biome: 'Arcane Peaks',
     langs: [
       'Haskell',
       'OCaml',
@@ -206,7 +206,7 @@ export const TYPE_INFO: Record<TypeId, TypeInfo> = {
   shade: {
     id: 'shade',
     name: 'Shade',
-    biome: 'Shell Caves',
+    biome: 'Shadow Caves',
     langs: [
       'Shell',
       'PowerShell',
@@ -224,7 +224,7 @@ export const TYPE_INFO: Record<TypeId, TypeInfo> = {
   bloom: {
     id: 'bloom',
     name: 'Bloom',
-    biome: 'Canvas Gardens',
+    biome: 'Blossom Gardens',
     langs: ['HTML', 'CSS', 'SCSS', 'Vue', 'Svelte', 'Astro', 'Less'],
     ground: '#33223a',
     colors: ['#e55ea8', '#ffc2e2', '#7a2358'],

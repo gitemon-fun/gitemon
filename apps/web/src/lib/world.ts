@@ -11,9 +11,7 @@ import {
   VILLAGE_MIN,
   WORLD_H,
   WORLD_W,
-  bandRadius,
   biomeOrigin,
-  hash32,
   plotRect,
   zoneOf,
   type MapGitemon,
@@ -26,135 +24,149 @@ import { house, prop, tower, TERRAIN, type PropKind } from './props';
 import { sprite } from './sprites';
 
 /**
- * The map (DECISIONS D24): an isometric world where every language biome is a floating island.
- *   World  (u < 1.2 px):  islands, bridges, clouds, island banners, only notable Gitemon
- *   Town   (1.2 ≤ u < 8): islands in more detail, every Gitemon as a dot, notable ones as sprites
+ * The map (DECISIONS D24, D29): one floating continent. Each language owns a region — Magma
+ * Fields, Miasma Marsh, Frost Tundra… — and the regions flow into each other along organic borders.
+ * A region's village sits at its centre; its Gitemon live around it.
+ *   World  (u < 1.2 px):  the whole continent, region banners, only notable Gitemon
+ *   Town   (1.2 ≤ u < 8): the continent in more detail, every Gitemon as a dot
  *   Street (u ≥ 8):       every tile, prop, house and Gitemon, animated
  * `u` is the screen size of half a tile's width. A tile is 2u wide and u tall.
- * Being visible from the far zoom is the status reward (D5, D6).
  */
 export const STREET_U = 8;
 export const TOWN_U = 1.2;
 const MAX_U = 40;
-const HI_RES = 4; // island pre-render scale for the town band
+const MID_RES = 2; // pre-render scale for the town band
+const CLIFF = 40; // max cliff depth under the continent edge (half-tiles)
 
 type Dot = [number, number, number, number];
 type Band = 'world' | 'town' | 'street';
 
-/** Seeded 0..1 per tile. FNV alone correlates neighbouring tiles, so finish with an avalanche mix. */
-const rnd = (a: string, x: number, y: number) => {
-  let h = hash32(`${a}:${x},${y}`);
+// ---- fast deterministic randomness (numbers only; no strings on the hot path) --------------------
+
+function mix(h: number) {
   h ^= h >>> 16;
   h = Math.imul(h, 0x7feb352d);
   h ^= h >>> 15;
   h = Math.imul(h, 0x846ca68b);
   h ^= h >>> 16;
-  return (h >>> 0) / 4294967296;
-};
+  return h >>> 0;
+}
+const rnd = (seed: number, x: number, y: number) =>
+  mix(seed ^ Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1)) / 4294967296;
 
-/** Coarse value noise for organic island edges. */
-function noise(seed: string, x: number, y: number, cell = 9) {
+function noise(seed: number, x: number, y: number, cell: number) {
   const gx = Math.floor(x / cell);
   const gy = Math.floor(y / cell);
   const fx = x / cell - gx;
   const fy = y / cell - gy;
-  const v = (i: number, j: number) => rnd(seed, gx + i, gy + j);
   const sx = fx * fx * (3 - 2 * fx);
   const sy = fy * fy * (3 - 2 * fy);
-  return (v(0, 0) * (1 - sx) + v(1, 0) * sx) * (1 - sy) + (v(0, 1) * (1 - sx) + v(1, 1) * sx) * sy;
+  const a = rnd(seed, gx, gy);
+  const b = rnd(seed, gx + 1, gy);
+  const c = rnd(seed, gx, gy + 1);
+  const d = rnd(seed, gx + 1, gy + 1);
+  return (a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy;
 }
 
-interface Island {
+const S_COAST = 11;
+const S_RX = 23;
+const S_RY = 37;
+const S_VAR = 41;
+const S_PROP = 53;
+const S_KIND = 67;
+const S_CLIFF = 71;
+
+/** Is (X, Y) on the continent? The coast wanders 8–30 tiles in from the world's edge. */
+function landAt(X: number, Y: number) {
+  if (X < 0 || Y < 0 || X >= WORLD_W || Y >= WORLD_H) return false;
+  const d = Math.min(X, Y, WORLD_W - 1 - X, WORLD_H - 1 - Y);
+  return d > 8 + noise(S_COAST, X, Y, 14) * 22;
+}
+
+/** Which region a tile looks like: the biome grid, with borders pushed around by noise. */
+function regionAt(X: number, Y: number): number {
+  const jx = Math.max(0, Math.min(WORLD_W - 1, Math.round(X + (noise(S_RX, X, Y, 22) - 0.5) * 70)));
+  const jy = Math.max(0, Math.min(WORLD_H - 1, Math.round(Y + (noise(S_RY, X, Y, 22) - 0.5) * 70)));
+  return Math.floor(jy / BIOME) * COLS + Math.floor(jx / BIOME);
+}
+
+// ---- one biome square of the continent -----------------------------------------------------------
+
+interface Square {
   t: TypeId;
-  pop: number;
-  radius: number;
-  /** 1 = land, per local tile (BIOME × BIOME) */
+  ox: number;
+  oy: number;
   land: Uint8Array;
-  /** 0 = none, else index+1 into TERRAIN[t].props; HOUSE / LANDMARK */
+  region: Uint8Array;
+  /** 0 = none, else prop index+1 of the tile's region; HOUSE / LANDMARK */
   obj: Uint8Array;
   variant: Uint8Array;
-  /** cliff length below front-edge tiles, 0 = not an edge */
   cliff: Uint8Array;
-  lo: Map<number, HTMLCanvasElement>;
   roofs: Map<number, string>;
-  falls: number[];
+  pre: Map<number, HTMLCanvasElement>;
 }
 
 const HOUSE = 250;
 const LANDMARK = 251;
 const ROOFS = ['#c24b2a', '#2a6fc2', '#3a8a4a', '#8a3ac2', '#c2a02a', '#2aa0a0'];
 
-function buildIsland(t: TypeId, pop: number, towns: Town[]): Island {
+function buildSquare(t: TypeId, towns: Town[]): Square {
   const N = BIOME;
+  const { x: ox, y: oy } = biomeOrigin(t);
+  const own = BIOME_ORDER.indexOf(t);
   const land = new Uint8Array(N * N);
+  const region = new Uint8Array(N * N);
   const obj = new Uint8Array(N * N);
   const variant = new Uint8Array(N * N);
   const cliff = new Uint8Array(N * N);
-  const radius = Math.min(N / 2 - 3, 64 + bandRadius(pop) + 10);
-  const T = TERRAIN[t];
-  const c = (N - 1) / 2;
   for (let y = 0; y < N; y++)
     for (let x = 0; x < N; x++) {
-      const dx = Math.abs(x - c);
-      const dy = Math.abs(y - c);
-      const d = Math.pow(dx ** 4 + dy ** 4, 0.25);
-      const edge = radius + (noise(t, x, y) - 0.5) * 12 + (noise(t + '2', x, y, 3) - 0.5) * 3;
-      if (d < edge || zoneOf(x, y) !== 'wild') land[y * N + x] = 1;
+      const X = ox + x;
+      const Y = oy + y;
+      if (!landAt(X, Y)) continue;
+      const i = y * N + x;
+      land[i] = 1;
+      const r = zoneOf(x, y) === 'wild' ? regionAt(X, Y) : own;
+      region[i] = r;
+      // shade comes in soft patches, with a little per-tile grain
+      variant[i] = Math.min(2, Math.floor(noise(S_VAR, X, Y, 6) * 2.4 + rnd(S_VAR, X, Y) * 0.6));
+      if (!landAt(X + 1, Y) || !landAt(X, Y + 1))
+        cliff[i] = 6 + Math.floor(noise(S_CLIFF, X, Y, 4) * (CLIFF - 6));
+      const T = TERRAIN[BIOME_ORDER[r]];
+      // props on the odd checkerboard colour only: Gitemon stand on the even one
+      if ((X + Y) % 2 === 1 && zoneOf(x, y) === 'wild' && rnd(S_PROP, X, Y) < T.density)
+        obj[i] = 1 + Math.floor(rnd(S_KIND, X, Y) * T.props.length);
     }
   const roofs = new Map<number, string>();
-  for (let y = 0; y < N; y++)
-    for (let x = 0; x < N; x++) {
-      const i = y * N + x;
-      if (!land[i]) continue;
-      variant[i] = Math.floor(rnd(t + 'v', x, y) * 3);
-      const front = x === N - 1 || y === N - 1 || !land[i + 1] || !land[i + N];
-      if (front) cliff[i] = 6 + Math.floor(noise(t + 'c', x, y, 4) * 30);
-      // props only on the odd checkerboard colour: Gitemon stand on the even one
-      if ((x + y) % 2 === 1 && zoneOf(x, y) === 'wild' && rnd(t + 'p', x, y) < T.density)
-        obj[i] = 1 + Math.floor(rnd(t + 'k', x, y) * T.props.length);
-    }
-  // village: houses on its rim, landmark in the middle
-  for (let k = 0; k < VILLAGE; k += 5) {
+  for (let k = 0; k < VILLAGE; k += 5)
     for (const [x, y] of [
       [VILLAGE_MIN + k, VILLAGE_MIN - 1],
       [VILLAGE_MIN - 1, VILLAGE_MIN + k],
       [VILLAGE_MIN + k + 1, VILLAGE_MIN + VILLAGE],
       [VILLAGE_MIN + VILLAGE, VILLAGE_MIN + k + 1],
-    ]) {
+    ])
       if ((x + y) % 2 === 1) {
         obj[y * N + x] = HOUSE;
-        roofs.set(y * N + x, ROOFS[hash32(`${t}${x},${y}`) % ROOFS.length]);
+        roofs.set(y * N + x, ROOFS[mix(own * 977 + x * 31 + y) % ROOFS.length]);
       }
-    }
-  }
   obj[(N / 2 - 1) * N + N / 2] = LANDMARK;
-  // town plots: a house on each corner
-  const o = biomeOrigin(t);
   for (const town of towns.filter((tw) => tw.biome === t)) {
     const r = plotRect(t, town.plot);
     const roof = town.kind === 'official' ? '#d8a83a' : ROOFS[town.id % ROOFS.length];
     for (const [x, y] of [
-      [r.x - o.x, r.y - o.y + 1],
-      [r.x - o.x + PLOT - 1, r.y - o.y],
-      [r.x - o.x + 1, r.y - o.y + PLOT - 2],
-      [r.x - o.x + PLOT - 2, r.y - o.y + PLOT - 1],
+      [r.x - ox, r.y - oy + 1],
+      [r.x - ox + PLOT - 1, r.y - oy],
+      [r.x - ox + 1, r.y - oy + PLOT - 2],
+      [r.x - ox + PLOT - 2, r.y - oy + PLOT - 1],
     ]) {
       obj[y * N + x] = HOUSE;
       roofs.set(y * N + x, roof);
     }
   }
-  // waterfalls off a few front edges
-  const falls: number[] = [];
-  if (T.waterfall) {
-    const edges: number[] = [];
-    for (let i = 0; i < N * N; i++) if (cliff[i] > 20) edges.push(i);
-    for (let k = 0; k < Math.min(3, edges.length); k++)
-      falls.push(edges[hash32(t + 'f' + k) % edges.length]);
-  }
-  return { t, pop, radius, land, obj, variant, cliff, lo: new Map(), roofs, falls };
+  return { t, ox, oy, land, region, obj, variant, cliff, roofs, pre: new Map() };
 }
 
-// ---- landmark sprites ------------------------------------------------------------------------------
+// ---- cached images --------------------------------------------------------------------------------
 
 const landmarkCache = new Map<TypeId, HTMLCanvasElement>();
 function landmark(t: TypeId): HTMLCanvasElement {
@@ -180,6 +192,22 @@ function landmark(t: TypeId): HTMLCanvasElement {
   return c;
 }
 
+const glowCache = new Map<string, HTMLCanvasElement>();
+function glow(rgb: string): HTMLCanvasElement {
+  let c = glowCache.get(rgb);
+  if (c) return c;
+  c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, `rgba(${rgb},0.5)`);
+  grd.addColorStop(1, `rgba(${rgb},0)`);
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 64);
+  glowCache.set(rgb, c);
+  return c;
+}
+
 // ---- the view ----------------------------------------------------------------------------------------
 
 interface Cloud {
@@ -187,7 +215,6 @@ interface Cloud {
   y: number;
   w: number;
   speed: number;
-  layer: number;
 }
 
 export class WorldView {
@@ -200,17 +227,32 @@ export class WorldView {
   private dpr = 1;
   private raf = 0;
   private t0 = performance.now();
+  private lastDraw = 0;
+  private dirty = true;
   private chunks = new Map<number, MapGitemon[] | 'loading'>();
   private biomes = new Map<TypeId, Dot[] | 'loading'>();
   private notable: MapGitemon[] = [];
-  private pops: Record<string, number> = {};
-  private islands = new Map<TypeId, Island>();
+  private squares = new Map<TypeId, Square>();
   private tiles = new Map<string, HTMLCanvasElement>();
   private tileU = 0;
   towns: Town[] = [];
   private bySlot = new Map<string, MapGitemon>();
-  selected: MapGitemon | null = null;
-  me: number | null = null;
+  private sel: MapGitemon | null = null;
+  private meId: number | null = null;
+  get selected() {
+    return this.sel;
+  }
+  set selected(g: MapGitemon | null) {
+    this.sel = g;
+    this.dirty = true;
+  }
+  get me() {
+    return this.meId;
+  }
+  set me(id: number | null) {
+    this.meId = id;
+    this.dirty = true;
+  }
   private pointers = new Map<number, { x: number; y: number }>();
   private pinch: { d: number; u: number } | null = null;
   private moved = 0;
@@ -223,6 +265,7 @@ export class WorldView {
   } | null = null;
   private clouds: Cloud[] = [];
   private visible = true;
+  private still = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -230,18 +273,20 @@ export class WorldView {
     private onZoom: (band: Band) => void,
   ) {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
-    for (let i = 0; i < 22; i++)
+    for (let i = 0; i < 16; i++)
       this.clouds.push({
-        x: rnd('cx', i, 0),
-        y: rnd('cy', i, 0),
-        w: 60 + rnd('cw', i, 0) * 140,
-        speed: 4 + rnd('cs', i, 0) * 10,
-        layer: i % 2,
+        x: rnd(5, i, 0),
+        y: rnd(6, i, 0),
+        w: 70 + rnd(7, i, 0) * 150,
+        speed: 3 + rnd(8, i, 0) * 7,
       });
     this.resize();
     this.fit();
     this.bind();
-    document.addEventListener('visibilitychange', () => (this.visible = !document.hidden));
+    document.addEventListener('visibilitychange', () => {
+      this.visible = !document.hidden;
+      this.dirty = true;
+    });
     this.loop();
   }
 
@@ -255,19 +300,19 @@ export class WorldView {
 
   resize() {
     const r = this.canvas.getBoundingClientRect();
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.dpr = Math.min(1.5, window.devicePixelRatio || 1);
     this.w = r.width;
     this.h = r.height;
     this.canvas.width = Math.round(r.width * this.dpr);
     this.canvas.height = Math.round(r.height * this.dpr);
+    this.dirty = true;
   }
 
-  /** The world diamond is (W+H)·u wide and (W+H)·u/2 tall. */
   get fitU() {
-    return Math.min(this.w / (WORLD_W + WORLD_H), (this.h * 2) / (WORLD_W + WORLD_H)) * 1.9;
+    return Math.min(this.w / (WORLD_W + WORLD_H), (this.h * 2) / (WORLD_W + WORLD_H)) * 1.05;
   }
   get minU() {
-    return this.fitU * 0.7;
+    return this.fitU * 0.8;
   }
 
   fit() {
@@ -275,14 +320,15 @@ export class WorldView {
     this.u = this.fitU;
     this.x = WORLD_W / 2;
     this.y = WORLD_H / 2;
+    this.dirty = true;
   }
 
-  setNotable(g: MapGitemon[], towns: Town[], pops: Record<string, number> = {}) {
+  setNotable(g: MapGitemon[], towns: Town[]) {
     this.notable = g;
     this.towns = towns;
-    this.pops = pops;
-    this.islands.clear();
+    this.squares.clear();
     for (const n of g) this.bySlot.set(`${n.x},${n.y}`, n);
+    this.dirty = true;
   }
 
   upsert(g: MapGitemon) {
@@ -296,18 +342,21 @@ export class WorldView {
       if (i >= 0) c[i] = g;
       else c.push(g);
     }
+    this.dirty = true;
   }
 
   invalidate() {
     this.chunks.clear();
     this.biomes.clear();
     this.bySlot.clear();
-    this.islands.clear();
+    this.squares.clear();
     for (const n of this.notable) this.bySlot.set(`${n.x},${n.y}`, n);
+    this.dirty = true;
   }
 
   flyTo(x: number, y: number, u = 20) {
     const target = Math.min(MAX_U, u);
+    if (target >= STREET_U) this.prefetch(x, y);
     // on phones the info sheet covers the lower half: aim below the creature so it sits higher
     const lift = this.w < 760 ? (this.h * 0.2) / target : 0;
     this.anim = {
@@ -328,6 +377,7 @@ export class WorldView {
     this.y += wy - ny;
     this.clamp();
     if (this.band !== prev) this.onZoom(this.band);
+    this.dirty = true;
   }
 
   private clamp() {
@@ -382,6 +432,7 @@ export class WorldView {
       this.x -= (a + bb) / 2;
       this.y -= (bb - a) / 2;
       this.clamp();
+      this.dirty = true;
     });
     const up = (e: PointerEvent) => {
       const was = this.pointers.size;
@@ -412,7 +463,7 @@ export class WorldView {
   }
 
   private creatureSize() {
-    // designed species carry their own size (babies small, final forms big) on one 80 px canvas
+    // designed species carry their own size (babies small, final forms big) on one canvas
     return this.u * 3.4;
   }
   private creatureRect(g: MapGitemon): [number, number, number, number] {
@@ -452,7 +503,7 @@ export class WorldView {
         this.anim = {
           x: wx,
           y: wy,
-          u: this.band === 'world' ? 4 : 14,
+          u: this.band === 'world' ? 3 : 14,
           t0: performance.now(),
           from: { x: this.x, y: this.y, u: this.u },
         };
@@ -461,6 +512,7 @@ export class WorldView {
     }
     this.selected = best;
     this.onPick(best);
+    this.dirty = true;
   }
 
   // ---- data ----------------------------------------------------------------------------------------
@@ -502,6 +554,29 @@ export class WorldView {
           .then(({ data }) => {
             this.chunks.set(k, data.g);
             for (const g of data.g) this.bySlot.set(`${g.x},${g.y}`, g);
+            this.dirty = true;
+          })
+          .catch(() => this.chunks.delete(k));
+      }
+  }
+
+  /** Start loading the chunks around a destination before the camera gets there. */
+  private prefetch(x: number, y: number) {
+    const per = WORLD_W / CHUNK;
+    const cx0 = Math.floor(x / CHUNK);
+    const cy0 = Math.floor(y / CHUNK);
+    for (let cy = cy0 - 1; cy <= cy0 + 1; cy++)
+      for (let cx = cx0 - 1; cx <= cx0 + 1; cx++) {
+        if (cx < 0 || cy < 0 || cx >= per || cy >= WORLD_H / CHUNK) continue;
+        const k = cy * per + cx;
+        if (this.chunks.has(k)) continue;
+        this.chunks.set(k, 'loading');
+        api
+          .chunk(cx, cy)
+          .then(({ data }) => {
+            this.chunks.set(k, data.g);
+            for (const g of data.g) this.bySlot.set(`${g.x},${g.y}`, g);
+            this.dirty = true;
           })
           .catch(() => this.chunks.delete(k));
       }
@@ -512,95 +587,94 @@ export class WorldView {
     this.biomes.set(t, 'loading');
     api
       .biome(t)
-      .then(({ data }) => this.biomes.set(t, data.d))
+      .then(({ data }) => {
+        this.biomes.set(t, data.d);
+        this.dirty = true;
+      })
       .catch(() => this.biomes.delete(t));
   }
 
-  private island(t: TypeId): Island {
-    let is = this.islands.get(t);
-    if (!is) this.islands.set(t, (is = buildIsland(t, this.pops[t] ?? 0, this.towns)));
-    return is;
+  /** Squares are built lazily, a few per frame, so opening the map never stalls. */
+  private square(t: TypeId, budget: { n: number }): Square | null {
+    let s = this.squares.get(t);
+    if (s) return s;
+    if (budget.n <= 0) {
+      this.dirty = true;
+      return null;
+    }
+    budget.n--;
+    s = buildSquare(t, this.towns);
+    this.squares.set(t, s);
+    this.dirty = true;
+    return s;
   }
 
-  // ---- island pre-render (world + town bands) ------------------------------------------------------
+  // ---- pre-render of a square (world + town bands) ------------------------------------------------
 
-  private islandCanvas(is: Island, u0: number): HTMLCanvasElement {
-    let c = is.lo.get(u0);
+  private squareCanvas(s: Square, u0: number): HTMLCanvasElement {
+    let c = s.pre.get(u0);
     if (c) return c;
     const N = BIOME;
-    const T = TERRAIN[is.t];
-    const depth = 44 * u0;
     c = document.createElement('canvas');
     c.width = 2 * N * u0;
-    c.height = N * u0 + depth;
+    c.height = N * u0 + CLIFF * u0;
     const g = c.getContext('2d')!;
     g.imageSmoothingEnabled = false;
     const P = (x: number, y: number): [number, number] => [(x - y + N) * u0, ((x + y) * u0) / 2];
-    // underside first
     for (let y = 0; y < N; y++)
       for (let x = 0; x < N; x++) {
         const i = y * N + x;
-        if (!is.cliff[i]) continue;
+        if (!s.cliff[i]) continue;
+        const T = TERRAIN[BIOME_ORDER[s.region[i]]];
         const [sx, sy] = P(x, y);
         g.fillStyle = T.side;
         g.fillRect(sx - u0, sy + u0 / 2, 2 * u0, Math.max(1, u0 * 1.5));
         g.fillStyle = T.under;
-        g.fillRect(sx - u0 * 0.6, sy + u0 * 2, 1.2 * u0, (is.cliff[i] * u0) / 2);
+        g.fillRect(sx - u0 * 0.6, sy + u0 * 2, 1.2 * u0, (s.cliff[i] * u0) / 2);
       }
-    for (const f of is.falls) {
-      const [sx, sy] = P(f % N, Math.floor(f / N));
-      g.fillStyle = T.waterfall!;
-      g.fillRect(sx - u0 * 0.8, sy + u0, 1.6 * u0, depth - u0);
-    }
-    // tops, back to front
-    for (let s = 0; s < 2 * N - 1; s++)
-      for (let x = Math.max(0, s - N + 1); x <= Math.min(N - 1, s); x++) {
-        const y = s - x;
+    for (let d = 0; d < 2 * N - 1; d++)
+      for (let x = Math.max(0, d - N + 1); x <= Math.min(N - 1, d); x++) {
+        const y = d - x;
         const i = y * N + x;
-        if (!is.land[i]) continue;
+        if (!s.land[i]) continue;
+        const T = TERRAIN[BIOME_ORDER[s.region[i]]];
         const [sx, sy] = P(x, y);
-        g.fillStyle =
-          zoneOf(x, y) === 'village' ? T.plaza[is.variant[i] % 2] : T.top[is.variant[i]];
-        if (u0 <= 1) g.fillRect(sx - u0, sy, 2 * u0, u0);
-        else {
-          g.beginPath();
-          g.moveTo(sx, sy);
-          g.lineTo(sx + u0, sy + u0 / 2);
-          g.lineTo(sx, sy + u0);
-          g.lineTo(sx - u0, sy + u0 / 2);
-          g.fill();
-        }
+        g.fillStyle = zoneOf(x, y) === 'village' ? T.plaza[s.variant[i] % 2] : T.top[s.variant[i]];
+        g.fillRect(sx - u0, sy, 2 * u0, u0);
       }
-    // objects
     const k = u0 / 8;
-    for (let s = 0; s < 2 * N - 1; s++)
-      for (let x = Math.max(0, s - N + 1); x <= Math.min(N - 1, s); x++) {
-        const y = s - x;
+    for (let d = 0; d < 2 * N - 1; d++)
+      for (let x = Math.max(0, d - N + 1); x <= Math.min(N - 1, d); x++) {
+        const y = d - x;
         const i = y * N + x;
-        const ob = is.obj[i];
+        const ob = s.obj[i];
         if (!ob) continue;
         const [sx, sy] = P(x + 0.5, y + 0.5);
         if (u0 <= 1 && ob !== LANDMARK) {
-          g.fillStyle = ob === HOUSE ? (is.roofs.get(i) ?? ROOFS[0]) : 'rgba(0,0,0,0.3)';
+          g.fillStyle = ob === HOUSE ? (s.roofs.get(i) ?? ROOFS[0]) : 'rgba(0,0,0,0.28)';
           g.fillRect(Math.round(sx), Math.round(sy - 1), 1, 1);
           continue;
         }
+        const T = TERRAIN[BIOME_ORDER[s.region[i]]];
         const img =
           ob === LANDMARK
-            ? landmark(is.t)
+            ? landmark(s.t)
             : ob === HOUSE
-              ? house(is.roofs.get(i) ?? ROOFS[0])
-              : prop(T.props[ob - 1] as PropKind);
-        const scale = ob === LANDMARK ? Math.max(k * 2.6, 0.5) : k;
-        const w = img.width * scale;
-        const h = img.height * scale;
-        g.drawImage(img, sx - w / 2, sy - h + u0 * 0.3, w, h);
+              ? house(s.roofs.get(i) ?? ROOFS[0])
+              : prop(T.props[(ob - 1) % T.props.length] as PropKind);
+        const scale = ob === LANDMARK ? Math.max(k * 2.6, 0.6) : k;
+        g.drawImage(
+          img,
+          sx - (img.width * scale) / 2,
+          sy - img.height * scale + u0 * 0.3,
+          img.width * scale,
+          img.height * scale,
+        );
       }
-    is.lo.set(u0, c);
-    // keep memory bounded: at most 5 hi-res islands at a time
-    if (u0 === HI_RES) {
-      const hi = [...this.islands.values()].filter((o) => o.lo.has(HI_RES));
-      if (hi.length > 5) hi[0].lo.delete(HI_RES);
+    s.pre.set(u0, c);
+    if (u0 === MID_RES) {
+      const hi = [...this.squares.values()].filter((o) => o.pre.has(MID_RES));
+      if (hi.length > 8) hi[0].pre.delete(MID_RES);
     }
     return c;
   }
@@ -631,12 +705,13 @@ export class WorldView {
       g.lineTo(0, U / 2 + U * 0.7);
       g.fill();
     }
+    // the diamond is grown by half a pixel so neighbouring tiles overlap and leave no seams
     g.fillStyle = color;
     g.beginPath();
-    g.moveTo(U, 0);
-    g.lineTo(2 * U, U / 2);
-    g.lineTo(U, U);
-    g.lineTo(0, U / 2);
+    g.moveTo(U, -0.5);
+    g.lineTo(2 * U + 1, U / 2);
+    g.lineTo(U, U + 0.5);
+    g.lineTo(-1, U / 2);
     g.fill();
     this.tiles.set(key, c);
     return c;
@@ -647,8 +722,9 @@ export class WorldView {
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
     if (!this.visible) return;
+    const now = performance.now();
     if (this.anim) {
-      const k = Math.min(1, (performance.now() - this.anim.t0) / 800);
+      const k = Math.min(1, (now - this.anim.t0) / 800);
       const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
       const f = this.anim.from;
       const prev = this.band;
@@ -657,7 +733,13 @@ export class WorldView {
       this.u = Math.exp(Math.log(f.u) + (Math.log(this.anim.u) - Math.log(f.u)) * e);
       if (this.band !== prev) this.onZoom(this.band);
       if (k >= 1) this.anim = null;
+      this.dirty = true;
     }
+    // idle animation (bobbing, clouds, sparkles) runs slowly: 20 fps close up, 8 fps far away
+    const idle = this.still ? Infinity : this.band === 'street' ? 50 : 125;
+    if (!this.dirty && now - this.lastDraw < idle) return;
+    this.dirty = false;
+    this.lastDraw = now;
     this.draw();
   };
 
@@ -672,26 +754,24 @@ export class WorldView {
     sky.addColorStop(1, '#fbe3cf');
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, this.w, this.h);
-    this.drawClouds(time, 0);
     const band = this.band;
-    this.drawBridges();
     if (band === 'street') this.drawStreet(time);
-    else this.drawIslands(band, time);
-    if (band !== 'street') this.drawClouds(time, 1);
+    else {
+      this.drawClouds(time);
+      this.drawContinent(band, time);
+    }
   }
 
-  private drawClouds(time: number, layer: number) {
+  private drawClouds(time: number) {
     const ctx = this.ctx;
-    const par = layer ? 0.35 : 0.12;
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
     for (const c of this.clouds) {
-      if (c.layer !== layer) continue;
       const span = this.w + 400;
-      const x = ((((c.x * span + time * c.speed - this.x * par * 2) % span) + span) % span) - 200;
+      const x = ((((c.x * span + time * c.speed - this.x * 0.2) % span) + span) % span) - 200;
       const y =
-        ((((c.y * (this.h + 100) - this.y * par) % (this.h + 100)) + this.h + 100) %
+        ((((c.y * (this.h + 100) - this.y * 0.1) % (this.h + 100)) + this.h + 100) %
           (this.h + 100)) -
         20;
-      ctx.fillStyle = layer ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.8)';
       const h = c.w * 0.28;
       ctx.fillRect(Math.round(x), Math.round(y), Math.round(c.w), Math.round(h * 0.5));
       ctx.fillRect(
@@ -700,87 +780,42 @@ export class WorldView {
         Math.round(c.w * 0.5),
         Math.round(h * 0.5),
       );
-      ctx.fillRect(
-        Math.round(x + c.w * 0.45),
-        Math.round(y - h * 0.2),
-        Math.round(c.w * 0.35),
-        Math.round(h * 0.4),
-      );
     }
   }
 
-  /** Rope bridges between neighbouring islands, along the biome centre lines. */
-  private drawBridges() {
+  private drawContinent(band: Band, time: number) {
     const ctx = this.ctx;
-    for (let i = 0; i < BIOME_ORDER.length; i++) {
-      const t = BIOME_ORDER[i];
-      const o = biomeOrigin(t);
-      const is = this.island(t);
-      const mid = BIOME / 2;
-      const right = i % COLS < COLS - 1 ? BIOME_ORDER[i + 1] : null;
-      const down = BIOME_ORDER[i + COLS] ?? null;
-      for (const [nb, axis] of [
-        [right, 'x'],
-        [down, 'y'],
-      ] as const) {
-        if (!nb) continue;
-        const ni = this.island(nb);
-        const a = mid + is.radius - 4;
-        const b = BIOME + mid - ni.radius + 4;
-        const p0 =
-          axis === 'x' ? this.toScreen(o.x + a, o.y + mid) : this.toScreen(o.x + mid, o.y + a);
-        const p1 =
-          axis === 'x' ? this.toScreen(o.x + b, o.y + mid) : this.toScreen(o.x + mid, o.y + b);
-        if (Math.max(p0[0], p1[0]) < -50 || Math.min(p0[0], p1[0]) > this.w + 50) continue;
-        if (Math.max(p0[1], p1[1]) < -50 || Math.min(p0[1], p1[1]) > this.h + 50) continue;
-        const wdt = Math.max(1.5, this.u * 1.6);
-        const sag = this.u * 3;
-        const mx = (p0[0] + p1[0]) / 2;
-        const my = (p0[1] + p1[1]) / 2 + sag;
-        ctx.strokeStyle = '#7a5230';
-        ctx.lineWidth = wdt;
-        ctx.beginPath();
-        ctx.moveTo(p0[0], p0[1]);
-        ctx.quadraticCurveTo(mx, my, p1[0], p1[1]);
-        ctx.stroke();
-        if (this.u >= 2) {
-          ctx.strokeStyle = '#b8864f';
-          ctx.lineWidth = Math.max(1, wdt * 0.55);
-          ctx.setLineDash([this.u * 0.5, this.u * 0.35]);
-          ctx.beginPath();
-          ctx.moveTo(p0[0], p0[1]);
-          ctx.quadraticCurveTo(mx, my, p1[0], p1[1]);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-      }
-    }
-  }
-
-  private drawIslands(band: Band, time: number) {
-    const ctx = this.ctx;
-    const u0 = band === 'town' ? HI_RES : 1;
-    const labels: [string, string, number, number][] = [];
-    for (const t of BIOME_ORDER) {
+    const u0 = band === 'town' ? MID_RES : 1;
+    const budget = { n: 3 };
+    // back to front: squares by (row + col)
+    const order = BIOME_ORDER.map((t, i) => ({ t, d: (i % COLS) + Math.floor(i / COLS) })).sort(
+      (a, b) => a.d - b.d,
+    );
+    for (const { t } of order) {
       const o = biomeOrigin(t);
       const [lx] = this.toScreen(o.x, o.y + BIOME);
       const [, ty] = this.toScreen(o.x, o.y);
       const wdt = 2 * BIOME * this.u;
-      const hgt = BIOME * this.u + 44 * this.u;
+      const hgt = BIOME * this.u + CLIFF * this.u;
       if (lx > this.w || ty > this.h || lx + wdt < 0 || ty + hgt < 0) continue;
-      const is = this.island(t);
-      ctx.drawImage(this.islandCanvas(is, u0), lx, ty, wdt, hgt);
+      const s = this.square(t, budget);
+      if (!s) {
+        // not built yet: a plain diamond in the region colour
+        const p = [
+          this.toScreen(o.x, o.y),
+          this.toScreen(o.x + BIOME, o.y),
+          this.toScreen(o.x + BIOME, o.y + BIOME),
+          this.toScreen(o.x, o.y + BIOME),
+        ];
+        ctx.fillStyle = TERRAIN[t].top[0];
+        ctx.beginPath();
+        ctx.moveTo(p[0][0], p[0][1]);
+        for (const q of p.slice(1)) ctx.lineTo(q[0], q[1]);
+        ctx.fill();
+        continue;
+      }
+      ctx.drawImage(this.squareCanvas(s, u0), lx, ty, wdt, hgt);
       if (band === 'town') this.loadBiome(t);
-      const [cx, cy] = this.toScreen(o.x + BIOME / 2 - is.radius, o.y + BIOME / 2 - is.radius);
-      const langs =
-        TYPE_INFO[t].langs.slice(0, 3).join(' · ') ||
-        (t === 'machine' ? 'agents' : 'everything else');
-      labels.push([
-        TYPE_INFO[t].biome.toUpperCase(),
-        `${langs} · ${is.pop.toLocaleString('en-US')}`,
-        cx,
-        cy,
-      ]);
     }
     if (band === 'town') {
       const r = Math.max(1.5, this.u * 0.9);
@@ -790,8 +825,6 @@ export class WorldView {
         for (const [x, y, , c] of dots) {
           const [px, py] = this.toScreen(x + 0.5, y + 0.5);
           if (px < -4 || py < -4 || px > this.w + 4 || py > this.h + 4) continue;
-          ctx.fillStyle = 'rgba(0,0,0,0.35)';
-          ctx.fillRect(px - r / 2, py - r * 0.3, r, r * 0.6);
           ctx.fillStyle = c ? '#ffffff' : col;
           ctx.fillRect(px - r / 2, py - r * 1.6, r, r * 1.3);
         }
@@ -809,11 +842,25 @@ export class WorldView {
         );
       }
     }
-    const size = band === 'world' ? Math.max(20, Math.min(36, this.u * 30)) : 36;
+    const size = band === 'world' ? Math.max(18, Math.min(34, this.u * 40)) : 34;
     const ns = this.visibleNotable().sort((a, b) => a.x + a.y - (b.x + b.y));
     for (const n of ns) this.drawNotable(n, size, time);
-    for (const [name, sub, x, y] of labels)
-      this.banner(name, x, y - 8, band === 'world' ? 12 : 16, '#ffffff', sub);
+    for (const t of BIOME_ORDER) {
+      const o = biomeOrigin(t);
+      const [cx, cy] = this.toScreen(o.x + BIOME / 2, o.y + BIOME / 2);
+      if (cx < -100 || cy < -40 || cx > this.w + 100 || cy > this.h + 40) continue;
+      const langs =
+        TYPE_INFO[t].langs.slice(0, 3).join(' · ') ||
+        (t === 'machine' ? 'agents' : 'everything else');
+      this.banner(
+        TYPE_INFO[t].biome.toUpperCase(),
+        cx,
+        cy - (band === 'world' ? 34 : this.u * 40),
+        band === 'world' ? 12 : 15,
+        '#ffffff',
+        langs,
+      );
+    }
   }
 
   private drawStreet(time: number) {
@@ -821,45 +868,47 @@ export class WorldView {
     this.loadChunks();
     const v = this.viewRect(6);
     const U = this.u;
+    const budget = { n: 2 };
     const objs: { depth: number; draw: () => void }[] = [];
     for (const t of BIOME_ORDER) {
       const o = biomeOrigin(t);
       if (o.x > v.x1 || o.y > v.y1 || o.x + BIOME < v.x0 || o.y + BIOME < v.y0) continue;
-      const is = this.island(t);
-      const T = TERRAIN[t];
+      const s = this.square(t, budget);
+      if (!s) continue;
       const x0 = Math.max(v.x0, o.x) - o.x;
       const x1 = Math.min(v.x1, o.x + BIOME - 1) - o.x;
       const y0 = Math.max(v.y0, o.y) - o.y;
       const y1 = Math.min(v.y1, o.y + BIOME - 1) - o.y;
-      for (let s = x0 + y0; s <= x1 + y1; s++)
-        for (let x = Math.max(x0, s - y1); x <= Math.min(x1, s - y0); x++) {
-          const y = s - x;
+      for (let d = x0 + y0; d <= x1 + y1; d++)
+        for (let x = Math.max(x0, d - y1); x <= Math.min(x1, d - y0); x++) {
+          const y = d - x;
           const i = y * BIOME + x;
-          if (!is.land[i]) continue;
+          if (!s.land[i]) continue;
           const [sx, sy] = this.toScreen(o.x + x, o.y + y);
           if (sx < -2 * U || sx > this.w + 2 * U || sy < -2 * U || sy > this.h + U) continue;
-          if (is.cliff[i]) {
+          const T = TERRAIN[BIOME_ORDER[s.region[i]]];
+          if (s.cliff[i]) {
             ctx.fillStyle = T.under;
-            ctx.fillRect(sx - U * 0.7, sy + U, U * 1.4, (is.cliff[i] * U) / 2);
+            ctx.fillRect(sx - U * 0.7, sy + U, U * 1.4, (s.cliff[i] * U) / 2);
           }
           const z = zoneOf(x, y);
           const col =
             z === 'village'
-              ? T.plaza[is.variant[i] % 2]
+              ? T.plaza[s.variant[i] % 2]
               : z === 'town' && this.inTown(t, x, y)
                 ? T.plaza[1]
-                : T.top[is.variant[i]];
-          const img = this.tile(col, is.cliff[i] ? T.side : null);
+                : T.top[s.variant[i]];
+          const img = this.tile(col, s.cliff[i] ? T.side : null);
           ctx.drawImage(img, sx - U, sy, 2 * U, img.height / this.dpr);
-          const ob = is.obj[i];
+          const ob = s.obj[i];
           if (ob) {
             const [cx, cy] = this.toScreen(o.x + x + 0.5, o.y + y + 0.5);
             const im =
               ob === LANDMARK
                 ? landmark(t)
                 : ob === HOUSE
-                  ? house(is.roofs.get(i) ?? ROOFS[0])
-                  : prop(T.props[ob - 1] as PropKind);
+                  ? house(s.roofs.get(i) ?? ROOFS[0])
+                  : prop(T.props[(ob - 1) % T.props.length] as PropKind);
             const scale = (U / 8) * (ob === LANDMARK ? 2.6 : 1);
             const w = im.width * scale;
             const h = im.height * scale;
@@ -869,20 +918,6 @@ export class WorldView {
             });
           }
         }
-      for (const f of is.falls) {
-        const [sx, sy] = this.toScreen(o.x + (f % BIOME), o.y + Math.floor(f / BIOME));
-        if (sx < -U * 2 || sx > this.w + U * 2 || sy > this.h) continue;
-        ctx.fillStyle = T.waterfall!;
-        ctx.fillRect(sx - U * 0.7, sy + U, U * 1.4, U * 30);
-        ctx.fillStyle = 'rgba(255,255,255,0.6)';
-        for (let k = 0; k < 6; k++)
-          ctx.fillRect(
-            sx - U * 0.5 + (k % 3) * U * 0.4,
-            sy + U + ((time * 60 + k * 37) % (U * 30)),
-            U * 0.15,
-            U * 1.2,
-          );
-      }
     }
     for (const c of this.chunks.values()) {
       if (c === 'loading') continue;
@@ -911,12 +946,14 @@ export class WorldView {
 
   private banner(text: string, x: number, y: number, size: number, color: string, sub?: string) {
     const ctx = this.ctx;
-    ctx.font = `800 ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    const f1 = `800 ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    const f2 = `600 ${Math.round(size * 0.72)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.font = f1;
     let w = ctx.measureText(text).width + size * 1.2;
     if (sub) {
-      ctx.font = `600 ${Math.round(size * 0.72)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      ctx.font = f2;
       w = Math.max(w, ctx.measureText(sub).width + size * 1.2);
     }
     const h = size * 1.7 + (sub ? size * 1.1 : 0);
@@ -924,11 +961,11 @@ export class WorldView {
     ctx.beginPath();
     ctx.roundRect(x - w / 2, y - size * 0.85, w, h, size * 0.5);
     ctx.fill();
-    ctx.font = `800 ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    ctx.font = f1;
     ctx.fillStyle = color;
     ctx.fillText(text, x, y);
     if (sub) {
-      ctx.font = `600 ${Math.round(size * 0.72)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      ctx.font = f2;
       ctx.fillStyle = 'rgba(255,255,255,0.78)';
       ctx.fillText(sub, x, y + size * 1.15);
     }
@@ -939,42 +976,33 @@ export class WorldView {
     const [sx, sy] = this.toScreen(g.x + 0.5, g.y + 0.5);
     const size = this.creatureSize();
     if (sx < -size || sy < -size * 0.2 || sx > this.w + size || sy > this.h + size) return;
-    const bob = Math.sin(time * 2.2 + (g.id % 97)) * this.u * 0.08;
+    const bob = this.still ? 0 : Math.sin(time * 2.2 + (g.id % 97)) * this.u * 0.08;
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath();
-    ctx.ellipse(sx, sy, size * 0.3, size * 0.09, 0, 0, Math.PI * 2);
+    ctx.ellipse(sx, sy, size * 0.22, size * 0.07, 0, 0, Math.PI * 2);
     ctx.fill();
     if (this.selected?.id === g.id || this.me === g.id) {
       ctx.strokeStyle = this.selected?.id === g.id ? '#ffffff' : '#ffd666';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.ellipse(sx, sy, size * 0.42, size * 0.14, 0, 0, Math.PI * 2);
+      ctx.ellipse(sx, sy, size * 0.34, size * 0.11, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
     if (g.f === 3 || g.a) {
-      const pulse = 0.5 + 0.5 * Math.sin(time * 3 + g.id);
-      const grd = ctx.createRadialGradient(sx, sy - size * 0.4, 0, sx, sy - size * 0.4, size * 0.7);
-      grd.addColorStop(
-        0,
-        g.a
-          ? `rgba(255,214,102,${0.25 + pulse * 0.15})`
-          : `rgba(255,255,255,${0.15 + pulse * 0.12})`,
-      );
-      grd.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = grd;
-      ctx.fillRect(sx - size, sy - size * 1.2, size * 2, size * 1.4);
+      const im = glow(g.a ? '255,214,102' : '255,255,255');
+      ctx.drawImage(im, sx - size * 0.6, sy - size, size * 1.2, size * 1.2);
     }
     const [x, y, w, h] = this.creatureRect(g);
     ctx.drawImage(sprite(g), x, y + bob, w, h);
-    if (g.s) this.sparkle(sx, sy - size * 0.6, size, time, g.id);
+    if (g.s) this.sparkle(sx, sy - size * 0.5, size, time, g.id);
     if (this.u >= 30 || this.selected?.id === g.id || this.me === g.id) {
       ctx.font = `600 ${Math.min(13, 8 + this.u * 0.2)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillText(g.login, sx + 1, sy + size * 0.12 + 1);
-      ctx.fillStyle = g.st === 'c' ? '#ffffff' : 'rgba(255,255,255,0.85)';
-      ctx.fillText(g.login, sx, sy + size * 0.12);
+      ctx.fillText(g.login, sx + 1, sy + size * 0.1 + 1);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(g.login, sx, sy + size * 0.1);
     }
   }
 
@@ -983,10 +1011,9 @@ export class WorldView {
     ctx.fillStyle = '#fff6b0';
     for (let k = 0; k < 3; k++) {
       const a = time * 1.5 + k * 2.1 + id;
-      const r = size * 0.45;
-      const px = x + Math.cos(a) * r;
-      const py = y + Math.sin(a) * r * 0.5;
-      const s = Math.max(1, size * 0.04) * (1 + Math.sin(time * 6 + k));
+      const px = x + Math.cos(a) * size * 0.4;
+      const py = y + Math.sin(a) * size * 0.2;
+      const s = Math.max(1, size * 0.035) * (1 + Math.sin(time * 6 + k));
       ctx.fillRect(px - s, py, s * 2 + 1, 1.5);
       ctx.fillRect(px, py - s, 1.5, s * 2 + 1);
     }
@@ -998,30 +1025,18 @@ export class WorldView {
     if (cx < -size || cy < -size || cx > this.w + size || cy > this.h + size) return;
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath();
-    ctx.ellipse(cx, cy, size * 0.3, size * 0.09, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, cy, size * 0.25, size * 0.08, 0, 0, Math.PI * 2);
     ctx.fill();
-    if (n.f === 3) {
-      const grd = ctx.createRadialGradient(
-        cx,
-        cy - size * 0.45,
-        0,
-        cx,
-        cy - size * 0.45,
-        size * 0.8,
-      );
-      grd.addColorStop(0, 'rgba(255,230,140,0.45)');
-      grd.addColorStop(1, 'rgba(255,230,140,0)');
-      ctx.fillStyle = grd;
-      ctx.fillRect(cx - size, cy - size * 1.3, size * 2, size * 1.6);
-    }
-    const bob = Math.sin(time * 2 + (n.id % 50)) * 1.2;
+    if (n.f === 3)
+      ctx.drawImage(glow('255,230,140'), cx - size * 0.7, cy - size * 1.1, size * 1.4, size * 1.4);
+    const bob = this.still ? 0 : Math.sin(time * 2 + (n.id % 50)) * 1.2;
     ctx.drawImage(sprite(n), cx - size / 2, cy - size * 0.92 + bob, size, size);
-    if (n.s) this.sparkle(cx, cy - size * 0.55, size, time, n.id);
+    if (n.s) this.sparkle(cx, cy - size * 0.5, size, time, n.id);
     if (this.selected?.id === n.id) {
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.ellipse(cx, cy, size * 0.42, size * 0.14, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, cy, size * 0.36, size * 0.12, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
   }

@@ -153,7 +153,7 @@
     await Promise.all([loadMe(), loadTowns()]);
     const n = await api.notable();
     view?.invalidate();
-    view?.setNotable(n.data.g, n.data.towns, n.data.pops);
+    view?.setNotable(n.data.g, n.data.towns);
     if (me) view?.flyTo(me.x, me.y, 18);
   }
 
@@ -176,7 +176,7 @@
     (async () => {
       const [n] = await Promise.all([api.notable(), loadMe()]);
       total = n.data.total;
-      view!.setNotable(n.data.g, n.data.towns, n.data.pops);
+      view!.setNotable(n.data.g, n.data.towns);
       loaded = true;
       const focus = new URLSearchParams(location.search).get('focus');
       if (focus) {
