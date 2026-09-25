@@ -1,5 +1,5 @@
 /** Generates favicon + default share image from a fixed creature. Output goes to apps/web/public. */
-import { writeFileSync, existsSync } from 'node:fs';
+import { copyFileSync, writeFileSync, existsSync } from 'node:fs';
 import {
   compose,
   encodeIndexedPng,
@@ -31,10 +31,15 @@ writeFileSync(
   out + 'favicon.svg',
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}" shape-rendering="crispEdges">${rects}</svg>`,
 );
-writeFileSync(
-  out + 'og-default.png',
-  ogPng({ ...mascot, login: 'every developer', level: 1 }, art),
-);
+// The default share image is a render of the city's plaza when the private art repo holds one
+// (it shows the real art, so it never lives in this repo); otherwise the mascot card.
+const city = '../gitemon-art/og-city.png';
+if (existsSync(city)) copyFileSync(city, out + 'og-default.png');
+else
+  writeFileSync(
+    out + 'og-default.png',
+    ogPng({ ...mascot, login: 'every developer', level: 1 }, art),
+  );
 console.log('icons written with', art.id);
 
 /** Scale then centre on an n×n canvas; index 0 = background. */

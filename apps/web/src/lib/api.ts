@@ -6,6 +6,7 @@ export interface Me extends MapGitemon {
   bonus: number;
   town: { id: number; name: string } | null;
   catchesLeft: number;
+  home: { cc: string; city: string | null; shown: boolean } | null;
 }
 export interface Detail {
   g: MapGitemon;
@@ -16,6 +17,7 @@ export interface Detail {
   machine: boolean;
   town: { id: number; name: string } | null;
   caughtByMe: { bonded: boolean } | null;
+  home: { cc: string; city: string | null } | null;
 }
 export interface Town {
   id: number;
@@ -59,6 +61,7 @@ export const api = {
   catch: (id: number) =>
     post<{ ok?: boolean; n?: number; left?: number; error?: string }>(`/api/catch/${id}`),
   release: (hidden: boolean) => post<{ ok: boolean }>('/api/release', { hidden }),
+  hometown: (show: boolean) => post<{ ok: boolean }>('/api/me/hometown', { show }),
   found: (name: string) =>
     post<{ ok?: boolean; id?: number; error?: string }>('/api/towns', { name }),
   join: (id: number) => post<{ ok?: boolean; error?: string }>(`/api/towns/${id}/join`),

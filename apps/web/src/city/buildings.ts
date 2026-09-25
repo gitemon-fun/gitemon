@@ -225,6 +225,29 @@ const windowRow = (w: number, y: number, z: number, n: number) => {
   return out;
 };
 
+/**
+ * A player's house (V2-D5): a cottage whose walls are cream and whose roof is WHITE in the vertex
+ * colours, so the instance colour paints the roof in the owner's type colour. Returned in two parts.
+ */
+export function homeParts(): { walls: THREE.BufferGeometry; roof: THREE.BufferGeometry } {
+  const cream = new THREE.Color('#f6efe2');
+  const wood = new THREE.Color('#7a5230');
+  const glow = new THREE.Color('#ffe08a');
+  const white = new THREE.Color('#ffffff');
+  const walls = mergeGeometries([
+    part(box(0.8, 0.55, 0.6), cream),
+    part(box(0.16, 0.3, 0.02, 0, 0, 0.301), wood),
+    ...windowRow(0.55, 0.28, 0.301, 2).map((g) => part(g, glow)),
+    part(cyl(0.02, 0.02, 0.35, 5, 0.46, 0, 0.42), wood),
+    part(box(0.12, 0.08, 0.06, 0.46, 0.35, 0.42), wood),
+  ])!;
+  const roof = mergeGeometries([
+    part(gable(0.92, 0.74, 0.42, 0.55), white),
+    part(box(0.1, 0.22, 0.1, -0.24, 0.72, -0.1), white),
+  ])!;
+  return { walls, roof };
+}
+
 /** Archetype geometry on a 1×1 footprint, ~1 storey (≈1 unit before scaling) per `h`. */
 export function archetype(s: DistrictStyle): THREE.BufferGeometry {
   const C = (k: Col) =>

@@ -1,21 +1,26 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
+    COUNTRY_NAME,
     SHAPE_NAME,
     STAT_MEANING,
     TYPE_INFO,
+    flag,
     type MapGitemon,
     type Stats,
   } from '@gitemon/shared';
   import { api, ERRORS, type Detail, type Me, type Town } from './lib/api';
-  import { WorldView } from './lib/world';
+  import { CityScene } from './city/scene';
+  import { loadCity, type LoadedCity } from './city/load';
   import Sprite from './lib/Sprite.svelte';
 
-  let canvas: HTMLCanvasElement;
-  let view: WorldView | null = null;
+  // Gitemon City is the map (GRANDPLAN v2 §9): one dense city, districts by language.
+  let host: HTMLDivElement;
+  let scene: CityScene | null = null;
+  let town: LoadedCity | null = null;
   let me = $state<Me | null>(null);
   let loaded = $state(false);
-  let band = $state<'world' | 'town' | 'street'>('world');
+  let failed = $state(false);
   let picked = $state<MapGitemon | null>(null);
   let detail = $state<Detail | null>(null);
   let panel = $state<'dex' | 'towns' | 'me' | null>(null);
@@ -49,7 +54,6 @@
   async function loadMe() {
     const r = await api.me();
     me = r.data.player;
-    if (view) view.me = me?.id ?? null;
   }
   async function loadDex() {
     if (!me) return;
@@ -59,10 +63,24 @@
     towns = (await api.towns()).data.towns ?? [];
   }
 
+  /** Fly to a Gitemon in the city, stop it walking, ring it and open its sheet. */
+  function show(g: MapGitemon, zoom = 3.2) {
+    const p = town?.byId.get(g.id);
+    if (p && scene) {
+      const held = scene.hold(p);
+      scene.flyTo(held.spot.x, held.spot.z, zoom);
+      scene.select(held);
+    }
+    select(g);
+  }
+
   async function select(g: MapGitemon | null) {
     picked = g;
     detail = null;
-    if (!g) return;
+    if (!g) {
+      scene?.select(null);
+      return;
+    }
     const r = await api.detail(g.id);
     if (r.status === 200 && picked?.id === g.id) detail = r.data;
   }
@@ -76,10 +94,9 @@
       const r = await api.find(login);
       if (r.status === 202) say('That Gitemon is hatching. Try again in a few minutes.');
       else if (r.data.g) {
-        view?.upsert(r.data.g);
-        view?.flyTo(r.data.g.x, r.data.g.y, 22);
-        if (view) view.selected = r.data.g;
-        select(r.data.g);
+        show(r.data.g);
+        if (!town?.byId.has(r.data.g.id))
+          say('Just hatched. It moves into the city within ten minutes.');
         panel = null;
         if (location.pathname !== '/map') history.replaceState({}, '', '/map');
       } else
@@ -116,7 +133,6 @@
     await api.release(hidden);
     busy = false;
     await loadMe();
-    view?.invalidate();
     say(
       hidden ? 'Released. Your Gitemon is hidden everywhere.' : 'Your Gitemon is back on the map.',
     );
@@ -151,49 +167,53 @@
   }
   async function afterMove() {
     await Promise.all([loadMe(), loadTowns()]);
-    const n = await api.notable();
-    view?.invalidate();
-    view?.setNotable(n.data.g, n.data.towns);
-    if (me) view?.flyTo(me.x, me.y, 18);
+  }
+
+  async function setHometown(showIt: boolean) {
+    busy = true;
+    await api.hometown(showIt);
+    busy = false;
+    await loadMe();
+    say(showIt ? 'Your hometown shows on your profile.' : 'Your hometown is hidden.');
   }
 
   async function signOut() {
     await api.logout();
     me = null;
-    if (view) view.me = null;
     go('/map');
   }
 
   onMount(() => {
-    view = new WorldView(
-      canvas,
-      (g) => select(g),
-      (b) => (band = b),
-    );
-    band = view.band;
+    scene = new CityScene(host, (p) => select(p ? p.g : null));
     window.addEventListener('popstate', route);
     route();
     (async () => {
-      const [n] = await Promise.all([api.notable(), loadMe()]);
-      total = n.data.total;
-      view!.setNotable(n.data.g, n.data.towns);
+      const [loadedCity] = await Promise.all([loadCity(), loadMe()]);
+      if (!loadedCity) {
+        failed = true;
+        return;
+      }
+      town = loadedCity;
+      total = loadedCity.placed.length;
+      scene!.build(loadedCity.city, loadedCity.homes);
+      scene!.setCreatures(loadedCity.placed);
+      scene!.fitCity(loadedCity.city.radius);
       loaded = true;
       const focus = new URLSearchParams(location.search).get('focus');
       if (focus) {
         query = focus;
         await search();
-      } else if (me && !me.hidden) {
-        view!.flyTo(me.x, me.y, 18);
-      }
+      } else if (me && !me.hidden && town.byId.has(me.id)) show(me, 2.6);
+      else scene!.flyTo(0, 0, 1.3);
     })();
-    return () => view?.destroy();
+    return () => scene?.destroy();
   });
 
   const typeLine = (g: MapGitemon) =>
     g.t2 ? `${TYPE_INFO[g.t1].name} / ${TYPE_INFO[g.t2].name}` : TYPE_INFO[g.t1].name;
 </script>
 
-<canvas bind:this={canvas} class="map" aria-label="The Gitemon world map"></canvas>
+<div bind:this={host} class="map" role="application" aria-label="Gitemon City"></div>
 
 <header class="bar">
   <a class="brand" href="/" title="Gitemon home">Gitemon</a>
@@ -232,16 +252,22 @@
 </header>
 
 <div class="zoom" aria-label="Zoom">
-  <button onclick={() => view?.zoomBy(1.8)} aria-label="Zoom in">+</button>
-  <button onclick={() => view?.zoomBy(1 / 1.8)} aria-label="Zoom out">−</button>
-  <button onclick={() => view?.fit()} aria-label="Whole world" class="fit">◱</button>
+  <button onclick={() => scene?.zoomBy(1.6)} aria-label="Zoom in">+</button>
+  <button onclick={() => scene?.zoomBy(1 / 1.6)} aria-label="Zoom out">−</button>
+  <button onclick={() => scene?.rotate(1)} aria-label="Turn the city">⟳</button>
+  <button onclick={() => scene?.flyTo(0, 0, 1.3)} aria-label="Back to the plaza" class="fit"
+    >⌂</button
+  >
 </div>
 
-{#if loaded && band !== 'street' && !picked && !panel}
+{#if failed}
+  <div class="hint">The city could not load. Try again in a minute.</div>
+{:else if !loaded}
+  <div class="hint">Building the city…</div>
+{:else if !picked && !panel}
   <div class="hint">
-    {band === 'world'
-      ? `${total.toLocaleString('en-US')} Gitemon. Only the notable ones are visible from here — zoom in to see everyone.`
-      : 'Zoom in further to see each Gitemon.'}
+    {total.toLocaleString('en-US')} Gitemon live here. The most notable stand on the plaza; every language
+    has its own district. Tap anyone.
   </div>
 {/if}
 
@@ -252,7 +278,7 @@
       onclick={() => {
         picked = null;
         detail = null;
-        if (view) view.selected = null;
+        scene?.select(null);
       }}
       aria-label="Close">×</button
     >
@@ -292,7 +318,9 @@
         {/each}
       </div>
       <p class="dim small">
-        {TYPE_INFO[picked.t1].biome}{detail.town ? ` · ${detail.town.name}` : ''} · caught by {detail.caughtCount}
+        {TYPE_INFO[picked.t1].biome}{detail.town ? ` · ${detail.town.name}` : ''} · caught by {detail.caughtCount}{detail.home
+          ? ` · ${flag(detail.home.cc)} ${detail.home.city ? `${detail.home.city}, ` : ''}${COUNTRY_NAME[detail.home.cc] ?? detail.home.cc}`
+          : ''}
       </p>
     {/if}
     <div class="actions">
@@ -333,9 +361,7 @@
               onclick={() => {
                 panel = null;
                 history.pushState({}, '', '/map');
-                view?.flyTo(d.x, d.y, 22);
-                if (view) view.selected = d;
-                select(d);
+                show(d);
               }}
             >
               <Sprite g={d} size={56} />
@@ -347,7 +373,9 @@
       {/if}
     {:else if panel === 'towns'}
       <h2>Towns</h2>
-      <p class="dim">Your home is your language's biome. A town is a group you choose.</p>
+      <p class="dim">
+        Your home is your language's district in the city. A town is a group you choose.
+      </p>
       {#if me}
         {#if me.town}
           <p>
@@ -400,10 +428,20 @@
       </div>
       <p>{me.catchesLeft} catches left today.</p>
       <p class="dim">
-        {me.town
-          ? `You live in ${me.town.name}.`
-          : `You live in the ${TYPE_INFO[me.t1].biome} starter village.`}
+        You have a house in {TYPE_INFO[me.t1].biome}{me.town
+          ? ` and belong to ${me.town.name}`
+          : ''}.
       </p>
+      {#if me.home}
+        <p class="dim">
+          Hometown: {flag(me.home.cc)}
+          {me.home.city ? `${me.home.city}, ` : ''}{COUNTRY_NAME[me.home.cc] ?? me.home.cc}
+          ({me.home.shown ? 'shown' : 'hidden'} on your profile).
+          <button class="link" disabled={busy} onclick={() => setHometown(!me!.home!.shown)}
+            >{me.home.shown ? 'Hide it' : 'Show it'}</button
+          >
+        </p>
+      {/if}
       <div class="actions">
         <a class="btn" href={'/' + me.login}>Public profile</a>
         {#if me.hidden}

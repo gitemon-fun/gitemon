@@ -54,4 +54,19 @@ describe('city layout', () => {
     }
     expect(hits).toBe(0);
   });
+
+  it('gives every door a house, nearest the square first', () => {
+    city.districts.forEach((d, i) => {
+      const doors = city.doors[i]!;
+      doors.forEach((door, k) => {
+        const lot = city.lots[city.doorLots[i]![k]!]!;
+        expect(lot.house).toBe(true);
+        expect(Math.hypot(door.x - lot.x, door.z - lot.z)).toBeLessThan(lot.depth);
+        if (k)
+          expect(Math.hypot(door.x - d.square.x, door.z - d.square.z)).toBeGreaterThanOrEqual(
+            Math.hypot(doors[k - 1]!.x - d.square.x, doors[k - 1]!.z - d.square.z),
+          );
+      });
+    });
+  });
 });

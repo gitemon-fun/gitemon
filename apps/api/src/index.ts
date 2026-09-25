@@ -23,6 +23,9 @@ import {
   privacyPage,
   profilePage,
   termsPage,
+  worldPage,
+  type WorldCity,
+  type WorldCountry,
 } from './pages.js';
 import {
   byId,
@@ -215,6 +218,7 @@ app.get('/api/me', async (c) => {
     player: {
       ...toMap(r),
       hidden: r.hidden,
+      home: r.country ? { cc: r.country, city: r.city, shown: !r.hide_home } : null,
       admin: !!p.is_admin,
       bonus: await bonusLevels(c.env.DB, p.id),
       town,
@@ -333,12 +337,12 @@ app.get('/api/district/:t', async (c) => {
 
 /**
  * Gitemon City: every resident, most notable first, as plain arrays (cheap to serialise under the
- * free plan's CPU limit): [id, login, t1, t2, shape, form, shiny, level, claimed, aura].
+ * free plan's CPU limit): [id, login, t1, t2, shape, form, shiny, level, claimed, aura, claimedAt].
  */
 app.get('/api/city', (c) =>
   edgeCached(c, 600, async () => {
     const rows = await c.env.DB.prepare(
-      `SELECT id, login, t1, t2, shape, form, shiny, level, status = 'claimed', COALESCE(aura_until > ?, 0)
+      `SELECT id, login, t1, t2, shape, form, shiny, level, status = 'claimed', COALESCE(aura_until > ?, 0), claimed_at
        FROM gitemon WHERE hidden = 0 ORDER BY notable DESC, id LIMIT 40000`,
     )
       .bind(now())
@@ -380,6 +384,7 @@ app.get('/api/gitemon/:id', async (c) => {
     machine: !!r.machine,
     town,
     caughtByMe: caught ? { bonded: !!caught.bonded } : null,
+    home: r.country && !r.hide_home ? { cc: r.country, city: r.city } : null,
   });
 });
 
@@ -638,19 +643,64 @@ app.get('/', async (c) =>
     });
   }),
 );
+app.get('/world', async (c) => {
+  const cache = (caches as unknown as { default: Cache }).default;
+  const key = new Request(new URL('/world', c.req.url).toString());
+  const hit = await cache.match(key);
+  if (hit) return hit;
+  const db = c.env.DB;
+  const [countries, cities, counts] = await db.batch([
+    db.prepare(
+      `SELECT country, n, login AS top_login, level AS top_level, t1 AS top_t1 FROM (
+         SELECT country, login, level, t1, COUNT(*) OVER (PARTITION BY country) AS n,
+                ROW_NUMBER() OVER (PARTITION BY country ORDER BY notable DESC, id) AS rk
+         FROM gitemon WHERE country IS NOT NULL AND hidden = 0 AND hide_home = 0)
+       WHERE rk = 1 ORDER BY n DESC, country LIMIT 120`,
+    ),
+    db.prepare(
+      `SELECT country, city, COUNT(*) AS n FROM gitemon
+       WHERE city IS NOT NULL AND hidden = 0 AND hide_home = 0
+       GROUP BY country, city ORDER BY n DESC, city LIMIT 60`,
+    ),
+    db.prepare(
+      `SELECT SUM(country IS NOT NULL AND hide_home = 0) AS placed, COUNT(*) AS total FROM gitemon WHERE hidden = 0`,
+    ),
+  ]);
+  const cnt = counts!.results[0] as { placed: number; total: number };
+  const res = html(
+    c,
+    worldPage(
+      countries!.results as unknown as WorldCountry[],
+      cities!.results as unknown as WorldCity[],
+      cnt.placed ?? 0,
+      cnt.total,
+    ),
+    200,
+    3600,
+  );
+  c.executionCtx.waitUntil(cache.put(key, res.clone()));
+  return res;
+});
+
+/** The owner's choice to show or hide their hometown (shown by default, V2-D6). */
+app.post('/api/me/hometown', async (c) => {
+  const p = c.get('player');
+  if (!p) return c.json({ error: 'signin' }, 401);
+  const { show } = await c.req.json<{ show: boolean }>();
+  await c.env.DB.prepare('UPDATE gitemon SET hide_home = ? WHERE id = ?')
+    .bind(show ? 0 : 1, p.id)
+    .run();
+  return c.json({ ok: true, show: !!show });
+});
+
 app.get('/privacy', (c) => html(c, privacyPage(), 200, 3600));
 app.get('/terms', (c) => html(c, termsPage(), 200, 3600));
 
 app.get('*', async (c) => {
   const path = c.req.path;
   if (SPA.has(path)) return spa(c);
-  if (CITY.has(path)) {
-    const res = await c.env.STATIC.fetch(new Request(new URL('/city.html', c.req.url)));
-    return new Response(res.body, {
-      status: 200,
-      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
-    });
-  }
+  // the v2 preview address: the city is the map now
+  if (CITY.has(path)) return c.redirect('/map', 301);
   if (path.includes('.') || path.startsWith('/assets/')) {
     const res = await c.env.STATIC.fetch(c.req.raw);
     if (res.status !== 404) return res;

@@ -12,7 +12,7 @@ import {
   type TypeId,
 } from '@gitemon/shared';
 import { Crowd, type Placed } from './crowd';
-import { DISTRICT_STYLE, archetype } from './buildings';
+import { DISTRICT_STYLE, archetype, homeParts } from './buildings';
 
 /**
  * Gitemon City renderer (GRANDPLAN v2 §3, §7): Transit-style low-poly blocks under a fixed
@@ -270,7 +270,8 @@ export class CityScene {
 
   // ---- building the city ---------------------------------------------------------------------------
 
-  build(city: City) {
+  /** homes: lot index → the owner's roof colour (claimed players, V2-D5) */
+  build(city: City, homes = new Map<number, string>()) {
     const g = new THREE.Group();
     this.scene.add(g);
     const flat = (geo: THREE.BufferGeometry, color: string, y = 0) => {
@@ -299,7 +300,7 @@ export class CityScene {
     flat(new THREE.RingGeometry(CANAL_IN - 1.2, CANAL_IN, 96), '#9d9384', 0.03);
     flat(new THREE.RingGeometry(CANAL_OUT, CANAL_OUT + 1.2, 96), '#9d9384', 0.03);
     this.buildRoads(city, g);
-    this.buildBuildings(city, g);
+    this.buildBuildings(city, g, homes);
     this.buildDecor(city, g);
     this.dirty = true;
   }
@@ -343,21 +344,44 @@ export class CityScene {
     );
   }
 
-  private buildBuildings(city: City, g: THREE.Group) {
+  private buildBuildings(city: City, g: THREE.Group, homes: Map<number, string>) {
     // one instanced archetype per district style (buildings.ts): cosy low-rise, facing its road
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
     const col = new THREE.Color();
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    const place = (l: City['lots'][number]) => {
+      const a = Math.atan2(l.z, l.x);
+      // the front (+z of the archetype) looks at the road it faces
+      q.setFromAxisAngle(up, Math.atan2(-Math.cos(a) * l.face, -Math.sin(a) * l.face));
+    };
+    if (homes.size) {
+      const { walls, roof } = homeParts();
+      const wm = new THREE.InstancedMesh(walls, mat, homes.size);
+      const rm = new THREE.InstancedMesh(roof, mat, homes.size);
+      let k = 0;
+      for (const [i, colour] of homes) {
+        const l = city.lots[i]!;
+        place(l);
+        m.compose(
+          new THREE.Vector3(l.x, 0, l.z),
+          q,
+          new THREE.Vector3(l.w * 0.8, 6.4, l.depth * 0.8),
+        );
+        wm.setMatrixAt(k, m);
+        rm.setMatrixAt(k, m);
+        wm.setColorAt(k, col.set('#ffffff'));
+        rm.setColorAt(k++, col.set(colour));
+      }
+      g.add(wm, rm);
+    }
     city.districts.forEach((d, di) => {
-      const lots = city.lots.filter((l) => l.d === di);
+      const lots = city.lots.filter((l, i) => l.d === di && !homes.has(i));
       if (!lots.length) return;
       const mesh = new THREE.InstancedMesh(archetype(DISTRICT_STYLE[d.t]), mat, lots.length);
       lots.forEach((l, k) => {
-        const a = Math.atan2(l.z, l.x);
-        // the front (+z of the archetype) looks at the road it faces
-        q.setFromAxisAngle(up, Math.atan2(-Math.cos(a) * l.face, -Math.sin(a) * l.face));
+        place(l);
         const h = hash32(`b${di}:${k}`);
         const sw = l.w * (0.78 + (h % 12) / 100);
         const sd = l.depth * (0.8 + ((h >>> 4) % 10) / 100);

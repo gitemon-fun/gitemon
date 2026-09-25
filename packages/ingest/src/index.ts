@@ -28,7 +28,7 @@ export type NotFound = { notFound: true };
 const USER_QUERY = `query($login:String!){
   rateLimit{remaining resetAt}
   user(login:$login){
-    databaseId login name createdAt
+    databaseId login name createdAt location
     followers{totalCount}
     repositories(first:100, ownerAffiliations:OWNER, privacy:PUBLIC, orderBy:{field:STARGAZERS,direction:DESC}){
       nodes{ name stargazerCount isFork primaryLanguage{name} }
@@ -82,6 +82,7 @@ interface UserData {
     login: string;
     name: string | null;
     createdAt: string;
+    location: string | null;
     followers: { totalCount: number };
     repositories: {
       nodes: {
@@ -183,6 +184,7 @@ export async function fetchSnapshot(
     login: u.login,
     name: u.name,
     createdAt: u.createdAt,
+    location: u.location,
     isBot: false,
     followers: u.followers.totalCount,
     repos: u.repositories.nodes.map((r) => ({

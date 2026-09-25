@@ -16,3 +16,5 @@ apps/web/public/favicon.svg
 apps/web/public/favicon.png
 apps/web/public/apple-touch-icon.png
 apps/web/public/og-default.png
+
+packages/ingest/src/geo-data.ts

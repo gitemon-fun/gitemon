@@ -1,11 +1,11 @@
 # Gitemon
 
-Every GitHub developer, hatched into a pixel creature on one shared map — **[gitemon.fun](https://gitemon.fun)**.
+Every GitHub developer, hatched into a pixel creature in one shared city — **[gitemon.fun](https://gitemon.fun)**.
 
 - **Hatch.** Every developer already exists as a wild Gitemon, built from public GitHub data.
 - **Catch.** Sign in with GitHub and catch the developers you admire. Worked together for real? It's a _bonded_ catch.
 - **Claim.** When someone you caught signs in, you both get a friendship buff.
-- **Belong.** Your home is your language's biome. Found a town, and be seen from the far zoom.
+- **Belong.** Every language has a district in Gitemon City; the most notable stand on the central plaza. Claim yours and get a house. Your GitHub location becomes a hometown flag ([/world](https://gitemon.fun/world)).
 
 ## The rules, in one paragraph
 
@@ -28,8 +28,8 @@ if you turned that setting on.
 | `packages/scorer`       | snapshot → stats, level, type, species, form (pure, tested)           |
 | `packages/creature-gen` | deterministic pixel sprites + a tiny PNG encoder; CC0 placeholder art |
 | `apps/api`              | Cloudflare Worker (Hono): pages, API, auth, images — D1 + R2          |
-| `apps/web`              | the map (Svelte + canvas)                                             |
-| `scripts`               | trusted-fetcher jobs: seed, drain                                     |
+| `apps/web`              | Gitemon City (Svelte + Three.js; pixel sprites in a low-poly city)    |
+| `scripts`               | trusted-fetcher jobs: seed, drain, hometown backfill, geo-build       |
 
 ## Run it
 
@@ -46,3 +46,5 @@ a copy.
 ## Licence
 
 Code: [AGPL-3.0](LICENSE). Name, logo and creature art: not licensed — see [TRADEMARK.md](TRADEMARK.md).
+Place names for hometowns: [GeoNames](https://www.geonames.org) (CC BY 4.0). Build the lookup with
+`pnpm tsx scripts/geo-build.ts <dir>` from `cities15000.txt`, `countryInfo.txt` and `admin1CodesASCII.txt`.

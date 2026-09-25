@@ -79,7 +79,10 @@ export interface City {
   /** spot lists: plaza (inner first), and per district: square first, then streets outward */
   plaza: Spot[];
   spots: Spot[][];
+  /** house doors per district, nearest the square first (V2-D5: claim order fills them) */
   doors: Spot[][];
+  /** for each door, the index of its house in `lots` */
+  doorLots: number[][];
   radius: number;
 }
 
@@ -94,6 +97,7 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
   const lots: Lot[] = [];
   const spots: Spot[][] = [];
   const doors: Spot[][] = [];
+  const doorLots: number[][] = [];
   let radius = RING0;
 
   BIOME_ORDER.forEach((t, d) => {
@@ -114,7 +118,7 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
     sq.sort((p, q) => Math.hypot(p.x - sx, p.z - sz) - Math.hypot(q.x - sx, q.z - sz));
     list.push(...sq);
     const street: (Spot & { r: number })[] = [];
-    const door: Spot[] = [];
+    const door: (Spot & { lot: number })[] = [];
 
     const need = (pops[t] ?? 0) * 1.1 - sq.length;
     let bands = 0;
@@ -184,7 +188,7 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
             lots.push({ x, z, w: (arcLen / n) * 0.82, depth, rot: -a, h, d, house, face });
             if (house) {
               const [dx, dz] = polar(rC - (depth / 2 + 1.2) * face, a);
-              door.push({ x: dx, z: dz, d, kind: 'door', tx: 0, tz: 0 });
+              door.push({ x: dx, z: dz, d, kind: 'door', tx: 0, tz: 0, lot: lots.length - 1 });
             }
           }
         }
@@ -219,7 +223,9 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
     street.sort((p, q) => p.r - q.r);
     list.push(...street.map(({ x, z, d: dd, kind, tx, tz }) => ({ x, z, d: dd, kind, tx, tz })));
     spots.push(list);
-    doors.push(door);
+    door.sort((p, q) => Math.hypot(p.x - sx, p.z - sz) - Math.hypot(q.x - sx, q.z - sz));
+    doors.push(door.map(({ x, z, d: dd, kind, tx, tz }) => ({ x, z, d: dd, kind, tx, tz })));
+    doorLots.push(door.map((p) => p.lot));
   });
 
   // plaza rings, inner first (the monument stands in the middle); plaza residents stroll their ring
@@ -246,5 +252,5 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
   };
   plaza.forEach((sp, i) => loosen(sp, `p${i}`));
   spots.forEach((list, d) => list.forEach((sp, i) => loosen(sp, `${d}:${i}`)));
-  return { districts, roads, lots, plaza, spots, doors, radius };
+  return { districts, roads, lots, plaza, spots, doors, doorLots, radius };
 }

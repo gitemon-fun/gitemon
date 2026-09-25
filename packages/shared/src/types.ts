@@ -23,6 +23,13 @@ export interface Snapshot {
   /** Lifetime PRs merged into repos the developer does not own. */
   mergedToOthers: { count: number; langs: Record<string, number>; owners: string[] };
   fetchedAt: string;
+  /** Free-text public GitHub location, as written. */
+  location?: string | null;
+  /**
+   * Hometown parsed from `location` by the trusted fetcher (V2-D6). Absent when the snapshot was
+   * made somewhere without the lookup (the stored hometown is then kept as it is).
+   */
+  home?: { cc: string; city: string | null } | null;
 }
 
 export const TYPES = [
