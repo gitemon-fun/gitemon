@@ -490,7 +490,7 @@ export function dress(isl: Island, lit: THREE.Material, unlit: THREE.Material): 
   };
   for (const h of isl.habitats) block(h.x, h.z, 6);
   for (const pts of isl.roads) for (const [x, z] of pts) block(x, z, 4);
-  for (const l of isl.landmarks) block(l.x, l.z, 6);
+  for (const m of isl.miniPlazas) block(m.x, m.z, m.r + 3);
 
   const STEP = 3.4;
   const E = isl.radius;

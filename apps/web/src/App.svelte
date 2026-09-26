@@ -83,8 +83,35 @@
       scene?.select(null);
       return;
     }
+    // a sealed legend has no person behind it on the page: nothing to fetch (V5-D4)
+    if (g.special?.sealed) return;
     const r = await api.detail(g.id);
     if (r.status === 200 && picked?.id === g.id) detail = r.data;
+  }
+
+  const TIER_NAME = {
+    legendary: 'Legendary',
+    mythic: 'Mythic',
+    epic: 'Epic',
+    rare: 'Rare',
+  } as const;
+  const regionOf = (t: MapGitemon['t1']) =>
+    town?.city.regions.find((r) => r.types.includes(t))?.name ?? TYPE_INFO[t].biome;
+
+  async function wakeLegend() {
+    busy = true;
+    await api.wake();
+    busy = false;
+    await loadMe();
+    say('Your legend is awake. It shows with your name from the next map refresh.');
+  }
+  async function removeLegend() {
+    if (!confirm('Remove your sealed legend for good? It will not come back.')) return;
+    busy = true;
+    await api.removeLegend();
+    busy = false;
+    await loadMe();
+    say('Your legend is removed and will not be added again.');
   }
 
   async function search(e?: Event, zoom = 3.2) {
@@ -275,7 +302,29 @@
   </div>
 {/if}
 
-{#if picked}
+{#if picked?.special?.sealed}
+  <section class="sheet sealed" aria-label="A sealed legend">
+    <button
+      class="close"
+      onclick={() => {
+        picked = null;
+        scene?.select(null);
+      }}
+      aria-label="Close">×</button
+    >
+    <div class="head">
+      <div class="silhouette tier-{picked.special.tier}"><Sprite g={picked} size={96} /></div>
+      <div>
+        <h2>{picked.special.title ?? `${TIER_NAME[picked.special.tier]} legend`}</h2>
+        <p class="dim">{TIER_NAME[picked.special.tier]} · sealed · {regionOf(picked.t1)}</p>
+      </div>
+    </div>
+    <p>
+      A sealed legend. It belongs to a developer who shaped the tech world. It wakes only when they
+      sign in.
+    </p>
+  </section>
+{:else if picked}
   <section class="sheet" aria-label="Selected Gitemon">
     <button
       class="close"
@@ -295,6 +344,9 @@
             ? ' · ✦ Shiny'
             : ''}
         </p>
+        {#if picked.special}<p class="dim">
+            {picked.special.title ?? `${TIER_NAME[picked.special.tier]} legend`} · awake
+          </p>{/if}
         <p class="lv">
           Lv {picked.lv}{#if detail?.bonus}<span class="bonus"> +{detail.bonus}</span>{/if}
         </p>
@@ -429,6 +481,19 @@
           <p class="dim">{typeLine(me)} · {SHAPE_NAME[me.sh]} · Form {me.f}</p>
         </div>
       </div>
+      {#if me.legend && !me.legend.woken}
+        <div class="legend-offer">
+          <p>
+            <b>You have a sealed legend</b> — {me.legend.title ??
+              TIER_NAME[me.legend.tier as keyof typeof TIER_NAME]}, #{me.legend.rank} on the island. Nobody
+            can see it is yours. Wake it to show it with your name, or remove it for good.
+          </p>
+          <div class="actions">
+            <button class="primary" disabled={busy} onclick={wakeLegend}>Wake it</button>
+            <button disabled={busy} onclick={removeLegend}>Remove it</button>
+          </div>
+        </div>
+      {/if}
       <p>{me.catchesLeft} catches left today.</p>
       <p class="dim">
         You have a house in {TYPE_INFO[me.t1].biome}{me.town

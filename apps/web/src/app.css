@@ -374,3 +374,28 @@ h2 {
   font-size: 15px;
   max-width: calc(100vw - 32px);
 }
+
+/* v5 sealed legends (GRANDPLAN v5 §4): the sprite as a glowing silhouette, glow by tier */
+.silhouette canvas,
+.silhouette img {
+  filter: brightness(0) drop-shadow(0 0 6px var(--glow)) drop-shadow(0 0 12px var(--glow));
+}
+.tier-legendary {
+  --glow: #ffcc4d;
+}
+.tier-mythic {
+  --glow: #b880ff;
+}
+.tier-epic {
+  --glow: #59b3ff;
+}
+.tier-rare {
+  --glow: #66f28c;
+}
+.legend-offer {
+  border: 1px solid #e8c45c;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  background: #fff9e8;
+}

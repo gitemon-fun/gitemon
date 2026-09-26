@@ -23,7 +23,7 @@ const FORM_SCALE = { 1: 0.82, 2: 1, 3: 1.3 } as const;
 /** walking speed (radians of the patrol cycle per second) */
 const SPEED = 0.32;
 
-const spriteKey = (g: MapGitemon) => `${g.t1}:${g.f}:${g.sh}:${g.s}`;
+const spriteKey = (g: MapGitemon) => `${g.t1}:${g.f}:${g.sh}:${g.s}:${g.special?.species ?? ''}`;
 
 function buildAtlas(list: Placed[]) {
   const keys = new Map<string, number>();
@@ -39,7 +39,7 @@ function buildAtlas(list: Placed[]) {
   ctx.imageSmoothingEnabled = false;
   const tmp = document.createElement('canvas');
   for (const [k, i] of keys) {
-    const [t1, f, sh, s] = k.split(':');
+    const [t1, f, sh, s, one] = k.split(':');
     // a fixed representative id: the per-creature hue jitter is applied as an instance tint
     const sp = compose(art, {
       id: 7,
@@ -48,6 +48,7 @@ function buildAtlas(list: Placed[]) {
       sh: sh as MapGitemon['sh'],
       f: Number(f) as 1 | 2 | 3,
       s: Number(s) as 0 | 1,
+      sp: one || null,
     });
     tmp.width = sp.size;
     tmp.height = sp.size;
@@ -93,6 +94,23 @@ function buildAtlas(list: Placed[]) {
   return { tex, keys, rows };
 }
 
+/** v5 specials: bigger by tier (The Origin biggest), and the glow colour of a sealed one */
+const SPECIAL_SCALE = { legendary: 1.55, mythic: 1.3, epic: 1.15, rare: 1.05 } as const;
+const GLOW: Record<string, [number, number, number]> = {
+  legendary: [1.0, 0.8, 0.3],
+  mythic: [0.72, 0.5, 1.0],
+  epic: [0.35, 0.7, 1.0],
+  rare: [0.4, 0.95, 0.55],
+};
+/** [size multiplier, sealed flag, glow r, g, b] for one resident */
+function specialAttr(g: MapGitemon): [number, number, number, number, number] {
+  const sp = g.special;
+  if (!sp) return [1, 0, 0, 0, 0];
+  const scale = sp.rank === 1 ? 2.3 : sp.rank <= 3 ? 1.9 : SPECIAL_SCALE[sp.tier];
+  const [r, gg, b] = GLOW[sp.tier]!;
+  return [scale, sp.sealed ? 1 : 0, r, gg, b];
+}
+
 const VERT_COMMON = /* glsl */ `
   attribute vec3 iPos;   // x, z, phase
   attribute float iY;    // ground height at the spot (v4: the island has terrain)
@@ -135,6 +153,8 @@ export class Crowd {
     const walk = new Float32Array(n * 3);
     const uv = new Float32Array(n * 4);
     const tint = new Float32Array(n * 4);
+    const spec = new Float32Array(n * 4); // scale, sealed, glow r, glow g
+    const glowB = new Float32Array(n);
     list.forEach((p, i) => {
       const h = hash32(`crowd:${p.g.id}`);
       pos.set([p.spot.x, p.spot.z, (h % 6283) / 1000], i * 3);
@@ -159,12 +179,17 @@ export class Crowd {
         ],
         i * 4,
       );
+      const [sc, sealed, gr, gg, gb] = specialAttr(p.g);
+      spec.set([sc, sealed, gr, gg], i * 4);
+      glowB[i] = gb;
     });
     const iPos = new THREE.InstancedBufferAttribute(pos, 3);
     const iY = new THREE.InstancedBufferAttribute(ys, 1);
     this.walk = new THREE.InstancedBufferAttribute(walk, 3);
     const iUv = new THREE.InstancedBufferAttribute(uv, 4);
     const iTint = new THREE.InstancedBufferAttribute(tint, 4);
+    const iSpec = new THREE.InstancedBufferAttribute(spec, 4);
+    const iGlowB = new THREE.InstancedBufferAttribute(glowB, 1);
 
     const quad = new THREE.InstancedBufferGeometry();
     quad.setAttribute(
@@ -184,6 +209,8 @@ export class Crowd {
     quad.setAttribute('iWalk', this.walk);
     quad.setAttribute('iUv', iUv);
     quad.setAttribute('iTint', iTint);
+    quad.setAttribute('iSpec', iSpec);
+    quad.setAttribute('iGlowB', iGlowB);
     quad.instanceCount = n;
 
     this.material = new THREE.ShaderMaterial({
@@ -194,14 +221,18 @@ export class Crowd {
         ${VERT_COMMON}
         attribute vec4 iUv;
         attribute vec4 iTint;
+        attribute vec4 iSpec;
+        attribute float iGlowB;
         uniform float uUpScale;
         varying vec2 vUv;
         varying vec3 vTint;
+        varying float vSealed;
+        varying vec3 vGlow;
         #include <fog_pars_vertex>
         void main() {
           float moving; float dirSign;
           vec3 base = walkPos(moving, dirSign);
-          float size = ${CELL_W.toFixed(2)} * iTint.w * uGrow;
+          float size = ${CELL_W.toFixed(2)} * iTint.w * iSpec.x * uGrow;
           // a small hop per step while walking, a slow breath while standing
           float t = uTime * 7.0 + iPos.z * 3.0;
           float hop = moving * abs(sin(t)) * 0.16 * size / ${CELL_W.toFixed(2)};
@@ -214,6 +245,8 @@ export class Crowd {
           vec2 uv0 = vec2(flip > 0.0 ? uv.x : 1.0 - uv.x, uv.y);
           vUv = iUv.xy + uv0 * iUv.zw;
           vTint = iTint.rgb;
+          vSealed = iSpec.y;
+          vGlow = vec3(iSpec.z, iSpec.w, iGlowB);
           vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mvPosition;
           #include <fog_vertex>
@@ -221,13 +254,24 @@ export class Crowd {
       `,
       fragmentShader: /* glsl */ `
         uniform sampler2D uAtlas;
+        uniform float uTime;
         varying vec2 vUv;
         varying vec3 vTint;
+        varying float vSealed;
+        varying vec3 vGlow;
         #include <fog_pars_fragment>
         void main() {
           vec4 c = texture2D(uAtlas, vUv);
           if (c.a < 0.5) discard;
-          gl_FragColor = vec4(c.rgb * vTint, 1.0);
+          vec3 col = c.rgb * vTint;
+          if (vSealed > 0.5) {
+            // a sealed legend (v5 §4): its shape as a glowing silhouette with a slow shimmer; the
+            // species reads, the details do not
+            float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+            float shimmer = 0.5 + 0.5 * sin(uTime * 1.6 + vUv.y * 40.0 + vUv.x * 25.0);
+            col = mix(vGlow * 0.55, vGlow * 1.25 + 0.15, l) + vGlow * shimmer * 0.18;
+          }
+          gl_FragColor = vec4(col, 1.0);
           #include <colorspace_fragment>
           #include <fog_fragment>
         }
@@ -247,6 +291,8 @@ export class Crowd {
     ground.setAttribute('iY', iY);
     ground.setAttribute('iWalk', this.walk);
     ground.setAttribute('iTint', iTint);
+    ground.setAttribute('iSpec', iSpec);
+    ground.setAttribute('iGlowB', iGlowB);
     ground.instanceCount = n;
     const shadowMat = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
@@ -255,21 +301,30 @@ export class Crowd {
       vertexShader: /* glsl */ `
         ${VERT_COMMON}
         attribute vec4 iTint;
+        attribute vec4 iSpec;
+        attribute float iGlowB;
         varying vec2 vP;
+        varying float vSealed;
+        varying vec3 vGlow;
         void main() {
           float moving; float dirSign;
           vec3 base = walkPos(moving, dirSign);
-          float r = 0.62 * iTint.w * uGrow;
+          vSealed = iSpec.y;
+          vGlow = vec3(iSpec.z, iSpec.w, iGlowB);
+          float r = 0.62 * iTint.w * iSpec.x * uGrow * (iSpec.y > 0.5 ? 2.2 : 1.0);
           vP = position.xz;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(base + vec3(position.x * r, 0.08, position.z * r * 0.8), 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
         varying vec2 vP;
+        varying float vSealed;
+        varying vec3 vGlow;
         void main() {
           float d = dot(vP, vP);
           if (d > 1.0) discard;
-          gl_FragColor = vec4(0.0, 0.0, 0.0, 0.24 * (1.0 - d));
+          if (vSealed > 0.5) gl_FragColor = vec4(vGlow, 0.55 * (1.0 - d) * (1.0 - d));
+          else gl_FragColor = vec4(0.0, 0.0, 0.0, 0.24 * (1.0 - d));
         }
       `,
     });
@@ -318,7 +373,7 @@ export class Crowd {
     return this.list[i]!;
   }
   heightOf(i: number, grow: number) {
-    return CELL_W * FORM_SCALE[this.list[i]!.g.f] * grow;
+    return CELL_W * FORM_SCALE[this.list[i]!.g.f] * specialAttr(this.list[i]!.g)[0] * grow;
   }
 
   dispose() {

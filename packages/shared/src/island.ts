@@ -116,6 +116,14 @@ export interface Island {
   doorLots: number[];
   habitats: Habitat[];
   landmarks: { t: TypeId; region: number; x: number; z: number; y: number }[];
+  /** v5: The Origin's spot on the monument, the two Guardians' plinths, Legendary 4–10's ring */
+  monument: Spot;
+  plinths: Spot[];
+  legendRing: Spot[];
+  /** v5: one mini plaza per region (Epic inner rings, Rare outer), at its landmark */
+  miniPlazas: { x: number; z: number; y: number; r: number; region: number }[];
+  /** per type (BIOME_ORDER index): its mini-plaza spots, inner ring first */
+  mini: Spot[][];
   /** the machine quarter's angular window in the outer town row */
   quarter: { a0: number; a1: number };
   volcano: { x: number; z: number };
@@ -201,7 +209,12 @@ const rnd = (seed: string) => hash32(seed) / 4294967296;
 
 // ---- the island ------------------------------------------------------------------------------------
 
-export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60): Island {
+export function island(
+  pops: Partial<Record<TypeId, number>>,
+  plazaTarget = 60,
+  /** v5: how many Epic + Rare specials each type holds (sizes its mini plaza) */
+  specials: Partial<Record<TypeId, number>> = {},
+): Island {
   // region widths ∝ population (min 22°), frost centred at the top of the screen (-3π/4)
   const MIN = (22 / 180) * Math.PI;
   const weight = REGIONS.map((r) => r.types.reduce((s, t) => s + (pops[t] ?? 0), 0) + 1);
@@ -303,9 +316,36 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
     }
   };
 
+  const roadAngle = (i: number, r: number) =>
+    regions[i]!.mid + 0.07 * vnoise(r / 35 + i * 9.7, 1.3, 29) * smooth(TOWN_R, TOWN_R + 30, r);
+
+  // v5 mini plazas (V5-D6): one per region beside its road just outside the gate, sized by the
+  // Epic + Rare specials it holds; rings of spots round the region's landmark in the middle
+  const MP_RINGS = [6.2, 8.6, 11, 13.4, 15.8, 18.2, 20.6];
+  const MP_GAP = 2.5;
+  const ringCap = (rr: number) => Math.floor((TAU * rr) / MP_GAP);
+  const miniDefs = regions.map((g, i) => {
+    const need = g.types.map((t) => specials[t] ?? 0);
+    // rings until every type's share of the circle holds its specials
+    let rings = 1;
+    const share = g.types.length > 1 ? 0.5 : 1;
+    while (
+      rings < MP_RINGS.length &&
+      need.some(
+        (n) =>
+          MP_RINGS.slice(0, rings).reduce((a, rr) => a + Math.floor(ringCap(rr) * share), 0) < n,
+      )
+    )
+      rings++;
+    const r = MP_RINGS[rings - 1]! + 2.4;
+    const dist = TOWN_R + 4 + r;
+    const off = (r + 4.5) / dist;
+    const [x, z] = polar(dist, roadAngle(i, dist) + off);
+    return { x, z, r, rings, region: i, plateau: NaN };
+  });
   /** region of the last `height` call (-1 town, -2 sea): lets the grid pass skip `at` */
   let lastRegion = -1;
-  const height = (x: number, z: number): number => {
+  const heightRaw = (x: number, z: number): number => {
     const r = Math.hypot(x, z);
     if (r < TOWN_R) {
       lastRegion = -1;
@@ -356,6 +396,19 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
     h = -2.5 + (h + 2.5) * (cliff ? smooth(-1, 3, edge) : smooth(-8, 20, edge));
     return h;
   };
+  /** the land, with each mini plaza levelled to a flat terrace (blended over 6 m) */
+  const height = (x: number, z: number): number => {
+    let h = heightRaw(x, z);
+    const reg = lastRegion;
+    for (const m of miniDefs) {
+      const d = Math.hypot(x - m.x, z - m.z);
+      if (d > m.r + 6) continue;
+      if (Number.isNaN(m.plateau)) m.plateau = Math.max(WATER_Y + 0.8, heightRaw(m.x, m.z));
+      h = m.plateau + (h - m.plateau) * smooth(m.r, m.r + 6, d);
+    }
+    lastRegion = reg;
+    return h;
+  };
 
   const at = (x: number, z: number) => {
     const r = Math.hypot(x, z);
@@ -394,8 +447,6 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
 
   // ---- roads: one from each gate out into its region, along the valley ---------------------------
   const roads: [number, number][][] = [];
-  const roadAngle = (i: number, r: number) =>
-    regions[i]!.mid + 0.07 * vnoise(r / 35 + i * 9.7, 1.3, 29) * smooth(TOWN_R, TOWN_R + 30, r);
   regions.forEach((g, i) => {
     const pts: [number, number][] = [];
     for (let r = STREET_OUT; r <= COAST - 45; r += 6) pts.push(polar(r, roadAngle(i, r)));
@@ -501,8 +552,29 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
   });
 
   // plaza rings, inner first; plaza residents stroll their ring
+  // v5 (V5-D6): The Origin on the monument's base, facing the opening camera; the two Guardians on
+  // plinths either side of it; Legendary 4–10 on the ring round them; everyone else from r = 17
+  const FRONT = Math.PI / 4;
+  const mon = polar(4.3, FRONT);
+  const monument: Spot = {
+    x: mon[0],
+    z: mon[1],
+    y: TOWN_Y + 2,
+    d: -1,
+    kind: 'plaza',
+    tx: 0,
+    tz: 0,
+  };
+  const plinths: Spot[] = [-0.95, 0.95].map((da) => {
+    const [x, z] = polar(10.5, FRONT + da);
+    return { x, z, y: TOWN_Y + 1.2, d: -1, kind: 'plaza' as const, tx: 0, tz: 0 };
+  });
+  const legendRing: Spot[] = Array.from({ length: 7 }, (_, k) => {
+    const [x, z] = polar(14.2, FRONT + Math.PI + ((k - 3) * TAU) / 8.5);
+    return { x, z, y: TOWN_Y, d: -1, kind: 'plaza' as const, tx: 0, tz: 0 };
+  });
   const plaza: Spot[] = [];
-  for (let r = 9; r <= PLAZA_R - 3 && plaza.length < plazaTarget * 2; r += 3.4) {
+  for (let r = 18; r <= PLAZA_R - 3 && plaza.length < plazaTarget * 2; r += 3.4) {
     const n = Math.floor((TAU * r) / 4.2);
     for (let s = 0; s < n; s++) {
       const a = (s / n) * TAU + r;
@@ -543,6 +615,7 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
           const here = at(x, z);
           if (!here || here.type !== t) continue;
           if (hq(x, z) < 0.9 || slope(x, z) > maxSlope || nearRoad(x, z, i) < 6) continue;
+          if (miniDefs.some((m) => Math.hypot(x - m.x, z - m.z) < m.r + 7)) continue;
           cands.push({ x, z, r: Math.hypot(x, z) });
         }
       }
@@ -639,11 +712,47 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
   }
 
   // landmarks: one per region, beside its road just outside the gate
-  const landmarks = regions.map((g, i) => {
-    const r = TOWN_R + 13;
-    const [x, z] = polar(r, roadAngle(i, r) + 11 / r);
-    return { t: g.types[0]!, region: i, x, z, y: height(x, z) };
-  });
+  const landmarks = miniDefs.map((m) => ({
+    t: regions[m.region]!.types[0]!,
+    region: m.region,
+    x: m.x,
+    z: m.z,
+    y: height(m.x, m.z),
+  }));
+  // mini-plaza spots: paired regions split the circle in two halves, one per type
+  const mini: Spot[][] = BIOME_ORDER.map(() => []);
+  for (const m of miniDefs) {
+    const g = regions[m.region]!;
+    const y = height(m.x, m.z);
+    // the half facing the region's first border goes to its first type
+    const toward = Math.atan2(m.z, m.x);
+    for (const rr of MP_RINGS.slice(0, m.rings)) {
+      const n = ringCap(rr);
+      for (let k = 0; k < n; k++) {
+        const a = (k / n) * TAU + rr * 0.37;
+        const x = m.x + Math.cos(a) * rr;
+        const z = m.z + Math.sin(a) * rr;
+        const side = g.types.length > 1 ? (wrap(a - toward) < Math.PI ? 1 : 0) : 0;
+        const t = g.types[side]!;
+        mini[BIOME_ORDER.indexOf(t)]!.push({
+          x,
+          z,
+          y,
+          d: BIOME_ORDER.indexOf(t),
+          kind: 'plaza',
+          tx: 0,
+          tz: 0,
+        });
+      }
+    }
+  }
+  const miniPlazas = miniDefs.map((m) => ({
+    x: m.x,
+    z: m.z,
+    y: height(m.x, m.z),
+    r: m.r,
+    region: m.region,
+  }));
 
   // nobody stands on a ruler line
   const loosen = (sp: Spot, k: string) => {
@@ -667,6 +776,11 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
     doorLots: doors.map((p) => p.lot),
     habitats,
     landmarks,
+    monument,
+    plinths,
+    legendRing,
+    miniPlazas,
+    mini,
     quarter,
     volcano: { x: vx, z: vz },
     grid,

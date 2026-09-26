@@ -181,10 +181,31 @@ app.get('/api/me', async (c) => {
   )
     .bind(p.id, since)
     .first<{ n: number }>();
+  const legend = await c.env.DB.prepare(
+    'SELECT key, rank, tier, title, woken_at FROM legend WHERE id = ?',
+  )
+    .bind(p.id)
+    .first<{
+      key: string;
+      rank: number;
+      tier: string;
+      title: string | null;
+      woken_at: string | null;
+    }>();
   return c.json({
     player: {
       ...toMap(r),
       hidden: r.hidden,
+      // only ever sent to the developer themselves (V5-D4)
+      legend: legend
+        ? {
+            key: legend.key,
+            rank: legend.rank,
+            tier: legend.tier,
+            title: legend.title,
+            woken: !!legend.woken_at,
+          }
+        : null,
       admin: !!p.is_admin,
       bonus: await bonusLevels(c.env.DB, p.id),
       town,
@@ -313,7 +334,16 @@ app.get('/api/city', (c) =>
     )
       .bind(now())
       .raw();
-    return c.json({ g: rows });
+    // the specials (V5-D4): [key, rank, tier, title, species, t1, t2, shape, form, shiny, id, login].
+    // Sealed ones carry NO id and NO login — nothing links them to a person until they wake.
+    const legends = await c.env.DB.prepare(
+      `SELECT l.key, l.rank, l.tier, l.title, l.species, l.t1, l.t2, l.shape, l.form, l.shiny,
+              CASE WHEN l.woken_at IS NOT NULL THEN g.id END,
+              CASE WHEN l.woken_at IS NOT NULL THEN g.login END
+       FROM legend l LEFT JOIN gitemon g ON g.id = l.id AND g.hidden = 0
+       ORDER BY l.rank`,
+    ).raw();
+    return c.json({ g: rows, l: legends });
   }),
 );
 
@@ -391,6 +421,32 @@ app.post('/api/catch/:id', async (c) => {
     })(),
   );
   return c.json(res);
+});
+
+/** A listed developer wakes their sealed legend: it shows with their name from now on (V5-D4). */
+app.post('/api/legend/wake', async (c) => {
+  const p = c.get('player');
+  if (!p) return c.json({ error: 'signin' }, 401);
+  const r = await c.env.DB.prepare(
+    'UPDATE legend SET woken_at = ? WHERE id = ? AND woken_at IS NULL',
+  )
+    .bind(now(), p.id)
+    .run();
+  return c.json({ ok: true, woken: r.meta.changes > 0 });
+});
+
+/** …or removes it for good: deleted, and never imported again (V5-D4, G3). */
+app.post('/api/legend/remove', async (c) => {
+  const p = c.get('player');
+  if (!p) return c.json({ error: 'signin' }, 401);
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM legend WHERE id = ?').bind(p.id),
+    c.env.DB.prepare('INSERT OR IGNORE INTO legend_removed (id, removed_at) VALUES (?, ?)').bind(
+      p.id,
+      now(),
+    ),
+  ]);
+  return c.json({ ok: true });
 });
 
 app.post('/api/release', async (c) => {
@@ -491,6 +547,79 @@ app.post('/internal/ingest', async (c) => {
     done.push(s.login);
   }
   return c.json({ ok: true, done });
+});
+
+/**
+ * The Legends list (V5-D3): the private import script posts ranked, already-scored specials. Keys
+ * survive re-imports; anyone in `legend_removed` is skipped; ranks not in this batch are left alone
+ * (a full import sends `final: true` to drop legends that fell off the list and were never woken).
+ */
+app.post('/internal/legends', async (c) => {
+  type L = {
+    id: number;
+    login: string;
+    rank: number;
+    tier: string;
+    title: string | null;
+    species: string | null;
+    t1: TypeId;
+    t2: TypeId | null;
+    shape: string;
+    form: number;
+    shiny: number;
+  };
+  const { legends, final, keep } = await c.req.json<{
+    legends: L[];
+    final?: boolean;
+    keep?: number[];
+  }>();
+  const db = c.env.DB;
+  const removed = new Set(
+    (await db.prepare('SELECT id FROM legend_removed').all<{ id: number }>()).results.map(
+      (r) => r.id,
+    ),
+  );
+  const t = now();
+  const stmts: D1PreparedStatement[] = [];
+  for (const l of (legends ?? []).slice(0, 40)) {
+    if (!Number.isInteger(l.id) || removed.has(l.id) || !TYPES.includes(l.t1)) continue;
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO legend (id, key, login, rank, tier, title, species, t1, t2, shape, form, shiny, imported_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET login=excluded.login, rank=excluded.rank, tier=excluded.tier,
+             title=excluded.title, species=excluded.species, t1=excluded.t1, t2=excluded.t2,
+             shape=excluded.shape, form=excluded.form, shiny=excluded.shiny, imported_at=excluded.imported_at`,
+        )
+        .bind(
+          l.id,
+          crypto.randomUUID().replace(/-/g, '').slice(0, 16),
+          l.login,
+          l.rank,
+          l.tier,
+          l.title,
+          l.species,
+          l.t1,
+          l.t2,
+          l.shape,
+          l.form,
+          l.shiny,
+          t,
+        ),
+    );
+  }
+  if (stmts.length) await db.batch(stmts);
+  if (final && Array.isArray(keep)) {
+    const ids = keep.filter(Number.isInteger);
+    await db
+      .prepare(
+        `DELETE FROM legend WHERE woken_at IS NULL AND id NOT IN (${ids.map(() => '?').join(',') || 'NULL'})`,
+      )
+      .bind(...ids)
+      .run();
+  }
+  return c.json({ ok: true, upserted: stmts.length });
 });
 
 /** Re-score from stored snapshots after a scorer change (no GitHub calls). */

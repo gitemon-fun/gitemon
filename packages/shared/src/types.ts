@@ -89,6 +89,19 @@ export interface MapGitemon {
   st: 'w' | 'c';
   /** 1 when a friendship buff is active */
   a: 0 | 1;
+  /** v5: one of the 500 specials. Sealed ones have a negative id and no login (V5-D4). */
+  special?: Special;
+}
+
+export type SpecialTier = 'legendary' | 'mythic' | 'epic' | 'rare';
+export interface Special {
+  key: string;
+  rank: number;
+  tier: SpecialTier;
+  title: string | null;
+  /** a one-of-one species key (The Origin, The Guardians), else null */
+  species: string | null;
+  sealed: boolean;
 }
 
 export interface TypeInfo {

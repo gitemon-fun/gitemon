@@ -189,8 +189,60 @@ function townGround(isl: Island): THREE.Object3D[] {
       ),
     );
   }
+  // v5: the Guardians' plinths beside the monument
+  for (const p of isl.plinths) {
+    stone.push(
+      coloured(
+        new THREE.CylinderGeometry(1.7, 1.9, 1.2, 10).translate(p.x, Y + 0.6, p.z),
+        '#e4dccc',
+      ),
+    );
+    stone.push(
+      coloured(
+        new THREE.CylinderGeometry(1.9, 1.9, 0.18, 10).translate(p.x, Y + 1.12, p.z),
+        '#e0b040',
+      ),
+    );
+  }
+  // v5: one paved mini plaza per region, in the region's own stone (V5-D6)
+  for (const m of isl.miniPlazas) {
+    const pave = MINI_PAVE[isl.regions[m.region]!.climate];
+    flat.push(
+      coloured(
+        new THREE.CircleGeometry(m.r + 1.2, 40)
+          .rotateX(-Math.PI / 2)
+          .translate(m.x, m.y + 0.04, m.z),
+        '#c8bda8',
+      ),
+      coloured(
+        new THREE.CircleGeometry(m.r, 40).rotateX(-Math.PI / 2).translate(m.x, m.y + 0.07, m.z),
+        pave,
+      ),
+    );
+    for (let rr = 7.4; rr < m.r - 1; rr += 4.8)
+      flat.push(
+        coloured(
+          new THREE.RingGeometry(rr, rr + 0.5, 40)
+            .rotateX(-Math.PI / 2)
+            .translate(m.x, m.y + 0.09, m.z),
+          '#a89e8c',
+        ),
+      );
+  }
   return [mesh(flat), mesh(stone, true)];
 }
+
+const MINI_PAVE: Record<string, string> = {
+  frost: '#eef3f8',
+  marsh: '#bdb7cc',
+  bloom: '#efe3d0',
+  tide: '#f1e6cc',
+  jungle: '#cfc8ae',
+  volcano: '#6e666a',
+  canyon: '#e4b88e',
+  crystal: '#ebe6f6',
+  savanna: '#e8d8ac',
+};
 
 // ---- town furniture: lamps along the ring streets, trees on the lawn inside the wall -----------------
 

@@ -8,6 +8,8 @@ export interface SpriteParams {
   sh: Shape;
   f: 1 | 2 | 3;
   s: 0 | 1;
+  /** v5: a one-of-one species key (The Origin, The Guardians) that overrides the type's species */
+  sp?: string | null;
 }
 
 /** Palette indices. 0 is transparent. */
@@ -139,7 +141,10 @@ const PATTERNS: Record<TypeId, (x: number, y: number) => boolean> = {
 // ---- composition ------------------------------------------------------------------------------
 
 export function compose(art: ArtSet, p: SpriteParams): Sprite {
-  const drawn = art.species?.[`${p.t1}-${p.f}`] ?? art.species?.[`${p.t1}-1`];
+  const drawn =
+    (p.sp ? art.species?.[p.sp] : undefined) ??
+    art.species?.[`${p.t1}-${p.f}`] ??
+    art.species?.[`${p.t1}-1`];
   if (drawn) return composeSpecies(drawn, p);
   const rand = rng(hash32(`sprite:${p.id}`));
   const tpl = art.shapes[p.sh];
