@@ -41,7 +41,7 @@ export interface Town {
   detail: THREE.Object3D[];
 }
 
-export function buildTown(isl: Island, homes: Map<number, string>): Town {
+export function buildTown(isl: Island, homes: Map<number, string>, onLater?: () => void): Town {
   const group = new THREE.Group();
   const detail: THREE.Object3D[] = [];
   const lit = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
@@ -66,9 +66,16 @@ export function buildTown(isl: Island, homes: Map<number, string>): Town {
   add(lights.meshes(glow), true);
   add(props.meshes(lit, { cast: true, receive: true }), true);
 
-  const nat = dress(isl, lit, glow);
-  add(nat.props);
-  add(nat.glow);
+  // props come one frame later: the town, land and crowd show first (G1), trees follow
+  const later = () => {
+    const nat = dress(isl, lit, glow);
+    add(nat.props);
+    add(nat.glow);
+    onLater?.();
+  };
+  if (typeof requestAnimationFrame === 'function')
+    requestAnimationFrame(() => setTimeout(later, 0));
+  else later();
 
   for (const l of isl.landmarks) {
     const m = new THREE.Mesh(landmark(l.t), lit);

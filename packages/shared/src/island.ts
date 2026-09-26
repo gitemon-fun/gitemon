@@ -303,9 +303,12 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
     }
   };
 
+  /** region of the last `height` call (-1 town, -2 sea): lets the grid pass skip `at` */
+  let lastRegion = -1;
   const height = (x: number, z: number): number => {
     const r = Math.hypot(x, z);
     if (r < TOWN_R) {
+      lastRegion = -1;
       if (r > CANAL_IN && r < CANAL_OUT) return -0.8;
       // rivers leave the canal straight through the town (under the street bridges)
       if (r > CANAL_OUT) {
@@ -348,6 +351,7 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
     }
     // coast: beaches, or cliffs on Bloom Cliffs
     const edge = coastR(a) - r;
+    lastRegion = edge < 0 ? -2 : i;
     const cliff = regions[i]!.climate === 'bloom';
     h = -2.5 + (h + 2.5) * (cliff ? smooth(-1, 3, edge) : smooth(-8, 20, edge));
     return h;
@@ -365,7 +369,7 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
   };
 
   // sample the land once: every later check reads the grid (the height field is costly)
-  const GN = 200;
+  const GN = 170;
   const GE = COAST + 44;
   const grid: HeightGrid = {
     E: GE,
@@ -380,8 +384,7 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
       const z = -GE + j * grid.cell;
       const k = j * (GN + 1) + i;
       grid.h[k] = height(x, z);
-      const here = at(x, z);
-      grid.region[k] = here ? here.region : Math.hypot(x, z) < TOWN_R ? -1 : -2;
+      grid.region[k] = lastRegion;
     }
   const hq = (x: number, z: number) => gridHeight(grid, x, z);
   const slope = (x: number, z: number) => {
@@ -550,6 +553,8 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
       }
       cands.sort((p, q) => p.r - q.r);
       for (const c of cands) {
+        // stop once this type has room enough: further-out habitats are never used
+        if (list.length >= need) break;
         const group: Spot[] = [];
         for (const rr of RINGS) {
           const n = rr ? Math.round((TAU * rr) / 2.2) : 1;

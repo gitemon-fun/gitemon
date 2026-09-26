@@ -277,7 +277,11 @@ export class CityScene {
   /** homes: lot index → the owner's colour (claimed players, V2-D5 / V3-D2) */
   build(city: Island, homes = new Map<number, string>()) {
     const t0 = performance.now();
-    const town = buildTown(city, homes);
+    const town = buildTown(city, homes, () => {
+      // props arrived: they cast shadows too, so the static map is drawn once more
+      this.renderer.shadowMap.needsUpdate = true;
+      this.dirty = true;
+    });
     this.stats.townMs = Math.round(performance.now() - t0);
     this.stats.buildMs = Math.round(performance.now() - t0);
     this.stats.homes = homes.size;

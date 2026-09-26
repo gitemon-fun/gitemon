@@ -5,7 +5,6 @@ import {
   WATER_Y,
   gridHeight,
   gridRegion,
-  hash32,
   type ClimateId,
   type Island,
 } from '@gitemon/shared';
@@ -17,7 +16,13 @@ import { Batch, flatGrey, mg, shade } from './kit';
  * dirt roads draped on the land; and props that follow the land — never scattered uniformly.
  */
 
-const u = (a: number, b: number, s: number) => (hash32(`${a | 0}:${b | 0}:${s}`) % 10000) / 10000;
+/** seeded 0..1 from integer cell coords (integer mixing: this runs per face and per prop cell) */
+const u = (a: number, b: number, s: number) => {
+  let h = Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1) ^ Math.imul(s, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+};
 
 interface Palette {
   low: string;
@@ -44,64 +49,145 @@ const SEA_FLOOR = '#7fb8c4';
 export function terrain(isl: Island): THREE.Mesh {
   // the layout already sampled the land: reuse its grid (no height-field calls here)
   const { E, N, cell, h: H, region: C } = isl.grid;
-  const pos: number[] = [];
-  const col: number[] = [];
-  const c = new THREE.Color();
-  const tri = (ks: number[], xs: number[], zs: number[]) => {
-    const ys = ks.map((k) => H[k]!);
-    // flat colour per triangle: climate of its first corner, height, slope of the face
-    const e1 = new THREE.Vector3(xs[1]! - xs[0]!, ys[1]! - ys[0]!, zs[1]! - zs[0]!);
-    const e2 = new THREE.Vector3(xs[2]! - xs[0]!, ys[2]! - ys[0]!, zs[2]! - zs[0]!);
-    const n = e1.cross(e2).normalize();
-    const steep = 1 - Math.abs(n.y);
-    const y = (ys[0]! + ys[1]! + ys[2]!) / 3;
-    const cx = (xs[0]! + xs[1]! + xs[2]!) / 3;
-    const cz = (zs[0]! + zs[1]! + zs[2]!) / 3;
-    const reg = C[ks[0]!]!;
-    if (y < WATER_Y - 0.05) c.set(SEA_FLOOR);
-    else if (reg === -1) c.set(Math.hypot(cx, cz) > TOWN_R - 5 ? '#a8c880' : TOWN_GROUND);
-    else if (reg === -2) c.set(LAND.tide.shore);
+  // palettes as plain RGB, looked up per face (no allocation in the loop: ~80k faces)
+  const rgb = (hex: string) => {
+    const c = new THREE.Color(hex);
+    return [c.r, c.g, c.b] as const;
+  };
+  const PAL = isl.regions.map((g) => {
+    const p = LAND[g.climate];
+    return {
+      climate: g.climate,
+      low: rgb(p.low),
+      high: rgb(p.high),
+      rock: rgb(p.rock),
+      shore: rgb(p.shore),
+    };
+  });
+  const SEA = rgb(SEA_FLOOR);
+  const TOWN = rgb(TOWN_GROUND);
+  const LAWN = rgb('#a8c880');
+  const SHORE = rgb(LAND.tide.shore);
+  const HEATHER = rgb('#9486b0');
+  const ICE = rgb('#c4e2f2');
+  const STRIPE_A = rgb('#c8683f');
+  const STRIPE_B = rgb('#e49a68');
+  const DRY = rgb('#c2b060');
+  const SALT = rgb('#cfe6f4');
+  const faces = N * N * 2;
+  const pos = new Float32Array(faces * 9);
+  const nor = new Float32Array(faces * 9);
+  const col = new Float32Array(faces * 9);
+  let f = 0;
+  let cr = 0;
+  let cg = 0;
+  let cb = 0;
+  const set = (c: readonly [number, number, number]) => {
+    cr = c[0];
+    cg = c[1];
+    cb = c[2];
+  };
+  const mix = (c: readonly [number, number, number], t: number) => {
+    cr += (c[0] - cr) * t;
+    cg += (c[1] - cg) * t;
+    cb += (c[2] - cb) * t;
+  };
+  const tri = (
+    k0: number,
+    k1: number,
+    k2: number,
+    x0: number,
+    z0: number,
+    x1: number,
+    z1: number,
+    x2: number,
+    z2: number,
+  ) => {
+    const y0 = H[k0]!;
+    const y1 = H[k1]!;
+    const y2 = H[k2]!;
+    // face normal (flat shading) — computed here, so no computeVertexNormals pass
+    const ax = x1 - x0,
+      ay = y1 - y0,
+      az = z1 - z0;
+    const bx = x2 - x0,
+      by = y2 - y0,
+      bz = z2 - z0;
+    let nx = ay * bz - az * by;
+    let ny = az * bx - ax * bz;
+    let nz = ax * by - ay * bx;
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    nx /= nl;
+    ny /= nl;
+    nz /= nl;
+    if (ny < 0) {
+      nx = -nx;
+      ny = -ny;
+      nz = -nz;
+    }
+    const steep = 1 - ny;
+    const y = (y0 + y1 + y2) / 3;
+    const cx = (x0 + x1 + x2) / 3;
+    const cz = (z0 + z1 + z2) / 3;
+    const reg = C[k0]!;
+    if (y < WATER_Y - 0.05) set(SEA);
+    else if (reg === -1) set(Math.hypot(cx, cz) > TOWN_R - 5 ? LAWN : TOWN);
+    else if (reg === -2) set(SHORE);
     else {
-      const climate = isl.regions[reg]!.climate;
-      const p = LAND[climate];
-      const r = Math.hypot(cx, cz);
-      if (steep > 0.45) c.set(p.rock);
-      else if (y < 1.1 && r > COAST - 40) c.set(p.shore);
+      const p = PAL[reg]!;
+      if (steep > 0.45) set(p.rock);
+      else if (y < 1.1 && Math.hypot(cx, cz) > COAST - 40) set(p.shore);
       else {
-        c.set(p.low).lerp(new THREE.Color(p.high), Math.min(1, y / 18));
+        set(p.low);
+        mix(p.high, Math.min(1, y / 18));
         // climate details: heather in the marsh, frozen lakes, striped canyon walls, dry patches
-        if (climate === 'marsh' && u(cx / 9, cz / 9, 3) < 0.35) c.set('#9486b0');
-        if (climate === 'frost' && y < 0.6) c.set('#c4e2f2');
-        if (climate === 'canyon' && steep > 0.25)
-          c.set(Math.floor(y / 2.2) % 2 ? '#c8683f' : '#e49a68');
-        if (climate === 'savanna' && u(cx / 7, cz / 7, 5) < 0.3) c.set('#c2b060');
-        if (climate === 'crystal' && u(cx / 6, cz / 6, 7) < 0.3) c.set('#cfe6f4');
+        if (p.climate === 'marsh' && u(cx / 9, cz / 9, 3) < 0.35) set(HEATHER);
+        else if (p.climate === 'frost' && y < 0.6) set(ICE);
+        else if (p.climate === 'canyon' && steep > 0.25)
+          set(Math.floor(y / 2.2) % 2 ? STRIPE_A : STRIPE_B);
+        else if (p.climate === 'savanna' && u(cx / 7, cz / 7, 5) < 0.3) set(DRY);
+        else if (p.climate === 'crystal' && u(cx / 6, cz / 6, 7) < 0.3) set(SALT);
       }
-      if (steep > 0.2 && steep <= 0.45) c.lerp(new THREE.Color(p.rock), (steep - 0.2) * 2);
+      if (steep > 0.2 && steep <= 0.45) mix(p.rock, (steep - 0.2) * 2);
     }
     // a little lightness jitter per face keeps large areas from looking flat-filled
-    c.offsetHSL(0, 0, (u(cx, cz, 9) - 0.5) * 0.04);
-    for (let q = 0; q < 3; q++) {
-      pos.push(xs[q]!, ys[q]!, zs[q]!);
-      col.push(c.r, c.g, c.b);
+    const j = 1 + (u(cx, cz, 9) - 0.5) * 0.05;
+    const o = f * 9;
+    pos[o] = x0;
+    pos[o + 1] = y0;
+    pos[o + 2] = z0;
+    pos[o + 3] = x1;
+    pos[o + 4] = y1;
+    pos[o + 5] = z1;
+    pos[o + 6] = x2;
+    pos[o + 7] = y2;
+    pos[o + 8] = z2;
+    for (let q = 0; q < 9; q += 3) {
+      nor[o + q] = nx;
+      nor[o + q + 1] = ny;
+      nor[o + q + 2] = nz;
+      col[o + q] = cr * j;
+      col[o + q + 1] = cg * j;
+      col[o + q + 2] = cb * j;
     }
+    f++;
   };
-  for (let j = 0; j < N; j++)
+  for (let jz = 0; jz < N; jz++)
     for (let i = 0; i < N; i++) {
       const x0 = -E + i * cell;
-      const z0 = -E + j * cell;
-      const k00 = j * (N + 1) + i;
+      const z0 = -E + jz * cell;
+      if (Math.hypot(x0, z0) > E + 10) continue;
+      const k00 = jz * (N + 1) + i;
       const k10 = k00 + 1;
       const k01 = k00 + N + 1;
       const k11 = k01 + 1;
-      if (Math.hypot(x0, z0) > E + 10) continue;
-      tri([k00, k01, k10], [x0, x0, x0 + cell], [z0, z0 + cell, z0]);
-      tri([k10, k01, k11], [x0 + cell, x0, x0 + cell], [z0, z0 + cell, z0 + cell]);
+      tri(k00, k01, k10, x0, z0, x0, z0 + cell, x0 + cell, z0);
+      tri(k10, k01, k11, x0 + cell, z0, x0, z0 + cell, x0 + cell, z0 + cell);
     }
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  g.computeVertexNormals();
+  g.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, f * 9), 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor.subarray(0, f * 9), 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col.subarray(0, f * 9), 3));
   const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
   m.receiveShadow = true;
   m.castShadow = true;
