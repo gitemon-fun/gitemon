@@ -445,9 +445,10 @@
   <div class="hint">Building the island…</div>
 {:else if !picked && !panel}
   <div class="hint">
-    {#if players}{players.toLocaleString('en-US')} Gitemon and
-    {/if}{sealed.toLocaleString('en-US')} sealed legends live on the island. The stronger a Gitemon, the
-    nearer the town it lives. Sign in with GitHub to hatch yours. Tap anyone.
+    {players ? `${players.toLocaleString('en-US')} Gitemon and ` : ''}{sealed.toLocaleString(
+      'en-US',
+    )} sealed legends live on the island. The stronger a Gitemon, the nearer the town it lives. Sign in
+    with GitHub to hatch yours. Tap anyone.
   </div>
 {/if}
 
