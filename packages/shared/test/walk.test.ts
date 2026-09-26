@@ -27,3 +27,26 @@ describe('walk rules (v6)', () => {
     expect(legendOfDayRank('2026-09-27')).toBe(r);
   });
 });
+
+import { cleanProject, signText } from '../src/index.js';
+describe('signs (v7)', () => {
+  it('accepts plain project names and refuses links, slurs and spam', () => {
+    expect(cleanProject('  Gitemon  2 ')).toBe('Gitemon 2');
+    expect(cleanProject('my-app_v1.2')).toBe('my-app_v1.2');
+    for (const bad of [
+      'http://x',
+      'see www.site',
+      'x.com',
+      'me@mail',
+      'free airdrop',
+      'a'.repeat(40),
+      '<script>',
+    ])
+      expect(cleanProject(bad), bad).toBeNull();
+  });
+  it('draws only template words', () => {
+    expect(signText('building', 'Gitemon')).toBe('Building Gitemon');
+    expect(signText('work', 'ignored')).toBe('Open to work');
+    expect(signText('evil', null)).toBe('');
+  });
+});

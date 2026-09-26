@@ -1,4 +1,4 @@
-import { score } from '@gitemon/scorer';
+import { merit, score } from '@gitemon/scorer';
 import {
   CHUNK,
   WORLD_W,
@@ -37,6 +37,7 @@ export interface Row {
   claimed_at: string | null;
   town_id: number | null;
   caught_count: number;
+  merit?: number;
 }
 
 export const chunkOf = (x: number, y: number) =>
@@ -150,6 +151,16 @@ function scoreCols(sc: Score) {
  * Returns the row after the write.
  */
 export async function ingest(db: D1Database, snap: Snapshot): Promise<Row> {
+  const row = await ingestScored(db, snap);
+  // v7 (V7-D2): merit, recomputed on every fresh snapshot
+  await db
+    .prepare('UPDATE gitemon SET merit = ? WHERE id = ?')
+    .bind(merit(snap), snap.userId)
+    .run();
+  return { ...row, merit: merit(snap) } as Row;
+}
+
+async function ingestScored(db: D1Database, snap: Snapshot): Promise<Row> {
   const sc = score(snap);
   const cols = scoreCols(sc);
   const existing = await byId(db, snap.userId);

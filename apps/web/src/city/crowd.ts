@@ -115,7 +115,9 @@ function specialAttr(g: MapGitemon): [number, number, number, number, number] {
   if (!sp) return [1, 0, 0, 0, 0];
   const scale = sp.rank === 1 ? 3 : sp.rank <= 3 ? 2.3 : SPECIAL_SCALE[sp.tier];
   const [r, gg, b] = GLOW[sp.tier]!;
-  return [scale, sp.sealed ? 1 : 0, r, gg, b];
+  // sealed = a glowing silhouette (1); a named legend — woken, or earned on merit (V7) — shows its own
+  // colours with the tier's glow at its feet (2)
+  return [scale, sp.sealed ? 1 : 2, r, gg, b];
 }
 
 const VERT_COMMON = /* glsl */ `

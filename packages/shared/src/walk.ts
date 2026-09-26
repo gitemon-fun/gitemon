@@ -40,3 +40,30 @@ export const legendOfDayRank = (day: string) => (hash32(`legend-of-the-day:${day
 
 /** a stable per-day order for moving the Rare to new group hearts (V6-D5) */
 export const dayShuffle = (key: string, day: string) => hash32(`rare:${key}:${day}`);
+
+// ---- v7 signs (V7-D5) -----------------------------------------------------------------------------
+
+/** the only sign templates; a player picks one — nothing is typed except a filtered project name */
+export const SIGN_TEMPLATES = {
+  work: 'Open to work',
+  hiring: 'Hiring',
+  building: 'Building',
+  freelance: 'Available for freelance',
+} as const;
+export type SignTemplate = keyof typeof SIGN_TEMPLATES;
+
+const BLOCKED =
+  /(fuck|shit|cunt|nigg|fag|porn|sex|casino|bet|crypto.?pump|airdrop|http|www\.|\.com|\.io|@)/i;
+/** a project name: 1–32 letters, digits, spaces and . - _ ; no links, no slurs, no spam words */
+export function cleanProject(s: unknown): string | null {
+  if (typeof s !== 'string') return null;
+  const t = s.trim().replace(/\s+/g, ' ');
+  if (!t) return null;
+  if (t.length > 32 || !/^[\p{L}\p{N} ._-]+$/u.test(t) || BLOCKED.test(t)) return null;
+  return t;
+}
+/** the sign's words, as drawn on a house */
+export const signText = (template: string, project: string | null) =>
+  template === 'building' && project
+    ? `Building ${project}`
+    : (SIGN_TEMPLATES[template as SignTemplate] ?? '');

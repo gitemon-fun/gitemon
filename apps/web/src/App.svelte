@@ -10,7 +10,7 @@
   import { api, ERRORS, type Detail, type Me, type Town } from './lib/api';
   import { CityScene } from './city/scene';
   import { loadCity, type LoadedCity } from './city/load';
-  import { CATCH_M, IDLE_MS, SIGHT_M } from '@gitemon/shared';
+  import { CATCH_M, IDLE_MS, SIGHT_M, SIGN_TEMPLATES, signText } from '@gitemon/shared';
   import Sprite from './lib/Sprite.svelte';
 
   // Gitemon Island is the map (GRANDPLAN v4): a centre town and nine climate regions.
@@ -225,6 +225,32 @@
     const p = town?.byId.get(g.id);
     return w && p ? Math.hypot(w[0] - p.spot.x, w[1] - p.spot.z) : Infinity;
   };
+
+  // ---- v7: signs (V7-D5) ----------------------------------------------------------------------
+  let signTpl = $state('work');
+  let signProject = $state('');
+  async function saveSign() {
+    busy = true;
+    const r = await api.setSign(signTpl, signProject);
+    busy = false;
+    say(
+      r.data.ok
+        ? 'Sign saved. It shows on your house from the next map refresh.'
+        : r.data.error === 'bad-project'
+          ? 'Project names: up to 32 letters, digits, spaces and . - _ — no links.'
+          : 'Could not save the sign.',
+    );
+  }
+  async function clearSign() {
+    busy = true;
+    await api.clearSign();
+    busy = false;
+    say('Sign removed.');
+  }
+  async function reportSign(id: number) {
+    await api.reportSign(id);
+    say('Thanks — the sign is reported.');
+  }
 
   async function doCatch() {
     if (!picked) return;
@@ -470,7 +496,18 @@
             : ''}
         </p>
         {#if picked.special}<p class="dim">
-            {picked.special.title ?? `${TIER_NAME[picked.special.tier]} legend`} · awake
+            {picked.special.title ?? `${TIER_NAME[picked.special.tier]} legend`} · {picked.special
+              .earned
+              ? 'earned on merit'
+              : 'awake'}
+          </p>{/if}
+        {#if detail?.sign}<p class="signline">
+            🪧 {signText(detail.sign.template, detail.sign.project)}{#if detail.website}
+              · <a href={detail.website} rel="nofollow noopener" target="_blank">website</a>{/if}
+            {#if me && me.id !== picked.id}<button
+                class="link"
+                onclick={() => reportSign(picked!.id)}>report</button
+              >{/if}
           </p>{/if}
         <p class="lv">
           Lv {picked.lv}{#if detail?.bonus}<span class="bonus"> +{detail.bonus}</span>{/if}
@@ -641,6 +678,31 @@
         <p class="dim small">
           Tap the map to walk. Walking home is free. Real GitHub work — merged pull requests,
           reviews, active weeks — earns more steps.
+        </p>
+      </div>
+      <div class="walkstats">
+        <p>
+          <b>Merit:</b>
+          {(town?.byId.get(me.id)?.g.m ?? 0).toFixed(0)} / 100 — your own work, counted by active days,
+          merged pull requests, reviews, stars and issues. The best take champion seats on the plazas.
+        </p>
+        <p><b>Sign on your house</b></p>
+        <div class="actions">
+          <select bind:value={signTpl} aria-label="Sign">
+            {#each Object.entries(SIGN_TEMPLATES) as [k, label]}<option value={k}>{label}</option
+              >{/each}
+          </select>
+          {#if signTpl === 'building'}<input
+              bind:value={signProject}
+              maxlength="32"
+              placeholder="Project name"
+              aria-label="Project name"
+            />{/if}
+          <button disabled={busy} onclick={saveSign}>Save</button>
+          <button disabled={busy} onclick={clearSign}>Remove</button>
+        </div>
+        <p class="dim small">
+          The only link is the website on your GitHub profile. Signs can be reported.
         </p>
       </div>
       <p>{me.catchesLeft} catches left today.</p>

@@ -17,6 +17,9 @@ export interface Me extends MapGitemon {
 }
 export interface Detail {
   g: MapGitemon;
+  sign?: { template: string; project: string | null } | null;
+  website?: string | null;
+  merit?: number;
   name: string | null;
   stats: Stats;
   caughtCount: number;
@@ -49,6 +52,11 @@ async function post<T>(url: string, body?: unknown): Promise<{ status: number; d
   return { status: r.status, data: (await r.json()) as T };
 }
 
+async function del<T>(url: string): Promise<{ status: number; data: T }> {
+  const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
+  return { status: r.status, data: (await r.json()) as T };
+}
+
 export const api = {
   me: () => get<{ player: Me | null }>('/api/me'),
   notable: () =>
@@ -74,6 +82,10 @@ export const api = {
       z,
       walked,
     }),
+  setSign: (template: string, project: string) =>
+    post<{ ok?: boolean; error?: string }>('/api/sign', { template, project }),
+  clearSign: () => del<{ ok: boolean }>('/api/sign'),
+  reportSign: (id: number) => post<{ ok: boolean }>(`/api/sign/report/${id}`, {}),
   wake: () => post<{ ok: boolean; woken: boolean }>('/api/legend/wake', {}),
   removeLegend: () => post<{ ok: boolean }>('/api/legend/remove', {}),
   dex: () => get<{ dex: (MapGitemon & { bonded: boolean; caughtAt: string })[] }>('/api/dex'),

@@ -14,6 +14,8 @@ import {
   legendOfDayRank,
   nextStreak,
   walkBudget,
+  SIGN_TEMPLATES,
+  cleanProject,
   type Snapshot,
   type TypeId,
 } from '@gitemon/shared';
@@ -338,7 +340,8 @@ app.get('/api/city', (c) =>
   edgeCached(c, 600, async () => {
     const rows = await c.env.DB.prepare(
       `SELECT id, login, t1, t2, shape, form, shiny, level, status = 'claimed',
-              CASE WHEN aura_until > ? THEN COALESCE(aura_tier, 'f') ELSE '' END, claimed_at
+              CASE WHEN aura_until > ? THEN COALESCE(aura_tier, 'f') ELSE '' END, claimed_at, merit,
+              (SELECT template || '|' || COALESCE(project, '') FROM sign WHERE player_id = gitemon.id AND hidden = 0)
        FROM gitemon WHERE hidden = 0 ORDER BY notable DESC, id LIMIT 40000`,
     )
       .bind(now())
@@ -392,6 +395,7 @@ app.get('/api/gitemon/:id', async (c) => {
     machine: !!r.machine,
     town,
     caughtByMe: caught ? { bonded: !!caught.bonded } : null,
+    ...(await signOf(c, r)),
   });
 });
 
@@ -544,6 +548,68 @@ app.post('/api/walk/bless', async (c) => {
     .bind(until, `${l.tier}:${auraLevel(ck.streak)}`, ck.p.id)
     .run();
   return c.json({ ok: true, until, streak: ck.streak });
+});
+
+/** a claimed player's sign and the website from their own GitHub profile (V7-D5) */
+async function signOf(c: Context<AppEnv>, r: Row) {
+  if (r.status !== 'claimed') return { sign: null, website: null };
+  const sg = await c.env.DB.prepare(
+    'SELECT template, project FROM sign WHERE player_id = ? AND hidden = 0',
+  )
+    .bind(r.id)
+    .first<{ template: string; project: string | null }>();
+  const site = (JSON.parse(r.snapshot) as Snapshot).website ?? null;
+  const website = sg && site && /^https?:\/\//.test(site) ? site : null;
+  return { sign: sg ?? null, website, merit: r.merit ?? 0 };
+}
+
+// ---- v7: signs on houses (V7-D5) ----------------------------------------------------------------------
+
+/** set your sign: a template + (for "Building") a filtered project name. Nothing else is typed. */
+app.post('/api/sign', async (c) => {
+  const p = c.get('player');
+  if (!p) return c.json({ error: 'signin' }, 401);
+  const { template, project } = await c.req.json<{ template: string; project?: string }>();
+  if (!(template in SIGN_TEMPLATES)) return c.json({ error: 'bad-template' }, 400);
+  const name = template === 'building' ? cleanProject(project) : null;
+  if (template === 'building' && !name) return c.json({ error: 'bad-project' }, 400);
+  await c.env.DB.prepare(
+    `INSERT INTO sign (player_id, template, project, hidden, reports, updated_at) VALUES (?, ?, ?, 0, 0, ?)
+     ON CONFLICT(player_id) DO UPDATE SET template = excluded.template, project = excluded.project, updated_at = excluded.updated_at`,
+  )
+    .bind(p.id, template, name, now())
+    .run();
+  return c.json({ ok: true });
+});
+app.delete('/api/sign', async (c) => {
+  const p = c.get('player');
+  if (!p) return c.json({ error: 'signin' }, 401);
+  await c.env.DB.prepare('DELETE FROM sign WHERE player_id = ?').bind(p.id).run();
+  return c.json({ ok: true });
+});
+/** report a sign: three reports hide it until an admin looks */
+app.post('/api/sign/report/:id', async (c) => {
+  const p = c.get('player');
+  if (!p) return c.json({ error: 'signin' }, 401);
+  const id = Number(c.req.param('id'));
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      'UPDATE sign SET reports = reports + 1, hidden = CASE WHEN reports + 1 >= 3 THEN 1 ELSE hidden END WHERE player_id = ?',
+    ).bind(id),
+    c.env.DB.prepare(
+      "INSERT INTO admin_log (admin_id, action, target_id, note, created_at) VALUES (?, 'report-sign', ?, NULL, ?)",
+    ).bind(p.id, id, now()),
+  ]);
+  return c.json({ ok: true });
+});
+app.post('/api/admin/sign/:id', async (c) => {
+  const p = c.get('player');
+  if (!p?.is_admin) return c.json({ error: 'forbidden' }, 403);
+  const { hidden } = await c.req.json<{ hidden: boolean }>();
+  await c.env.DB.prepare('UPDATE sign SET hidden = ?, reports = 0 WHERE player_id = ?')
+    .bind(hidden ? 1 : 0, Number(c.req.param('id')))
+    .run();
+  return c.json({ ok: true });
 });
 
 /** A listed developer wakes their sealed legend: it shows with their name from now on (V5-D4). */
@@ -763,12 +829,18 @@ app.post('/internal/layout', async (c) => {
   }>();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return c.json({ error: 'bad-day' }, 400);
   const db = c.env.DB;
+  // v7: climbing into the tiers is on only once calibrated (V7-D3, §5) — carried into every day
+  const cal = await db
+    .prepare("SELECT value FROM meta WHERE key = 'calibration'")
+    .first<{ value: string }>();
   await db.batch([
     db
       .prepare(
         "INSERT INTO meta (key, value) VALUES ('layout', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       )
-      .bind(JSON.stringify({ day, pops, specials })),
+      .bind(
+        JSON.stringify({ day, pops, specials, calibration: cal ? JSON.parse(cal.value) : null }),
+      ),
     db
       .prepare(
         `INSERT OR REPLACE INTO legend_spot (day, key, x, z)
@@ -779,6 +851,27 @@ app.post('/internal/layout', async (c) => {
     db.prepare('DELETE FROM legend_spot WHERE day < ?').bind(day),
   ]);
   return c.json({ ok: true, spots: (spots ?? []).length });
+});
+
+/** v7 §5: set (or clear, with null) the merit lines for climbing into each tier — Dedi's go only */
+app.post('/internal/calibration', async (c) => {
+  const { lines } = await c.req.json<{ lines: Record<string, number> | null }>();
+  if (lines === null) await c.env.DB.prepare("DELETE FROM meta WHERE key = 'calibration'").run();
+  else
+    await c.env.DB.prepare(
+      "INSERT INTO meta (key, value) VALUES ('calibration', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+      .bind(JSON.stringify(lines))
+      .run();
+  return c.json({ ok: true });
+});
+
+/** v7 §5: the merit distribution of signed-in players, for calibration (numbers only, no names) */
+app.get('/internal/merit-stats', async (c) => {
+  const rows = await c.env.DB.prepare(
+    "SELECT merit FROM gitemon WHERE status = 'claimed' AND hidden = 0 ORDER BY merit DESC",
+  ).all<{ merit: number }>();
+  return c.json({ merits: rows.results.map((r) => r.merit) });
 });
 
 /** Re-score from stored snapshots after a scorer change (no GitHub calls). */

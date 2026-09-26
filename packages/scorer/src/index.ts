@@ -163,3 +163,41 @@ export function score(s: Snapshot): Score {
     notable: level + (form - 1) * 15 + (shiny ? 40 : 0),
   };
 }
+
+// ---- v7 merit (GRANDPLAN v7 §4, V7-D2) ---------------------------------------------------------------
+
+/**
+ * Merit: a player's own work, rewarding CONSISTENCY over volume. Raw commits count — including on your
+ * own repos — but only as active days (one per calendar day, whatever the count). Every term is on a
+ * flattening scale and capped; fresh repos (< 14 days) and forks earn no stars; bots earn nothing.
+ * 0..100. Separate from the stats and the level (D6 still holds for them).
+ */
+export const MERIT = {
+  daysAt100: 300,
+  mergedAt100: 200,
+  reviewsAt100: 300,
+  starsAt100: 5000,
+  issuesAt100: 200,
+  freshRepoDays: 14,
+  weights: { days: 40, merged: 25, reviews: 15, stars: 10, issues: 10 },
+} as const;
+
+const unit = (x: number, at: number) => Math.min(1, Math.log1p(Math.max(0, x)) / Math.log1p(at));
+
+export function merit(s: Snapshot, now = Date.parse(s.fetchedAt) || Date.now()): number {
+  if (s.isBot) return 0;
+  const fresh = now - MERIT.freshRepoDays * 86_400_000;
+  const stars = s.repos
+    .filter((r) => !r.fork && (!r.createdAt || Date.parse(r.createdAt) < fresh))
+    .reduce((a, r) => a + r.stars, 0);
+  // older snapshots have no activeDays: a week with activity counts as ~2 days until the next fetch
+  const days = s.contrib.activeDays ?? s.contrib.activeWeeks * 2;
+  const w = MERIT.weights;
+  const v =
+    w.days * unit(days, MERIT.daysAt100) +
+    w.merged * unit(s.mergedToOthers.count, MERIT.mergedAt100) +
+    w.reviews * unit(s.contrib.reviews, MERIT.reviewsAt100) +
+    w.stars * unit(stars, MERIT.starsAt100) +
+    w.issues * unit(s.contrib.issues, MERIT.issuesAt100);
+  return Math.round(v * 10) / 10;
+}

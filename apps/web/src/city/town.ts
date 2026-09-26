@@ -12,12 +12,14 @@ import {
   TOWN_R,
   TOWN_Y,
   hash32,
+  signText,
   type Island,
   type Lot,
 } from '@gitemon/shared';
 import { Batch, PARTS, PITCH, PROPS, ROOFS, ROUND, type RoofId } from './kit';
 import { SKINS, landmark, monument, type Skin } from './buildings';
 import { dress, roads, terrain, water } from './nature';
+import type { Home } from './load';
 
 /**
  * Builds Gitemon Island (GRANDPLAN v4): the land and its dressing (nature.ts), and the centre town
@@ -41,7 +43,7 @@ export interface Town {
   detail: THREE.Object3D[];
 }
 
-export function buildTown(isl: Island, homes: Map<number, string>, onLater?: () => void): Town {
+export function buildTown(isl: Island, homes: Map<number, Home>, onLater?: () => void): Town {
   const group = new THREE.Group();
   const detail: THREE.Object3D[] = [];
   const lit = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
@@ -59,7 +61,9 @@ export function buildTown(isl: Island, homes: Map<number, string>, onLater?: () 
   const facade = new Batch();
   const lights = new Batch();
   const props = new Batch();
-  buildings(isl, homes, main, facade, lights);
+  const signs: SignSpot[] = [];
+  buildings(isl, homes, main, facade, lights, signs);
+  for (const sg of signs) group.add(signMesh(sg));
   townFurniture(isl, props, lights, main);
   add(main.meshes(lit, { cast: true, receive: true }));
   add(facade.meshes(lit, { receive: true }), true);
@@ -88,6 +92,33 @@ export function buildTown(isl: Island, homes: Map<number, string>, onLater?: () 
   mon.castShadow = mon.receiveShadow = true;
   group.add(mon);
   return { group, detail };
+}
+
+/** a house sign: white board, dark words, drawn once on a small canvas */
+function signMesh(sg: SignSpot): THREE.Mesh {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 96;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#fbf7ee';
+  ctx.fillRect(0, 0, 512, 96);
+  ctx.strokeStyle = '#6b5a44';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, 504, 88);
+  ctx.fillStyle = '#2a2530';
+  ctx.font = '600 44px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(sg.text, 256, 50, 480);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(sg.w, sg.w * (96 / 512)),
+    new THREE.MeshBasicMaterial({ map: tex }),
+  );
+  m.position.set(sg.x, sg.y, sg.z);
+  m.rotation.y = sg.theta;
+  return m;
 }
 
 // ---- town ground: plaza rings, ring streets, canal banks, bridges, the low wall ---------------------
@@ -322,12 +353,23 @@ function pickRoof(
 }
 const widthClass = (l: Lot) => (l.w < 4.2 ? 0 : l.w < 5.3 ? 1 : 2);
 
+/** a sign to hang on a house facade (V7-D5) */
+interface SignSpot {
+  x: number;
+  y: number;
+  z: number;
+  theta: number;
+  text: string;
+  w: number;
+}
+
 function buildings(
   isl: Island,
-  homes: Map<number, string>,
+  homes: Map<number, Home>,
   main: Batch,
   facade: Batch,
   lights: Batch,
+  signs: SignSpot[] = [],
 ) {
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -339,7 +381,10 @@ function buildings(
 
   isl.lots.forEach((lot, li) => {
     const s = SKINS[BIOME_ORDER[lot.d]!];
-    const owner = homes.get(li);
+    const home = homes.get(li);
+    const owner = home?.colour;
+    // v7 (V7-D6): a claimed player's house grows with their standing
+    const storeys = home ? Math.min(3, Math.max(lot.storeys, 1 + home.band)) : lot.storeys;
     const theta = Math.atan2(lot.fx, lot.fz);
     q.setFromAxisAngle(up, theta);
     const cos = Math.cos(theta);
@@ -364,7 +409,7 @@ function buildings(
       b.add(geo, m, colour);
     };
 
-    const H = lot.storeys * STOREY;
+    const H = storeys * STOREY;
     const w = lot.w;
     const dp = lot.depth;
     col.set(s.walls[Math.floor(u(lot.seed, 3) * s.walls.length)]!);
@@ -396,7 +441,7 @@ function buildings(
 
     // facade: windows per storey, a door on the ground floor
     const n = w < 3.9 ? 1 : w < 5.4 ? 2 : 3;
-    for (let i = 0; i < lot.storeys; i++) {
+    for (let i = 0; i < storeys; i++) {
       const geo =
         i === 0
           ? w >= 4
@@ -439,9 +484,9 @@ function buildings(
       );
     if (!lot.corner && u(lot.seed, 22) < o.awning)
       put(facade, PARTS.awning, 0, 2.55, dp / 2, w * 0.64, 1, 1, s.accent);
-    if (lot.storeys >= 2 && u(lot.seed, 23) < o.balcony)
+    if (storeys >= 2 && u(lot.seed, 23) < o.balcony)
       put(facade, PARTS.balcony, 0, STOREY + 0.05, dp / 2, w * 0.46, 1, 1, s.trim);
-    for (let i = 1; i < lot.storeys; i++)
+    for (let i = 1; i < storeys; i++)
       if (u(lot.seed, 30 + i) < o.flowers)
         put(facade, PARTS.flowers, 0, i * STOREY + 1.02, dp / 2, w * 0.5, 1, 1, FLOWERS);
     if ((roof === 'gable' || roof === 'mansard') && u(lot.seed, 24) < o.dormer)
@@ -457,6 +502,22 @@ function buildings(
         roofCol,
       );
 
+    // v7 (V7-D5): the owner's sign over the door, bigger on a bigger house
+    if (home?.sign) {
+      const [tpl, project] = home.sign.split('|');
+      const text = signText(tpl ?? '', project || null);
+      if (text) {
+        const at = lot.y + 2.5 + home.band * 0.4;
+        signs.push({
+          x: cx + (lot.depth / 2 + 0.12) * lot.fx,
+          y: at,
+          z: cz + (lot.depth / 2 + 0.12) * lot.fz,
+          theta,
+          text,
+          w: Math.min(lot.w * 0.9, 3.2 + home.band * 0.8),
+        });
+      }
+    }
     // a claimed player's house: door and flag in the owner's colour (V3-D2)
     if (owner) {
       put(main, PARTS.pole, 0, roofTop - 0.4, 0, 1, 1, 1, '#6b6b70');

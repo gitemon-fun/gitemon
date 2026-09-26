@@ -26,6 +26,8 @@ export type Row = [
   number,
   number | string,
   string | null,
+  number,
+  string | null,
 ];
 /** [key, rank, tier, title, species, t1, t2, shape, form, shiny, id|null, login|null] from /api/city */
 export type LegendRow = [
@@ -74,6 +76,9 @@ export const fromRow = (r: Row): MapGitemon => ({
   a: r[9] ? 1 : 0,
   // v6: '<tier>:<level>' while blessed by the legend of the day; 'f' = the friendship aura
   ...(typeof r[9] === 'string' && r[9] && r[9] !== 'f' ? { at: r[9] } : {}),
+  // v7: merit (standing) and the house sign ('template|project')
+  m: r[11] ?? 0,
+  ...(r[12] ? { sg: r[12] } : {}),
 });
 
 /**
@@ -88,7 +93,22 @@ export interface DayLayout {
   day: string;
   pops: Partial<Record<TypeId, number>>;
   specials: Partial<Record<TypeId, { mini: number; rare: number }>>;
+  /** v7: merit lines for climbing into each tier; absent = climbing off (V7-D3, §5) */
+  calibration?: Partial<Record<'legendary' | 'mythic' | 'epic' | 'rare', number>> | null;
 }
+
+/** a claimed player's house: their colour, how big it has grown, their sign (V7-D6) */
+export interface Home {
+  colour: string;
+  band: 0 | 1 | 2;
+  sign: string | null;
+  id: number;
+}
+/** standing bands for houses: merit 35+ grows a storey, 60+ another (V7-D6) */
+export const bandOf = (merit: number): 0 | 1 | 2 => (merit >= 60 ? 2 : merit >= 35 ? 1 : 0);
+/** champion seats (V7-D4, V7-Q1) */
+export const PLAZA_SEATS = 24;
+export const MINI_SEATS = 6;
 
 export function place(
   all: MapGitemon[],
@@ -98,7 +118,10 @@ export function place(
   day = dayOf(),
 ) {
   const woken = new Set(legends.filter((l) => !l.special!.sealed).map((l) => l.id));
-  const players = all.filter((g) => !woken.has(g.id));
+  // v7 (V7-D1): players stand by MERIT — their own work, consistency over volume
+  const players = all
+    .filter((g) => !woken.has(g.id))
+    .sort((a, b) => (b.m ?? 0) - (a.m ?? 0) || a.id - b.id);
   const pops: Partial<Record<TypeId, number>> = {};
   const specials: Partial<Record<TypeId, { mini: number; rare: number }>> = {};
   for (const g of players) pops[g.t1] = (pops[g.t1] ?? 0) + 1;
@@ -109,22 +132,58 @@ export function place(
     if (tier === 'mythic' || tier === 'epic') c.mini++;
     else if (tier === 'rare') c.rare++;
   }
-  const plazaN = Math.max(24, Math.min(190, Math.round((players.length + legends.length) / 40)));
+  // every mini plaza keeps room for its region's champion seats
+  for (const t of Object.keys(pops) as TypeId[]) {
+    const c = (specials[t] ??= { mini: 0, rare: 0 });
+    c.mini += MINI_SEATS;
+  }
   // the day's frozen layout wins: players who join during the day slot into its spare room
-  const city = island(layout?.pops ?? pops, plazaN, layout?.specials ?? specials);
+  const city = island(layout?.pops ?? pops, PLAZA_SEATS + 30, layout?.specials ?? specials);
   const placed: Placed[] = [];
-  let onPlaza = 0;
+  const taken = new Set<number>();
+
+  // v7 (V7-D3): climbing into the legend tiers — only once calibrated (thresholds in the layout).
+  // A climber takes the seat of the lowest sealed legend of their tier; that legend leaves for now.
+  const cal = layout?.calibration ?? null;
+  let seated = legends;
+  if (cal) {
+    const tiers = ['legendary', 'mythic', 'epic', 'rare'] as const;
+    const claimed = new Set<number>();
+    seated = [];
+    for (const tier of tiers) {
+      const own = legends
+        .filter((l) => l.special!.tier === tier)
+        .sort((a, b) => a.special!.rank - b.special!.rank);
+      const line = cal[tier];
+      const climbers =
+        line == null
+          ? []
+          : players.filter((g) => !claimed.has(g.id) && (g.m ?? 0) >= line && g.t1 !== 'machine');
+      // The Origin and The Guardians stay influence-only (ranks 1–3)
+      const open = own.filter((l) => l.special!.rank > 3 && l.special!.sealed);
+      const n = Math.min(climbers.length, open.length);
+      const out = new Set(open.slice(open.length - n).map((l) => l.id));
+      seated.push(...own.filter((l) => !out.has(l.id)));
+      for (let k = 0; k < n; k++) {
+        const g = climbers[k]!;
+        const seat = open[open.length - n + k]!;
+        claimed.add(g.id);
+        seated.push({ ...g, special: { ...seat.special!, sealed: false, earned: true } });
+      }
+    }
+  }
+
   // the specials, in rank order: the plaza keeps the top ten; Mythic then Epic stand on their
   // region's mini plaza; each Rare stands at the heart of one of its type's groups in the wild
   const miniNext = new Map<TypeId, number>();
   const denNext = new Map<TypeId, number>();
   // the Rare move to new group hearts every day (V6-D5): a per-day order within each type
-  const rareOrder = new Map<number, number>();
-  for (const l of legends)
-    if (l.special!.tier === 'rare') rareOrder.set(l.id, dayShuffle(l.special!.key, day));
-  const ordered = [...legends].sort((a, b) =>
+  const rareOrder = new Map<string, number>();
+  for (const l of seated)
+    if (l.special!.tier === 'rare') rareOrder.set(l.special!.key, dayShuffle(l.special!.key, day));
+  const ordered = [...seated].sort((a, b) =>
     a.special!.tier === 'rare' && b.special!.tier === 'rare'
-      ? rareOrder.get(a.id)! - rareOrder.get(b.id)!
+      ? rareOrder.get(a.special!.key)! - rareOrder.get(b.special!.key)!
       : a.special!.rank - b.special!.rank,
   );
   for (const l of ordered) {
@@ -146,30 +205,51 @@ export function place(
       spot = city.mini[BIOME_ORDER.indexOf(l.t1)]?.[k];
       miniNext.set(l.t1, k + 1);
     }
-    if (spot) placed.push({ g: l, spot });
+    if (spot) {
+      placed.push({ g: l, spot });
+      if (l.special!.earned) taken.add(l.id);
+    }
   }
-  const next = new Map<TypeId, number>();
-  // houses go in claim order: the first to claim gets the house nearest the plaza
-  const homes = new Map<number, string>();
-  const doorOf = new Map<number, number>();
+
+  // houses are PROPERTY (V7-D7): claim order, nearest the plaza first; they grow with merit and
+  // carry the sign — but where a Gitemon stands comes from its merit, like everyone else
+  const homes = new Map<number, Home>();
+  const houseOf = new Map<number, number>();
   const claimed = players
     .filter((g) => g.st === 'c')
     .sort((a, b) => (claimedAt.get(a.id) ?? '').localeCompare(claimedAt.get(b.id) ?? ''));
   claimed.forEach((g, k) => {
     if (!city.doors[k]) return;
-    doorOf.set(g.id, k);
-    homes.set(city.doorLots[k]!, TYPE_INFO[g.t1].colors[0]);
+    houseOf.set(g.id, k);
+    homes.set(city.doorLots[k]!, {
+      colour: TYPE_INFO[g.t1].colors[0],
+      band: bandOf(g.m ?? 0),
+      sign: g.sg ?? null,
+      id: g.id,
+    });
   });
-  const plazaEnd = onPlaza + plazaN;
+
+  // champion seats (V7-D4): the top players by merit on the main plaza, then each type's best on
+  // its mini plaza; everyone else in the wild, the stronger nearer the town
+  let onPlaza = 0;
+  const seatsUsed = new Map<TypeId, number>();
+  const next = new Map<TypeId, number>();
   for (const g of players) {
-    if (onPlaza < plazaEnd && g.t1 !== 'machine' && city.plaza[onPlaza]) {
+    if (taken.has(g.id)) continue;
+    if (onPlaza < PLAZA_SEATS && g.t1 !== 'machine' && city.plaza[onPlaza]) {
       placed.push({ g, spot: city.plaza[onPlaza++]! });
       continue;
     }
-    const door = doorOf.get(g.id);
-    if (door != null) {
-      placed.push({ g, spot: city.doors[door]! });
-      continue;
+    const used = seatsUsed.get(g.t1) ?? 0;
+    if (g.t1 !== 'machine' && used < MINI_SEATS) {
+      const k = miniNext.get(g.t1) ?? 0;
+      const spot = city.mini[BIOME_ORDER.indexOf(g.t1)]?.[k];
+      if (spot) {
+        miniNext.set(g.t1, k + 1);
+        seatsUsed.set(g.t1, used + 1);
+        placed.push({ g, spot });
+        continue;
+      }
     }
     const d = BIOME_ORDER.indexOf(g.t1);
     const k = next.get(g.t1) ?? 0;
@@ -179,8 +259,8 @@ export function place(
     placed.push({ g, spot });
   }
   const todayRank = legendOfDayRank(day);
-  const today = legends.find((l) => l.special!.rank === todayRank)?.special!.key ?? null;
-  return { city, placed, homes, today, pops, specials };
+  const today = seated.find((l) => l.special!.rank === todayRank)?.special!.key ?? null;
+  return { city, placed, homes, today, pops, specials, houseOf };
 }
 
 export interface LoadedCity {
@@ -188,7 +268,7 @@ export interface LoadedCity {
   today?: string | null;
   city: Island;
   placed: Placed[];
-  homes: Map<number, string>;
+  homes: Map<number, Home>;
   byId: Map<number, Placed>;
 }
 
@@ -198,6 +278,35 @@ export async function loadCity(): Promise<LoadedCity | null> {
   if (!r.ok) return null;
   const data = (await r.json()) as { g: Row[]; l?: LegendRow[]; layout?: DayLayout | null };
   const rows = data.g;
+  // ?fake=N (and &climb): N made-up players in this browser only — to see seats, houses and signs
+  // before real players exist. Nothing is sent anywhere.
+  const fake = Number(new URLSearchParams(location.search).get('fake')) || 0;
+  const types = BIOME_ORDER.filter((t) => t !== 'machine');
+  const tpls = ['work', 'hiring', 'building|Gitemon', 'freelance', ''];
+  for (let i = 0; i < fake; i++) {
+    const t = types[i % types.length]!;
+    const m = Math.round(95 * Math.pow(((i * 7919) % 1000) / 1000, 1.6));
+    rows.push([
+      -(100000 + i),
+      `player${i}`,
+      t,
+      null,
+      'steady',
+      ((i % 3) + 1) as 1 | 2 | 3,
+      0,
+      20,
+      1,
+      '',
+      `2026-09-2${i % 9}T00:00:00Z`,
+      m,
+      tpls[i % tpls.length] || null,
+    ]);
+  }
+  if (fake && location.search.includes('climb') && data.layout)
+    data.layout = {
+      ...data.layout,
+      calibration: { legendary: 92, mythic: 85, epic: 75, rare: 62 },
+    };
   const day = data.layout?.day ?? dayOf();
   const claimedAt = new Map(rows.filter((x) => x[10]).map((x) => [x[0], x[10]!]));
   const { city, placed, homes, today } = place(

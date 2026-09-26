@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TOWN_Y, gridHeight, type Island, type Spot } from '@gitemon/shared';
 import { Walk, Walkable } from './walker';
+import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
 import { buildTown } from './town';
 
@@ -277,8 +278,8 @@ export class CityScene {
 
   // ---- building the city ---------------------------------------------------------------------------
 
-  /** homes: lot index → the owner's colour (claimed players, V2-D5 / V3-D2) */
-  build(city: Island, homes = new Map<number, string>()) {
+  /** homes: lot index → the owner's house (claimed players, V2-D5 / V3-D2 / V7-D6) */
+  build(city: Island, homes = new Map<number, Home>()) {
     const t0 = performance.now();
     const town = buildTown(city, homes, () => {
       // props arrived: they cast shadows too, so the static map is drawn once more

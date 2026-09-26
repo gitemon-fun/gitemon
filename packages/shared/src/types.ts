@@ -8,7 +8,7 @@ export interface Snapshot {
   isBot: boolean;
   followers: number;
   /** Public repos the developer owns, top 100 by stars. */
-  repos: { name: string; stars: number; lang: string | null; fork: boolean }[];
+  repos: { name: string; stars: number; lang: string | null; fork: boolean; createdAt?: string }[];
   /** Last 12 months, from contributionsCollection. */
   contrib: {
     commits: number;
@@ -19,10 +19,14 @@ export interface Snapshot {
     restricted: number;
     /** Weeks (of the last 52) with at least one contribution. */
     activeWeeks: number;
+    /** v7: days (of the last 364) with at least one contribution — one per day, whatever the count */
+    activeDays?: number;
   };
   /** Lifetime PRs merged into repos the developer does not own. */
   mergedToOthers: { count: number; langs: Record<string, number>; owners: string[] };
   fetchedAt: string;
+  /** v7: the website on the developer's own public GitHub profile (the only link a sign may carry) */
+  website?: string | null;
 }
 
 export const TYPES = [
@@ -89,6 +93,9 @@ export interface MapGitemon {
   st: 'w' | 'c';
   /** 1 when a friendship buff is active */
   a: 0 | 1;
+  /** v7: merit (standing), and the house sign 'template|project' */
+  m?: number;
+  sg?: string;
   /** v6: blessed by the legend of the day — '<tier>:<level>' (level 0–2 from the streak) */
   at?: string;
   /** v5: one of the 500 specials. Sealed ones have a negative id and no login (V5-D4). */
@@ -104,6 +111,8 @@ export interface Special {
   /** a one-of-one species key (The Origin, The Guardians), else null */
   species: string | null;
   sealed: boolean;
+  /** v7: a player who climbed into this tier on merit (named; they joined) */
+  earned?: boolean;
 }
 
 export interface TypeInfo {

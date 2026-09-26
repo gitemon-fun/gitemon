@@ -28,10 +28,10 @@ export type NotFound = { notFound: true };
 const USER_QUERY = `query($login:String!){
   rateLimit{remaining resetAt}
   user(login:$login){
-    databaseId login name createdAt
+    databaseId login name createdAt websiteUrl
     followers{totalCount}
     repositories(first:100, ownerAffiliations:OWNER, privacy:PUBLIC, orderBy:{field:STARGAZERS,direction:DESC}){
-      nodes{ name stargazerCount isFork primaryLanguage{name} }
+      nodes{ name stargazerCount isFork createdAt primaryLanguage{name} }
     }
     contributionsCollection{
       totalCommitContributions totalPullRequestContributions
@@ -82,12 +82,14 @@ interface UserData {
     login: string;
     name: string | null;
     createdAt: string;
+    websiteUrl: string | null;
     followers: { totalCount: number };
     repositories: {
       nodes: {
         name: string;
         stargazerCount: number;
         isFork: boolean;
+        createdAt: string;
         primaryLanguage: { name: string } | null;
       }[];
     };
@@ -145,6 +147,7 @@ async function fetchBot(login: string, token: string, f: Fetcher): Promise<Snaps
     contrib: { commits: 0, prs: 0, reviews: 0, issues: 0, restricted: 0, activeWeeks: 0 },
     mergedToOthers: { count: 0, langs: {}, owners: [] },
     fetchedAt: new Date().toISOString(),
+    website: null,
   };
 }
 
@@ -176,6 +179,11 @@ export async function fetchSnapshot(
   const activeWeeks = weeks.filter((w) =>
     w.contributionDays.some((d) => d.contributionCount > 0),
   ).length;
+  // v7 (V7-D2): days with any contribution in the last year — one per calendar day, whatever the count
+  const activeDays = weeks.reduce(
+    (n, w) => n + w.contributionDays.filter((d) => d.contributionCount > 0).length,
+    0,
+  );
 
   return {
     v: 1,
@@ -190,6 +198,7 @@ export async function fetchSnapshot(
       stars: r.stargazerCount,
       lang: r.primaryLanguage?.name ?? null,
       fork: r.isFork,
+      createdAt: r.createdAt,
     })),
     contrib: {
       commits: cc.totalCommitContributions,
@@ -198,9 +207,12 @@ export async function fetchSnapshot(
       issues: cc.totalIssueContributions,
       restricted: cc.restrictedContributionsCount,
       activeWeeks,
+      activeDays,
     },
     mergedToOthers: { count: m.search.issueCount, langs, owners: [...owners].slice(0, 100) },
     fetchedAt: new Date().toISOString(),
+    // v7 (V7-D5): the only link a player's sign may carry — the website on their own GitHub profile
+    website: u.websiteUrl || null,
   };
 }
 
