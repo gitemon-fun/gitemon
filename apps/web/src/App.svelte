@@ -14,7 +14,7 @@
   import { loadCity, type LoadedCity } from './city/load';
   import Sprite from './lib/Sprite.svelte';
 
-  // Gitemon City is the map (GRANDPLAN v2 §9): one dense city, districts by language.
+  // Gitemon Island is the map (GRANDPLAN v4): a centre town and nine climate regions.
   let host: HTMLDivElement;
   let scene: CityScene | null = null;
   let town: LoadedCity | null = null;
@@ -62,6 +62,10 @@
   async function loadTowns() {
     towns = (await api.towns()).data.towns ?? [];
   }
+
+  /** the opening view: the town plus the inner edge of every region (G1), on any screen shape */
+  const homeZoom = () =>
+    Math.min(0.8, Math.max(0.42, (150 * (host.clientWidth / host.clientHeight)) / 220));
 
   /** Fly to a Gitemon in the city, stop it walking, ring it and open its sheet. */
   function show(g: MapGitemon, zoom = 3.2) {
@@ -189,7 +193,9 @@
     window.addEventListener('popstate', route);
     route();
     (async () => {
+      const tl = performance.now();
       const [loadedCity] = await Promise.all([loadCity(), loadMe()]);
+      if (scene) scene.stats.layoutMs = Math.round(performance.now() - tl);
       if (!loadedCity) {
         failed = true;
         return;
@@ -203,15 +209,16 @@
       const qs = new URLSearchParams(location.search);
       const house = qs.get('house');
       const focus = qs.get('focus') ?? house;
-      // ?at=<type> frames a district square (share links, screenshots); ?z= sets the zoom
-      const at = loadedCity.city.districts.find((d) => d.t === qs.get('at'));
-      if (at) scene!.flyTo(at.square.x, at.square.z, Number(qs.get('z')) || 1.6);
+      // ?at=<type> frames that type's best habitat (share links, screenshots); ?z= sets the zoom
+      // ?at=<type> frames that type's nearest habitat (its best residents)
+      const at = loadedCity.city.habitats.find((h) => h.t === qs.get('at'));
+      if (at) scene!.flyTo(at.x, at.z, Number(qs.get('z')) || 1.6);
       else if (focus) {
         query = focus;
         // ?house=<login> (profile "Visit house", V3-D2): the same flight, closer, onto the door
         await search(undefined, house ? 4 : 3.2);
       } else if (me && !me.hidden && town.byId.has(me.id)) show(me, 2.6);
-      else scene!.flyTo(0, 0, 1.3);
+      else scene!.flyTo(0, 0, homeZoom());
     })();
     return () => scene?.destroy();
   });
@@ -262,7 +269,7 @@
   <button onclick={() => scene?.zoomBy(1.6)} aria-label="Zoom in">+</button>
   <button onclick={() => scene?.zoomBy(1 / 1.6)} aria-label="Zoom out">−</button>
   <button onclick={() => scene?.rotate(1)} aria-label="Turn the city">⟳</button>
-  <button onclick={() => scene?.flyTo(0, 0, 1.3)} aria-label="Back to the plaza" class="fit"
+  <button onclick={() => scene?.flyTo(0, 0, homeZoom())} aria-label="Back to the town" class="fit"
     >⌂</button
   >
 </div>
@@ -270,11 +277,11 @@
 {#if failed}
   <div class="hint">The city could not load. Try again in a minute.</div>
 {:else if !loaded}
-  <div class="hint">Building the city…</div>
+  <div class="hint">Building the island…</div>
 {:else if !picked && !panel}
   <div class="hint">
-    {total.toLocaleString('en-US')} Gitemon live here. The most notable stand on the plaza; every language
-    has its own district. Tap anyone.
+    {total.toLocaleString('en-US')} Gitemon live on the island. The most notable stand on the plaza; the
+    stronger a Gitemon, the nearer the town it lives. Tap anyone.
   </div>
 {/if}
 
@@ -381,7 +388,8 @@
     {:else if panel === 'towns'}
       <h2>Towns</h2>
       <p class="dim">
-        Your home is your language's district in the city. A town is a group you choose.
+        Wild Gitemon live in their climate region; claimed ones live in the town with their tamer. A
+        town is a group you choose.
       </p>
       {#if me}
         {#if me.town}

@@ -95,6 +95,7 @@ function buildAtlas(list: Placed[]) {
 
 const VERT_COMMON = /* glsl */ `
   attribute vec3 iPos;   // x, z, phase
+  attribute float iY;    // ground height at the spot (v4: the island has terrain)
   attribute vec3 iWalk;  // tx, tz, amplitude (0 = standing)
   uniform float uTime;
   uniform float uGrow;
@@ -106,7 +107,7 @@ const VERT_COMMON = /* glsl */ `
     moving = iWalk.z > 0.0 ? step(abs(sin(t) * 1.45), 1.0) : 0.0;
     vec2 d = iWalk.xy * iWalk.z * s;
     dirSign = sign(dot(vec3(iWalk.x * v, 0.0, iWalk.y * v), uRight) + 1e-4);
-    return vec3(iPos.x + d.x, 0.0, iPos.y + d.y);
+    return vec3(iPos.x + d.x, iY, iPos.y + d.y);
   }
 `;
 
@@ -130,15 +131,19 @@ export class Crowd {
     const { tex, keys, rows } = buildAtlas(list);
     this.uniforms.uAtlas.value = tex;
     const pos = new Float32Array(n * 3);
+    const ys = new Float32Array(n);
     const walk = new Float32Array(n * 3);
     const uv = new Float32Array(n * 4);
     const tint = new Float32Array(n * 4);
     list.forEach((p, i) => {
       const h = hash32(`crowd:${p.g.id}`);
       pos.set([p.spot.x, p.spot.z, (h % 6283) / 1000], i * 3);
+      ys[i] = p.spot.y;
       // about two thirds of the street residents are out walking at any time
       const walks =
-        (p.spot.kind === 'street' && (h >>> 12) % 3 !== 0) ||
+        ((p.spot.kind === 'street' || p.spot.kind === 'wild') &&
+          (p.spot.tx || p.spot.tz) &&
+          (h >>> 12) % 3 !== 0) ||
         (p.spot.kind === 'plaza' && (h >>> 12) % 2 === 0);
       walk.set([p.spot.tx, p.spot.tz, walks ? WALK * (0.55 + ((h >>> 4) % 45) / 100) : 0], i * 3);
       const k = keys.get(spriteKey(p.g))!;
@@ -156,6 +161,7 @@ export class Crowd {
       );
     });
     const iPos = new THREE.InstancedBufferAttribute(pos, 3);
+    const iY = new THREE.InstancedBufferAttribute(ys, 1);
     this.walk = new THREE.InstancedBufferAttribute(walk, 3);
     const iUv = new THREE.InstancedBufferAttribute(uv, 4);
     const iTint = new THREE.InstancedBufferAttribute(tint, 4);
@@ -174,6 +180,7 @@ export class Crowd {
     );
     quad.setIndex([0, 1, 2, 0, 2, 3]);
     quad.setAttribute('iPos', iPos);
+    quad.setAttribute('iY', iY);
     quad.setAttribute('iWalk', this.walk);
     quad.setAttribute('iUv', iUv);
     quad.setAttribute('iTint', iTint);
@@ -237,6 +244,7 @@ export class Crowd {
     );
     ground.setIndex([0, 2, 1, 0, 3, 2]);
     ground.setAttribute('iPos', iPos);
+    ground.setAttribute('iY', iY);
     ground.setAttribute('iWalk', this.walk);
     ground.setAttribute('iTint', iTint);
     ground.instanceCount = n;
@@ -284,7 +292,11 @@ export class Crowd {
     const h = hash32(`crowd:${p.g.id}`);
     const t = time * SPEED + (h % 6283) / 1000;
     const s = Math.max(-1, Math.min(1, Math.sin(t) * 1.45));
-    return out.set(p.spot.x + this.walk.getX(i) * a * s, 0, p.spot.z + this.walk.getY(i) * a * s);
+    return out.set(
+      p.spot.x + this.walk.getX(i) * a * s,
+      p.spot.y,
+      p.spot.z + this.walk.getY(i) * a * s,
+    );
   }
 
   /** A tapped resident stops walking, so it stays where the ring is. */

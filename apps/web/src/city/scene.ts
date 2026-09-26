@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { City } from '@gitemon/shared';
+import type { Island } from '@gitemon/shared';
 import { Crowd, type Placed } from './crowd';
 import { buildTown } from './town';
 
@@ -28,6 +28,7 @@ export class CityScene {
   private ring: THREE.Mesh;
   private sun: THREE.DirectionalLight;
   private detail: THREE.Object3D[] = [];
+  private labels = new THREE.Group();
   private detailOn = true;
   private pointers = new Map<number, { x: number; y: number }>();
   private pinch: { d: number; z: number } | null = null;
@@ -226,8 +227,8 @@ export class CityScene {
       for (let i = 0; i < c.size; i++) {
         c.positionOf(i, this.clock, v);
         const h = c.heightOf(i, grow) * this.upScale * 0.55;
-        top.copy(v).setY(h);
-        v.setY(h * 0.45).project(this.camera);
+        top.copy(v).setY(v.y + h);
+        v.setY(v.y + h * 0.45).project(this.camera);
         top.project(this.camera);
         const sx = ((v.x + 1) / 2) * r.width + r.left;
         const sy = ((1 - v.y) / 2) * r.height + r.top;
@@ -267,22 +268,24 @@ export class CityScene {
 
   select(p: Placed | null) {
     this.ring.visible = !!p;
-    if (p) this.ring.position.set(p.spot.x, 0.06, p.spot.z);
+    if (p) this.ring.position.set(p.spot.x, p.spot.y + 0.08, p.spot.z);
     this.dirty = true;
   }
 
   // ---- building the city ---------------------------------------------------------------------------
 
   /** homes: lot index → the owner's colour (claimed players, V2-D5 / V3-D2) */
-  build(city: City, homes = new Map<number, string>()) {
+  build(city: Island, homes = new Map<number, string>()) {
     const t0 = performance.now();
     const town = buildTown(city, homes);
+    this.stats.townMs = Math.round(performance.now() - t0);
     this.stats.buildMs = Math.round(performance.now() - t0);
     this.stats.homes = homes.size;
     this.scene.add(town.group);
     this.detail = town.detail;
+    this.buildLabels(city);
     const cam = this.sun.shadow.camera;
-    const r = city.radius + 30;
+    const r = city.radius + 40;
     cam.left = cam.bottom = -r;
     cam.right = cam.top = r;
     cam.near = 1;
@@ -290,6 +293,36 @@ export class CityScene {
     cam.updateProjectionMatrix();
     this.renderer.shadowMap.needsUpdate = true;
     this.dirty = true;
+  }
+
+  /** region names, shown only when zoomed out (v4 Q1) */
+  private buildLabels(city: Island) {
+    this.labels.clear();
+    for (const g of city.regions) {
+      const c = document.createElement('canvas');
+      c.width = 512;
+      c.height = 96;
+      const ctx = c.getContext('2d')!;
+      ctx.font = '600 52px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 10;
+      ctx.strokeStyle = 'rgba(30,34,44,0.75)';
+      ctx.strokeText(g.name, 256, 50);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(g.name, 256, 50);
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const sp = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }),
+      );
+      sp.scale.set(80, 15, 1);
+      sp.position.set(Math.cos(g.mid) * 165, 40, Math.sin(g.mid) * 165);
+      sp.renderOrder = 10;
+      this.labels.add(sp);
+    }
+    this.labels.visible = false;
+    this.scene.add(this.labels);
   }
 
   // ---- creatures -------------------------------------------------------------------------------------
@@ -306,7 +339,7 @@ export class CityScene {
 
   /** sprites grow a little when zoomed far out, so the crowd still reads (Transit does the same) */
   private get grow() {
-    return Math.max(1, Math.min(3.2, 1.1 / this.zoom));
+    return Math.max(1, Math.min(2, 1.1 / this.zoom));
   }
   /** upright sprites are foreshortened by the camera pitch; stretch them back to true proportions */
   private get upScale() {
@@ -338,6 +371,7 @@ export class CityScene {
     this.placeCamera();
     // LOD: windows, add-ons and street furniture only where they can be seen (v3 build file 08)
     const near = this.zoom > 0.42;
+    this.labels.visible = this.zoom < 0.55;
     if (near !== this.detailOn) {
       this.detailOn = near;
       for (const o of this.detail) o.visible = near;
@@ -353,7 +387,7 @@ export class CityScene {
   };
 
   /** render counters for ?debug and the perf check (v3 build file 08) */
-  readonly stats = { frames: 0, ms: 0, buildMs: 0, homes: 0 };
+  readonly stats = { frames: 0, ms: 0, buildMs: 0, townMs: 0, layoutMs: 0, homes: 0 };
   get info() {
     const r = this.renderer.info.render;
     return { calls: r.calls, triangles: r.triangles, ...this.stats };

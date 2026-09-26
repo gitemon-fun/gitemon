@@ -1,8 +1,8 @@
 import {
   BIOME_ORDER,
   TYPE_INFO,
-  layout,
-  type City,
+  island,
+  type Island,
   type MapGitemon,
   type Shape,
   type TypeId,
@@ -39,44 +39,41 @@ export const fromRow = (r: Row): MapGitemon => ({
 });
 
 /**
- * Placement (GRANDPLAN v2 §5): the world's most notable stand on the central plaza; each
- * district's own best fill its square; claimed players live at a house door; everyone else
- * lines the streets outward by rank. Agents never stand on the plaza.
+ * Placement (GRANDPLAN v4 §7): the world's most notable stand on the central plaza; claimed
+ * Gitemon live in the town at their tamer's house (claim order, nearest the plaza first); machines
+ * live in the industrial quarter; every other Gitemon lives in its type's habitats in the wild,
+ * nearest the town first (rank = distance to the centre, V4-D3).
  */
 export function place(all: MapGitemon[], claimedAt: Map<number, string>) {
   const pops: Partial<Record<TypeId, number>> = {};
   for (const g of all) pops[g.t1] = (pops[g.t1] ?? 0) + 1;
   const plazaN = Math.max(24, Math.min(190, Math.round(all.length / 40)));
-  const city = layout(pops, plazaN);
+  const city = island(pops, plazaN);
   const placed: Placed[] = [];
   let onPlaza = 0;
   const next = new Map<TypeId, number>();
-  // houses go in claim order: the first to claim gets the house nearest the square
+  // houses go in claim order: the first to claim gets the house nearest the plaza
   const homes = new Map<number, string>();
   const doorOf = new Map<number, number>();
   const claimed = all
     .filter((g) => g.st === 'c')
     .sort((a, b) => (claimedAt.get(a.id) ?? '').localeCompare(claimedAt.get(b.id) ?? ''));
-  const used = new Map<TypeId, number>();
-  for (const g of claimed) {
-    const d = BIOME_ORDER.indexOf(g.t1);
-    const k = used.get(g.t1) ?? 0;
-    if (!city.doors[d]?.[k]) continue;
-    used.set(g.t1, k + 1);
+  claimed.forEach((g, k) => {
+    if (!city.doors[k]) return;
     doorOf.set(g.id, k);
-    homes.set(city.doorLots[d]![k]!, TYPE_INFO[g.t1].colors[0]);
-  }
+    homes.set(city.doorLots[k]!, TYPE_INFO[g.t1].colors[0]);
+  });
   for (const g of all) {
     if (onPlaza < plazaN && g.t1 !== 'machine' && city.plaza[onPlaza]) {
       placed.push({ g, spot: city.plaza[onPlaza++]! });
       continue;
     }
-    const d = BIOME_ORDER.indexOf(g.t1);
     const door = doorOf.get(g.id);
     if (door != null) {
-      placed.push({ g, spot: city.doors[d]![door]! });
+      placed.push({ g, spot: city.doors[door]! });
       continue;
     }
+    const d = BIOME_ORDER.indexOf(g.t1);
     const k = next.get(g.t1) ?? 0;
     const spot = city.spots[d]?.[k];
     if (!spot) continue;
@@ -87,7 +84,7 @@ export function place(all: MapGitemon[], claimedAt: Map<number, string>) {
 }
 
 export interface LoadedCity {
-  city: City;
+  city: Island;
   placed: Placed[];
   homes: Map<number, string>;
   byId: Map<number, Placed>;

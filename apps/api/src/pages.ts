@@ -166,7 +166,7 @@ export function worldPage(
     .join('');
   const body = `
 <section class="card"><h1>Gitemon of the world</h1>
-<p class="sub">Where developers say they live, from the location on their public GitHub profile. ${placed.toLocaleString('en')} of ${total.toLocaleString('en')} Gitemon have a hometown we could read. Hometown is identity only: in Gitemon City everyone lives in their language's district.</p></section>
+<p class="sub">Where developers say they live, from the location on their public GitHub profile. ${placed.toLocaleString('en')} of ${total.toLocaleString('en')} Gitemon have a hometown we could read. Hometown is identity only: on Gitemon Island every Gitemon lives in its climate region.</p></section>
 <section class="card"><h2>Countries</h2><table class="rank"><thead><tr><th></th><th>Country</th><th class="num">Gitemon</th><th>Top Gitemon</th></tr></thead><tbody>${rows}</tbody></table></section>
 <section class="card"><h2>Cities</h2><table class="rank"><thead><tr><th></th><th>City</th><th class="num">Gitemon</th></tr></thead><tbody>${cityRows}</tbody></table>
 <p class="sub" style="margin-top:16px">Place names from <a href="https://www.geonames.org" rel="nofollow">GeoNames</a> (CC BY 4.0). Owners can hide their hometown.</p></section>`;
@@ -239,17 +239,17 @@ export const homePage = (count: number) =>
   layout({
     title: 'Gitemon — every developer is a creature',
     description:
-      'Your GitHub work, hatched into a pixel creature in one shared city. Catch other developers, claim your own, get a house in your district.',
+      'Your GitHub work, hatched into a pixel creature on one shared island. Catch other developers, claim your own, bring it home to the town.',
     path: '/',
     body: `<section class="card"><h1>Every developer is a creature.</h1>
-<a href="/map"><img src="/og-default.png" width="1200" height="630" alt="Gitemon City: a round plaza full of pixel creatures, ringed by districts of small houses" style="width:100%;height:auto;border-radius:14px;margin:4px 0 14px"></a>
+<a href="/map"><img src="/og-default.png" width="1200" height="630" alt="Gitemon Island: a round town full of pixel creatures, ringed by snow peaks, jungle, desert, a volcano and the sea" style="width:100%;height:auto;border-radius:14px;margin:4px 0 14px"></a>
 <p class="sub">Your public GitHub work hatches into a pixel Gitemon that lives in Gitemon City with ${count.toLocaleString('en-US')} others. Its type comes from your languages. Its power comes from work other people accepted — never from raw volume.</p>
 <div class="btns"><a class="btn primary" href="/map">Open the city</a><a class="btn" href="/auth/login?next=/map">Sign in with GitHub</a></div></section>
 <section class="card"><h2>How it works</h2><ul>
 <li><b>Hatch.</b> Every GitHub developer already exists as a wild Gitemon.</li>
 <li><b>Catch.</b> Sign in and catch the developers you admire. Worked together for real? It's a bonded catch.</li>
 <li><b>Claim.</b> When someone you caught signs in, you both get a friendship buff.</li>
-<li><b>Belong.</b> Every language has a district. The most notable developers stand on the central plaza; claim yours and you get a house in your district.</li>
+<li><b>Belong.</b> Every language has a home in one of nine climates. The most notable developers stand on the central plaza and the stronger a Gitemon, the nearer the town it lives; claim yours and it moves into a house in town.</li>
 <li><b>Hometown.</b> Your GitHub location becomes a flag on your profile. See <a href="/world">Gitemon of the world</a>.</li></ul>
 <p class="sub">We never read private repositories and never contact anyone.</p></section>`,
   });

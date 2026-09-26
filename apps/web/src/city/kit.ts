@@ -9,7 +9,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
  */
 
 /** merge parts that may differ in indexing and attributes: position only, then re-derived */
-function mg(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+export function mg(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   const clean = parts.map((g) => {
     const n = g.index ? g.toNonIndexed() : g;
     for (const k of Object.keys(n.attributes)) if (k !== 'position') n.deleteAttribute(k);
@@ -19,7 +19,7 @@ function mg(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
 }
 
 /** grey vertex colours from a function of the vertex position (ambient occlusion, baked) */
-function shade(geo: THREE.BufferGeometry, f: (x: number, y: number, z: number) => number) {
+export function shade(geo: THREE.BufferGeometry, f: (x: number, y: number, z: number) => number) {
   const g = geo.index ? geo.toNonIndexed() : geo;
   const p = g.getAttribute('position');
   const c = new Float32Array(p.count * 3);
@@ -31,7 +31,7 @@ function shade(geo: THREE.BufferGeometry, f: (x: number, y: number, z: number) =
   g.computeVertexNormals();
   return g;
 }
-const flatGrey = (geo: THREE.BufferGeometry, v = 1) => shade(geo, () => v);
+export const flatGrey = (geo: THREE.BufferGeometry, v = 1) => shade(geo, () => v);
 
 /** a closed prism: `profile` is a polygon in the (z, y) plane, extruded along x from -0.5 to 0.5 */
 function prismX(profile: [number, number][]): THREE.BufferGeometry {

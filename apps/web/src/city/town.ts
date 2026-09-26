@@ -1,26 +1,29 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
-  AVENUE,
-  BAND,
+  BIOME_ORDER,
   CANAL_IN,
   CANAL_OUT,
   PLAZA_R,
-  RING0,
   ROAD,
+  STREET_IN,
+  STREET_OUT,
   SW,
+  TOWN_R,
+  TOWN_Y,
   hash32,
-  type City,
+  type Island,
   type Lot,
 } from '@gitemon/shared';
 import { Batch, PARTS, PITCH, PROPS, ROOFS, ROUND, type RoofId } from './kit';
 import { SKINS, landmark, monument, type Skin } from './buildings';
+import { dress, roads, terrain, water } from './nature';
 
 /**
- * Builds the town from the layout (GRANDPLAN v3 §4–§7): rows of kit buildings, streets with
- * paving, crosswalks and lamps, courts with a tree or fountain, one landmark per district square,
- * the plaza with its canal and bridges. Returns the static group plus the detail meshes the
- * renderer hides at far zoom (LOD, v3 build file 08).
+ * Builds Gitemon Island (GRANDPLAN v4): the land and its dressing (nature.ts), and the centre town
+ * from the v3 kit — plaza, canal, two ring streets with rows of houses between them, the gates, the
+ * machine quarter, a landmark at every region's gate. Returns the static group plus the detail
+ * meshes the renderer hides at far zoom.
  */
 
 const STOREY = 3;
@@ -34,60 +37,57 @@ const u = (seed: number, salt: number) => ((hash32(`${seed}:${salt}`) >>> 0) % 1
 
 export interface Town {
   group: THREE.Group;
-  /** windows, add-ons, props: hidden at far zoom */
+  /** windows, add-ons, small props: hidden at far zoom */
   detail: THREE.Object3D[];
 }
 
-export function buildTown(city: City, homes: Map<number, string>): Town {
+export function buildTown(isl: Island, homes: Map<number, string>): Town {
   const group = new THREE.Group();
   const detail: THREE.Object3D[] = [];
   const lit = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   const glow = new THREE.MeshBasicMaterial({ vertexColors: true });
-
   const add = (meshes: THREE.Object3D[], isDetail = false) => {
+    if (!meshes.length) return;
     group.add(...meshes);
     if (isDetail) detail.push(...meshes);
   };
 
-  add(ground(city));
-  add(streets(city));
+  add([terrain(isl), water(isl), roads(isl)]);
+  add(townGround(isl));
 
-  const main = new Batch(); // bodies, roofs: cast + receive
-  const facade = new Batch(); // windows, doors, add-ons: detail
-  const lights = new Batch(); // glowing windows, lamp heads: unlit
-  const props = new Batch(); // street furniture + trees: detail
-  buildings(city, homes, main, facade, lights);
-  furniture(city, props, lights);
-
+  const main = new Batch();
+  const facade = new Batch();
+  const lights = new Batch();
+  const props = new Batch();
+  buildings(isl, homes, main, facade, lights);
+  townFurniture(isl, props, lights, main);
   add(main.meshes(lit, { cast: true, receive: true }));
   add(facade.meshes(lit, { receive: true }), true);
   add(lights.meshes(glow), true);
   add(props.meshes(lit, { cast: true, receive: true }), true);
 
-  // landmarks on every district square, the monument on the plaza
-  for (const d of city.districts) {
-    const m = new THREE.Mesh(landmark(d.t), lit);
-    m.position.set(d.square.x, 0, d.square.z);
+  const nat = dress(isl, lit, glow);
+  add(nat.props);
+  add(nat.glow);
+
+  for (const l of isl.landmarks) {
+    const m = new THREE.Mesh(landmark(l.t), lit);
+    m.position.set(l.x, l.y - 0.3, l.z);
     m.castShadow = m.receiveShadow = true;
     group.add(m);
   }
   const mon = new THREE.Mesh(monument(), lit);
+  mon.position.y = TOWN_Y;
   mon.castShadow = mon.receiveShadow = true;
   group.add(mon);
   return { group, detail };
 }
 
-// ---- ground: districts, squares, courts, plaza, canal ------------------------------------------------
+// ---- town ground: plaza rings, ring streets, canal banks, bridges, the low wall ---------------------
 
-function sector(r0: number, r1: number, a0: number, a1: number, y: number, seg = 8) {
-  // RingGeometry lies in XY with theta counter-clockwise; after rotating flat, angle → -angle
-  return new THREE.RingGeometry(r0, r1, seg, 1, -a1, a1 - a0)
-    .rotateX(-Math.PI / 2)
-    .translate(0, y, 0);
-}
 function coloured(geo: THREE.BufferGeometry, colour: string) {
   const g = geo.index ? geo.toNonIndexed() : geo;
-  g.deleteAttribute('uv');
+  for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k);
   const c = new THREE.Color(colour);
   const n = g.getAttribute('position').count;
   const arr = new Float32Array(n * 3);
@@ -97,127 +97,141 @@ function coloured(geo: THREE.BufferGeometry, colour: string) {
     arr[i * 3 + 2] = c.b;
   }
   g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
-  if (g.getAttribute('normal')) g.deleteAttribute('normal');
   return g;
 }
-function mesh(parts: THREE.BufferGeometry[], receive = true, cast = false) {
+function mesh(parts: THREE.BufferGeometry[], cast = false) {
   const g = mergeGeometries(parts)!;
   g.computeVertexNormals();
   const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
-  m.receiveShadow = receive;
+  m.receiveShadow = true;
   m.castShadow = cast;
   return m;
 }
+const ring = (r0: number, r1: number, y: number, colour: string, seg = 96) =>
+  coloured(new THREE.RingGeometry(r0, r1, seg).rotateX(-Math.PI / 2).translate(0, y, 0), colour);
 
-function ground(city: City): THREE.Object3D[] {
-  const parts: THREE.BufferGeometry[] = [
+function townGround(isl: Island): THREE.Object3D[] {
+  const Y = TOWN_Y;
+  const flat = [
     coloured(
-      new THREE.CircleGeometry(city.radius + 60, 96).rotateX(-Math.PI / 2).translate(0, -0.2, 0),
-      '#d9d2c3',
+      new THREE.CircleGeometry(PLAZA_R + 2, 64).rotateX(-Math.PI / 2).translate(0, Y + 0.03, 0),
+      '#ece4d4',
+    ),
+    ring(PLAZA_R + 2, CANAL_IN, Y + 0.03, STONE),
+  ];
+  for (let r = 8; r < PLAZA_R; r += 6) flat.push(ring(r, r + 1.2, Y + 0.05, '#d6ccb8', 64));
+  for (const r of [STREET_IN, STREET_OUT]) {
+    flat.push(ring(r - ROAD / 2 - SW, r + ROAD / 2 + SW, Y + 0.04, PAVE));
+    flat.push(ring(r - ROAD / 2, r + ROAD / 2, Y + 0.07, ASPHALT));
+  }
+  // gate streets: from the outer ring street to the town edge, one per region
+  for (const g of isl.regions) {
+    const len = TOWN_R + 2 - STREET_OUT;
+    const r = (TOWN_R + 2 + STREET_OUT) / 2;
+    flat.push(
+      coloured(
+        new THREE.PlaneGeometry(len, ROAD)
+          .rotateX(-Math.PI / 2)
+          .rotateY(-g.mid)
+          .translate(Math.cos(g.mid) * r, Y + 0.07, Math.sin(g.mid) * r),
+        '#cdb28a',
+      ),
+    );
+  }
+  const stone: THREE.BufferGeometry[] = [
+    coloured(
+      new THREE.CylinderGeometry(CANAL_IN, CANAL_IN, 1.2, 96, 1, true).translate(0, Y - 0.5, 0),
+      '#c8bda8',
+    ),
+    coloured(
+      new THREE.CylinderGeometry(CANAL_OUT, CANAL_OUT, 1.2, 96, 1, true).translate(0, Y - 0.5, 0),
+      '#c8bda8',
     ),
   ];
-  for (const d of city.districts) {
-    const s = SKINS[d.t];
-    parts.push(
-      coloured(sector(CANAL_OUT, RING0 + d.bands * BAND + 4, d.a0, d.a1, -0.1, 12), s.ground),
-    );
-    // the square: paved in the court tone, with a stone edge
-    const { x, z, r } = d.square;
-    parts.push(
-      coloured(
-        new THREE.PlaneGeometry(r * 2 + 3, r * 2 + 3).rotateX(-Math.PI / 2).translate(x, -0.02, z),
-        STONE,
-      ),
-      coloured(
-        new THREE.PlaneGeometry(r * 2 + 1.6, r * 2 + 1.6).rotateX(-Math.PI / 2).translate(x, 0, z),
-        s.court,
-      ),
-    );
-  }
-  for (const c of city.courts)
-    parts.push(
-      coloured(sector(c.r0, c.r1, c.a0, c.a1, -0.04, 4), SKINS[city.districts[c.d]!.t].court),
-    );
-  // plaza: concentric paving rings (concept 08), canal and its stone banks
-  parts.push(coloured(new THREE.CircleGeometry(PLAZA_R + 2, 64).rotateX(-Math.PI / 2), '#ece4d4'));
-  for (let r = 8; r < PLAZA_R; r += 6)
-    parts.push(
-      coloured(
-        new THREE.RingGeometry(r, r + 1.2, 64).rotateX(-Math.PI / 2).translate(0, 0.02, 0),
-        '#d6ccb8',
-      ),
-    );
-  parts.push(
-    coloured(
-      new THREE.RingGeometry(CANAL_IN, CANAL_OUT, 96).rotateX(-Math.PI / 2).translate(0, -0.15, 0),
-      '#6fb4d8',
-    ),
-    coloured(
-      new THREE.RingGeometry(PLAZA_R + 2, CANAL_IN, 96).rotateX(-Math.PI / 2).translate(0, 0.01, 0),
-      STONE,
-    ),
-  );
-  const flatGround = mesh(parts);
-  // raised stone banks along the canal
-  const banks = mesh(
-    [
-      coloured(
-        new THREE.CylinderGeometry(CANAL_IN, CANAL_IN, 0.6, 96, 1, true).translate(0, -0.1, 0),
-        '#c8bda8',
-      ),
-      coloured(
-        new THREE.CylinderGeometry(CANAL_OUT, CANAL_OUT, 0.6, 96, 1, true).translate(0, -0.1, 0),
-        '#c8bda8',
-      ),
-    ],
-    true,
-  );
-  return [flatGround, banks];
-}
-
-// ---- streets: sidewalks, asphalt, crosswalks, bridges -------------------------------------------------
-
-function strip(
-  pts: [number, number][],
-  w: number,
-  y: number,
-  colour: string,
-  out: THREE.BufferGeometry[],
-) {
-  for (let i = 0; i < pts.length - 1; i++) {
-    const [x0, z0] = pts[i]!;
-    const [x1, z1] = pts[i + 1]!;
-    const len = Math.hypot(x1 - x0, z1 - z0);
-    const geo = new THREE.PlaneGeometry(len + w * 0.3, w)
-      .rotateX(-Math.PI / 2)
-      .rotateY(-Math.atan2(z1 - z0, x1 - x0))
-      .translate((x0 + x1) / 2, y, (z0 + z1) / 2);
-    out.push(coloured(geo, colour));
-  }
-}
-
-function streets(city: City): THREE.Object3D[] {
-  const flat: THREE.BufferGeometry[] = [];
-  for (const r of city.roads) strip(r.pts, r.w + SW * 2, 0.02, PAVE, flat);
-  for (const r of city.roads) strip(r.pts, r.w, 0.05, ASPHALT, flat);
-  const ground = mesh(flat);
-  // arched stone bridges over the canal on every avenue (concept 08)
-  const stone: THREE.BufferGeometry[] = [];
-  const span = CANAL_OUT - CANAL_IN + 3;
-  for (const d of city.districts) {
-    const parts = [
-      new THREE.BoxGeometry(span, 0.5, AVENUE).translate(0, 0.3, 0),
-      new THREE.BoxGeometry(span * 0.5, 0.5, AVENUE).translate(0, 0.7, 0),
-      new THREE.BoxGeometry(span, 0.9, 0.4).translate(0, 0.9, AVENUE / 2),
-      new THREE.BoxGeometry(span, 0.9, 0.4).translate(0, 0.9, -AVENUE / 2),
-    ];
+  // arched bridges: over the canal at every gate, and over each river on both ring streets
+  const bridge = (x: number, z: number, a: number, span: number, w: number) => {
+    for (const p of [
+      new THREE.BoxGeometry(span, 0.45, w).translate(0, Y + 0.25, 0),
+      new THREE.BoxGeometry(span * 0.5, 0.4, w).translate(0, Y + 0.6, 0),
+      new THREE.BoxGeometry(span, 0.8, 0.35).translate(0, Y + 0.85, w / 2),
+      new THREE.BoxGeometry(span, 0.8, 0.35).translate(0, Y + 0.85, -w / 2),
+    ])
+      stone.push(coloured(p.rotateY(-a).translate(x, 0, z), STONE));
+  };
+  for (const g of isl.regions) {
     const r = (CANAL_IN + CANAL_OUT) / 2;
-    for (const p of parts)
-      stone.push(
-        coloured(p.rotateY(-d.a0).translate(Math.cos(d.a0) * r, 0, Math.sin(d.a0) * r), STONE),
-      );
+    bridge(Math.cos(g.mid) * r, Math.sin(g.mid) * r, g.mid, CANAL_OUT - CANAL_IN + 3, 4.2);
   }
-  return [ground, mesh(stone, true, true)];
+  for (const b of isl.bridges) bridge(b.x, b.z, b.a + Math.PI / 2, 7.5, ROAD + 1);
+  // a low stone wall round the town, open at the gates and the rivers
+  const open = [...isl.regions.map((g) => g.mid), ...isl.bridges.map((b) => b.a)];
+  const WR = TOWN_R - 1.2;
+  const segs = 180;
+  for (let k = 0; k < segs; k++) {
+    const a = (k / segs) * Math.PI * 2;
+    if (open.some((o) => Math.abs(((a - o + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * WR < 4.2))
+      continue;
+    const len = ((Math.PI * 2) / segs) * WR + 0.05;
+    stone.push(
+      coloured(
+        new THREE.BoxGeometry(0.7, 1.1, len)
+          .translate(0, Y + 0.55, 0)
+          .rotateY(-a)
+          .translate(Math.cos(a) * WR, 0, Math.sin(a) * WR),
+        k % 9 === 0 ? '#c4b8a2' : '#d2c7b2',
+      ),
+    );
+  }
+  return [mesh(flat), mesh(stone, true)];
+}
+
+// ---- town furniture: lamps along the ring streets, trees on the lawn inside the wall -----------------
+
+function townFurniture(isl: Island, props: Batch, lights: Batch, main: Batch) {
+  const m = new THREE.Matrix4();
+  const at = (b: Batch, geo: THREE.BufferGeometry, x: number, z: number, colour: string, s = 1) => {
+    m.makeScale(s, s, s).setPosition(x, TOWN_Y, z);
+    b.add(geo, m, colour);
+  };
+  const gaps = [...isl.regions.map((g) => g.mid), ...isl.bridges.map((b) => b.a)];
+  const clear = (a: number, r: number, w: number) =>
+    !gaps.some((o) => Math.abs(((a - o + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * r < w);
+  for (const r of [STREET_IN, STREET_OUT])
+    for (const side of [-1, 1]) {
+      const rr = r + side * (ROAD / 2 + 0.3);
+      const n = Math.floor((Math.PI * 2 * rr) / 13);
+      for (let i = 0; i < n; i++) {
+        const a = ((i + 0.5) / n) * Math.PI * 2;
+        if (!clear(a, rr, 4)) continue;
+        at(props, PROPS.lampPost, Math.cos(a) * rr, Math.sin(a) * rr, '#4a4a52');
+        at(lights, PROPS.lampHead, Math.cos(a) * rr, Math.sin(a) * rr, '#fff3d0');
+      }
+    }
+  // lawn trees between the outer street and the wall
+  const tr = (STREET_OUT + ROAD / 2 + SW + TOWN_R - 1.2) / 2 + 0.6;
+  const n = Math.floor((Math.PI * 2 * tr) / 7);
+  for (let i = 0; i < n; i++) {
+    const a = ((i + 0.5) / n) * Math.PI * 2;
+    if (!clear(a, tr, 5)) continue;
+    const q = isl.quarter;
+    const inQ =
+      (a - q.a0 + Math.PI * 4) % (Math.PI * 2) < (q.a1 - q.a0 + Math.PI * 4) % (Math.PI * 2);
+    if (inQ) {
+      at(main, PROPS.tank, Math.cos(a) * tr, Math.sin(a) * tr, '#8a929c', 1.3);
+      continue;
+    }
+    at(props, PROPS.trunk, Math.cos(a) * tr, Math.sin(a) * tr, '#6b4a2e', 0.9);
+    at(props, PROPS.crown, Math.cos(a) * tr, Math.sin(a) * tr, '#6fae50', 0.9);
+  }
+  // trees in the stone ring between plaza and canal
+  for (let k = 0; k < 30; k++) {
+    const a = (k / 30) * Math.PI * 2 + 0.05;
+    if (!clear(a, PLAZA_R + 3, 4)) continue;
+    const x = Math.cos(a) * (PLAZA_R + 3.2);
+    const z = Math.sin(a) * (PLAZA_R + 3.2);
+    at(props, PROPS.trunk, x, z, '#6b4a2e', 0.9);
+    at(props, PROPS.crown, x, z, '#5fa84a', 0.9);
+  }
 }
 
 // ---- buildings (the kit, v3 §4) ---------------------------------------------------------------------
@@ -250,7 +264,7 @@ function pickRoof(
 const widthClass = (l: Lot) => (l.w < 4.2 ? 0 : l.w < 5.3 ? 1 : 2);
 
 function buildings(
-  city: City,
+  isl: Island,
   homes: Map<number, string>,
   main: Batch,
   facade: Batch,
@@ -264,8 +278,8 @@ function buildings(
   const col = new THREE.Color();
   const roofs: RoofId[] = [];
 
-  city.lots.forEach((lot, li) => {
-    const s = SKINS[city.districts[lot.d]!.t];
+  isl.lots.forEach((lot, li) => {
+    const s = SKINS[BIOME_ORDER[lot.d]!];
     const owner = homes.get(li);
     const theta = Math.atan2(lot.fx, lot.fz);
     q.setFromAxisAngle(up, theta);
@@ -286,7 +300,7 @@ function buildings(
       sz: number,
       colour: THREE.ColorRepresentation,
     ) => {
-      pos.set(cx + lx * cos + lz * sin, ly, cz - lx * sin + lz * cos);
+      pos.set(cx + lx * cos + lz * sin, lot.y + ly, cz - lx * sin + lz * cos);
       m.compose(pos, q, scl.set(sx, sy, sz));
       b.add(geo, m, colour);
     };
@@ -300,7 +314,7 @@ function buildings(
     put(main, PARTS.body, 0, 0, 0, w, H, dp, wall);
 
     // roof
-    const prev = lot.prev >= 0 ? city.lots[lot.prev] : undefined;
+    const prev = lot.prev >= 0 ? isl.lots[lot.prev] : undefined;
     const roof = pickRoof(s, lot, lot.prev >= 0 ? roofs[lot.prev] : undefined, prev);
     roofs[li] = roof;
     const roofCol = s.roofs[Math.floor(u(lot.seed, 5) * s.roofs.length)]!;
@@ -401,118 +415,4 @@ function buildings(
       );
     }
   });
-}
-
-// ---- street furniture, court trees, district props ------------------------------------------------------
-
-function furniture(city: City, props: Batch, lights: Batch) {
-  const m = new THREE.Matrix4();
-  const at = (
-    b: Batch,
-    geo: THREE.BufferGeometry,
-    x: number,
-    z: number,
-    colour: string,
-    s = 1,
-    rot = 0,
-  ) => {
-    m.makeRotationY(rot)
-      .scale(new THREE.Vector3(s, s, s))
-      .setPosition(x, 0, z);
-    b.add(geo, m, colour);
-  };
-  const polar = (r: number, a: number): [number, number] => [Math.cos(a) * r, Math.sin(a) * r];
-
-  city.districts.forEach((d) => {
-    const s = SKINS[d.t];
-    // lamps along both sides of every ring road, every ~13 m
-    for (let k = 0; k <= d.bands; k++) {
-      const r = RING0 + k * BAND;
-      for (const side of [-1, 1]) {
-        const rr = r + side * (ROAD / 2 + 0.3);
-        const n = Math.max(1, Math.floor((rr * (d.a1 - d.a0)) / 13));
-        for (let i = 0; i < n; i++) {
-          const a = d.a0 + ((i + 0.5) / n) * (d.a1 - d.a0);
-          const [x, z] = polar(rr, a);
-          at(props, PROPS.lampPost, x, z, '#4a4a52');
-          at(lights, PROPS[s.lamp], x, z, s.lampColor);
-        }
-      }
-      // crosswalks where the border avenue meets the ring road
-      if (k > 0) {
-        for (const side of [-1, 1]) {
-          const rr = r + side * (ROAD / 2 + 1.4);
-          for (let j = -2; j <= 2; j++) {
-            const [x, z] = polar(rr, d.a0 + (j * 0.95) / rr);
-            at(props, PROPS.stripe, x, z, '#f4f0e8', 1, -d.a0 + Math.PI / 2);
-          }
-        }
-      }
-    }
-    // street trees along the border avenue
-    for (let r = RING0 + 6; r < RING0 + d.bands * BAND; r += 11) {
-      if (Math.abs(((r - RING0) % BAND) - 0) < 4 || Math.abs(((r - RING0) % BAND) - BAND) < 4)
-        continue;
-      for (const side of [-1, 1]) {
-        const perp = side * (AVENUE / 2 + 0.5);
-        const [x0, z0] = polar(r, d.a0);
-        const x = x0 - Math.sin(d.a0) * perp;
-        const z = z0 + Math.cos(d.a0) * perp;
-        at(props, PROPS.trunk, x, z, s.tree[0], 0.8);
-        at(props, PROPS.crown, x, z, s.tree[1], 0.8);
-      }
-    }
-    // square corners: trees
-    const { x, z, r } = d.square;
-    for (const [sx, sz] of [
-      [1, 1],
-      [1, -1],
-      [-1, 1],
-      [-1, -1],
-    ]) {
-      at(props, PROPS.trunk, x + sx * (r + 0.2), z + sz * (r + 0.2), s.tree[0]);
-      at(props, PROPS.crown, x + sx * (r + 0.2), z + sz * (r + 0.2), s.tree[1]);
-    }
-  });
-
-  // courts: a tree or a fountain in the middle of wide courts, the district prop and a bench
-  city.courts.forEach((c, i) => {
-    const s = SKINS[city.districts[c.d]!.t];
-    const rm = (c.r0 + c.r1) / 2;
-    const am = (c.a0 + c.a1) / 2;
-    const [x, z] = polar(rm, am);
-    const h = hash32(`court${i}`);
-    if (c.tree) {
-      if (h % 3 === 0) {
-        at(props, PROPS.fountain, x, z, STONE);
-        at(props, PROPS.water, x, z, '#7fc4e4');
-      } else if (s.prop === 'pine') at(props, PROPS.pine, x, z, s.propColor);
-      else {
-        at(props, PROPS.trunk, x, z, s.tree[0]);
-        at(props, PROPS.crown, x, z, s.tree[1]);
-      }
-    }
-    const width = (c.a1 - c.a0) * rm;
-    if (width > 6) {
-      for (const side of [-1, 1]) {
-        const a = am + (side * (width / 2 - 1.2)) / rm;
-        const [px, pz] = polar(rm + ((h >>> 4) % 2 ? 1 : -1) * ((c.r1 - c.r0) / 2 - 0.9), a);
-        if (side < 0) at(props, PROPS[s.prop], px, pz, s.propColor, 0.9, h % 7);
-        else at(props, PROPS.bench, px, pz, '#8a6a4a', 1, -am);
-      }
-    }
-  });
-
-  // plaza: trees in the stone ring between plaza and canal
-  for (let k = 0; k < 36; k++) {
-    const a = (k / 36) * Math.PI * 2 + 0.05;
-    const nearAvenue = city.districts.some((d) => {
-      const x = Math.abs(a - d.a0) % (Math.PI * 2);
-      return Math.min(x, Math.PI * 2 - x) < 0.1;
-    });
-    if (nearAvenue) continue;
-    const [x, z] = polar(PLAZA_R + 3.2, a);
-    at(props, PROPS.trunk, x, z, '#6b4a2e', 0.9);
-    at(props, PROPS.crown, x, z, '#5fa84a', 0.9);
-  }
 }
