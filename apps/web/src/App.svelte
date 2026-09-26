@@ -228,9 +228,14 @@
       const qs = new URLSearchParams(location.search);
       const house = qs.get('house');
       const focus = qs.get('focus') ?? house;
-      // ?at=<type> frames that type's best habitat (share links, screenshots); ?z= sets the zoom
+      // ?at=<type> frames that type's mini plaza (share links, screenshots); ?z= sets the zoom
       // ?at=<type> frames that type's nearest habitat (its best residents)
-      const at = loadedCity.city.habitats.find((h) => h.t === qs.get('at'));
+      const atType = qs.get('at');
+      const region = loadedCity.city.regions.findIndex((r) => r.types.includes(atType as never));
+      // v5: a type's mini plaza (its specials) first, else its nearest habitat
+      const at =
+        loadedCity.city.miniPlazas.find((m) => m.region === region) ??
+        loadedCity.city.habitats.find((h) => h.t === atType);
       if (at) scene!.flyTo(at.x, at.z, Number(qs.get('z')) || 1.6);
       else if (qs.get('z')) scene!.flyTo(0, 0, Number(qs.get('z')));
       else if (focus) {
