@@ -401,16 +401,11 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
     for (let r = STREET_OUT; r <= COAST - 45; r += 6) pts.push(polar(r, roadAngle(i, r)));
     roads.push(pts);
   });
-  const nearRoad = (x: number, z: number) => {
+  /** distance (m) to the road of region `i` (roads run down each region's middle, far from others) */
+  const nearRoad = (x: number, z: number, i: number) => {
     const r = Math.hypot(x, z);
-    const a = Math.atan2(z, x);
-    let best = Infinity;
-    for (let i = 0; i < N; i++) {
-      if (r > COAST - 40) continue;
-      const d = Math.abs(wrap(a - roadAngle(i, r) + Math.PI) - Math.PI) * r;
-      best = Math.min(best, d);
-    }
-    return best;
+    if (r > COAST - 40) return Infinity;
+    return Math.abs(wrap(Math.atan2(z, x) - roadAngle(i, r) + Math.PI) - Math.PI) * r;
   };
 
   // ---- the town: plaza, two rows of houses between two ring streets, gates, machine quarter --------
@@ -547,7 +542,7 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
           const z = z0 + Math.cos(a) * ja;
           const here = at(x, z);
           if (!here || here.type !== t) continue;
-          if (hq(x, z) < 0.9 || slope(x, z) > maxSlope || nearRoad(x, z) < 6) continue;
+          if (hq(x, z) < 0.9 || slope(x, z) > maxSlope || nearRoad(x, z, i) < 6) continue;
           cands.push({ x, z, r: Math.hypot(x, z) });
         }
       }
@@ -576,7 +571,7 @@ export function island(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
               here.type !== t ||
               y < 0.7 ||
               slope(x, z) > maxSlope + 0.3 ||
-              nearRoad(x, z) < 3
+              nearRoad(x, z, i) < 3
             )
               continue;
             // the outer ring strolls round its group; the middle stands
