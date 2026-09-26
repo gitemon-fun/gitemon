@@ -1,6 +1,6 @@
 # CLAUDE.md — Gitemon
 
-**Project:** `gitemon-fun/gitemon` — every GitHub developer as a collectible pixel creature in one shared city (Gitemon City), for developers who want to be seen and to belong.
+**Project:** `gitemon-fun/gitemon` — every GitHub developer as a collectible pixel creature on one shared island (Gitemon Island), for developers who want to be seen and to belong.
 
 > **Read first:** `.claude/ai_context/` is the **source of truth for intent + design, kept in sync
 > with the code** (drift is a bug, fixed in the same change).
