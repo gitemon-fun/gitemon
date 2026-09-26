@@ -399,3 +399,10 @@ h2 {
   margin: 8px 0;
   background: #fff9e8;
 }
+.walkstats {
+  border: 1px solid #d8e2ee;
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  background: #f6f9fc;
+}

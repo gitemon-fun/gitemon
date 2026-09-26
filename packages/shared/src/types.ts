@@ -89,6 +89,8 @@ export interface MapGitemon {
   st: 'w' | 'c';
   /** 1 when a friendship buff is active */
   a: 0 | 1;
+  /** v6: blessed by the legend of the day — '<tier>:<level>' (level 0–2 from the streak) */
+  at?: string;
   /** v5: one of the 500 specials. Sealed ones have a negative id and no login (V5-D4). */
   special?: Special;
 }

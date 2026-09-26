@@ -106,6 +106,12 @@ const GLOW: Record<string, [number, number, number]> = {
 /** [size multiplier, sealed flag, glow r, g, b] for one resident */
 function specialAttr(g: MapGitemon): [number, number, number, number, number] {
   const sp = g.special;
+  if (!sp && g.at) {
+    // v6 blessing: not a silhouette (sealed = 1) but a glow halo (2), bigger with the streak
+    const [tier, level] = g.at.split(':');
+    const [r, gg, b] = GLOW[tier ?? ''] ?? GLOW.legendary!;
+    return [1 + Number(level ?? 0) * 0.08, 2 + Number(level ?? 0), r, gg, b];
+  }
   if (!sp) return [1, 0, 0, 0, 0];
   const scale = sp.rank === 1 ? 3 : sp.rank <= 3 ? 2.3 : SPECIAL_SCALE[sp.tier];
   const [r, gg, b] = GLOW[sp.tier]!;
@@ -265,7 +271,7 @@ export class Crowd {
           vec4 c = texture2D(uAtlas, vUv);
           if (c.a < 0.5) discard;
           vec3 col = c.rgb * vTint;
-          if (vSealed > 0.5) {
+          if (vSealed > 0.5 && vSealed < 1.5) {
             // a sealed legend (v5 §4): its shape as a glowing silhouette with a slow shimmer; the
             // species reads, the details do not
             float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
@@ -312,7 +318,7 @@ export class Crowd {
           vec3 base = walkPos(moving, dirSign);
           vSealed = iSpec.y;
           vGlow = vec3(iSpec.z, iSpec.w, iGlowB);
-          float r = 0.62 * iTint.w * iSpec.x * uGrow * (iSpec.y > 0.5 ? 2.2 : 1.0);
+          float r = 0.62 * iTint.w * iSpec.x * uGrow * (iSpec.y > 1.5 ? 2.0 + (iSpec.y - 2.0) * 0.5 : iSpec.y > 0.5 ? 2.2 : 1.0);
           vP = position.xz;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(base + vec3(position.x * r, 0.08, position.z * r * 0.8), 1.0);
         }
@@ -353,6 +359,20 @@ export class Crowd {
       p.spot.y,
       p.spot.z + this.walk.getY(i) * a * s,
     );
+  }
+
+  /** v6: move one resident by hand (the player's own walker): position, ground height, standing still */
+  setPos(i: number, x: number, z: number, y: number) {
+    const p = this.list[i]!;
+    p.spot = { ...p.spot, x, z, y };
+    const pos = this.sprites.geometry.getAttribute('iPos') as THREE.InstancedBufferAttribute;
+    const iy = this.sprites.geometry.getAttribute('iY') as THREE.InstancedBufferAttribute;
+    pos.setXY(i, x, z);
+    iy.setX(i, y);
+    pos.needsUpdate = true;
+    iy.needsUpdate = true;
+    this.walk.setZ(i, 0);
+    this.walk.needsUpdate = true;
   }
 
   /** A tapped resident stops walking, so it stays where the ring is. */

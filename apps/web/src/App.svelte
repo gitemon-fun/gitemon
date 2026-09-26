@@ -10,6 +10,7 @@
   import { api, ERRORS, type Detail, type Me, type Town } from './lib/api';
   import { CityScene } from './city/scene';
   import { loadCity, type LoadedCity } from './city/load';
+  import { CATCH_M, IDLE_MS, SIGHT_M } from '@gitemon/shared';
   import Sprite from './lib/Sprite.svelte';
 
   // Gitemon Island is the map (GRANDPLAN v4): a centre town and nine climate regions.
@@ -138,6 +139,93 @@
     }
   }
 
+  // ---- v6: walking (V6-D1…D6) ------------------------------------------------------------------
+
+  let walked = $state(0); // metres walked away from home today (walking home is free)
+  let walking = $state(false);
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const sightAsked = new Set<string>();
+  let blessedToday = false;
+  const demo = typeof location !== 'undefined' && location.search.includes('walkdemo');
+
+  const budgetLeft = () => (me ? Math.max(0, me.walk.budget - walked) : demo ? 400 - walked : 0);
+  function armIdle() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => scene?.walkHome(), IDLE_MS);
+  }
+  function startWalking(city: LoadedCity) {
+    const id = me?.id ?? (demo ? -999 : null);
+    if (id == null) return;
+    const i = city.placed.findIndex((p) => p.g.id === id);
+    if (i < 0 || !scene) return;
+    walking = true;
+    walked = me?.walk.walked ?? 0;
+    scene.enableWalker(city.city, i);
+    scene.onGround = (x, z) => {
+      const home = scene!.walkerHome!;
+      const toHome = Math.hypot(x - home.x, z - home.z) < 6;
+      const len = scene!.planWalk(x, z);
+      if (len == null) {
+        say('No way there on foot.');
+        return true;
+      }
+      if (!toHome && len > budgetLeft()) {
+        say(
+          `Not enough steps today: ${Math.round(budgetLeft())} m left. Real GitHub work earns more.`,
+        );
+        return true;
+      }
+      scene!.walkTo(x, z);
+      if (!toHome) walked += len;
+      armIdle();
+      return true;
+    };
+    scene.onWalk = (x, z) => checkLegends(x, z);
+    armIdle();
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) scene?.snapHome();
+    });
+  }
+  /** near a legend: log it (V6-D3); near the legend of the day: be blessed (V6-D4) */
+  async function checkLegends(x: number, z: number) {
+    if (!town) return;
+    for (const p of town.placed) {
+      const sp = p.g.special;
+      if (!sp || Math.hypot(p.spot.x - x, p.spot.z - z) > SIGHT_M) continue;
+      if (demo) {
+        if (!sightAsked.has(sp.key)) say(`Seen: a ${sp.tier} legend (demo).`);
+        sightAsked.add(sp.key);
+        continue;
+      }
+      if (!me) return;
+      if (!me.walk.seen.includes(sp.key) && !sightAsked.has(sp.key)) {
+        sightAsked.add(sp.key);
+        const r = await api.sight(sp.key, x, z, walked);
+        if (r.data.ok && r.data.new) {
+          me.walk.seen = [...me.walk.seen, sp.key];
+          me.walk.tally = { ...me.walk.tally, [sp.tier]: (me.walk.tally[sp.tier] ?? 0) + 1 };
+          say(
+            `Seen: ${sp.title ?? `a ${sp.tier} legend`} — ${r.data.seen} of 500 in your Legend Log.`,
+          );
+        }
+      }
+      if (sp.key === town.today && !blessedToday) {
+        blessedToday = true;
+        const r = await api.bless(sp.key, x, z, walked);
+        if (r.data.ok) {
+          me.walk.streak = r.data.streak ?? me.walk.streak;
+          say('Blessed by the legend of the day — your Gitemon glows for 6 hours.');
+        }
+      }
+    }
+  }
+  /** how far the player's walker is from a resident (catching needs ≤ 8 m, V6-D2) */
+  const distanceTo = (g: MapGitemon) => {
+    const w = scene?.walkerPos;
+    const p = town?.byId.get(g.id);
+    return w && p ? Math.hypot(w[0] - p.spot.x, w[1] - p.spot.z) : Infinity;
+  };
+
   async function doCatch() {
     if (!picked) return;
     if (!me) {
@@ -222,8 +310,31 @@
       total = loadedCity.placed.length;
       sealed = loadedCity.placed.filter((p) => p.g.special?.sealed).length;
       scene!.build(loadedCity.city, loadedCity.homes);
+      // ?walkdemo: a stand-in walker at the first town door, to try walking before signing in
+      if (demo && !me) {
+        const door = loadedCity.city.doors[0]!;
+        loadedCity.placed.push({
+          g: {
+            id: -999,
+            login: 'you',
+            x: 0,
+            y: 0,
+            t1: 'wild',
+            t2: null,
+            sh: 'steady',
+            f: 2,
+            s: 0,
+            lv: 1,
+            st: 'c',
+            a: 0,
+          },
+          spot: { ...door },
+        });
+        loadedCity.byId.set(-999, loadedCity.placed.at(-1)!);
+      }
       scene!.setCreatures(loadedCity.placed);
       scene!.stage(loadedCity.city, loadedCity.placed, loadedCity.today ?? null);
+      startWalking(loadedCity);
       scene!.fitCity(loadedCity.city.radius);
       loaded = true;
       const qs = new URLSearchParams(location.search);
@@ -332,8 +443,10 @@
       </div>
     </div>
     <p>
-      A sealed legend. It belongs to a developer who shaped the tech world. It wakes only when they
-      sign in.
+      {#if me?.walk.seen.includes(picked.special.key)}<b>In your Legend Log.</b>{/if}
+      {#if town?.today === picked.special.key}<b>Legend of the day</b> — stand near it to be blessed.{/if}
+      A sealed legend. It belongs to a developer who shaped the tech world. It wakes only when they sign
+      in.
     </p>
   </section>
 {:else if picked}
@@ -395,11 +508,17 @@
       {:else if detail?.caughtByMe}
         <span class="done">In your Dex{detail.caughtByMe.bonded ? ' · Bonded' : ''}</span>
       {:else if !detail?.machine}
-        <button class="primary" disabled={busy} onclick={doCatch}
-          >{me
-            ? `Catch${me.catchesLeft != null ? ` (${me.catchesLeft} left today)` : ''}`
-            : 'Sign in to catch'}</button
-        >
+        {#if me && walking && distanceTo(picked) > CATCH_M}
+          <button class="primary" disabled
+            >Walk closer to catch ({Math.round(distanceTo(picked))} m away)</button
+          >
+        {:else}
+          <button class="primary" disabled={busy} onclick={doCatch}
+            >{me
+              ? `Catch${me.catchesLeft != null ? ` (${me.catchesLeft} left today)` : ''}`
+              : 'Sign in to catch'}</button
+          >
+        {/if}
       {/if}
       <a class="btn" href={'/' + picked.login}>Profile</a>
     </div>
@@ -506,6 +625,24 @@
           </div>
         </div>
       {/if}
+      <div class="walkstats">
+        <p>
+          <b>Legend Log:</b>
+          {me.walk.seen.length} of 500 seen{#each ['legendary', 'mythic', 'epic', 'rare'] as t}{#if me.walk.tally[t]}
+              · {TIER_NAME[t as keyof typeof TIER_NAME]} {me.walk.tally[t]}{/if}{/each}
+        </p>
+        <p>
+          <b>Steps today:</b>
+          {Math.round(Math.max(0, me.walk.budget - walked))} of {me.walk.budget} m left{#if me.walk.streak}
+            · <b>Streak:</b>
+            {me.walk.streak}
+            {me.walk.streak === 1 ? 'day' : 'days'}{/if}
+        </p>
+        <p class="dim small">
+          Tap the map to walk. Walking home is free. Real GitHub work — merged pull requests,
+          reviews, active weeks — earns more steps.
+        </p>
+      </div>
       <p>{me.catchesLeft} catches left today.</p>
       <p class="dim">
         You have a house in {TYPE_INFO[me.t1].biome}{me.town

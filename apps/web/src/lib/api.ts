@@ -3,6 +3,13 @@ import type { MapGitemon, Stats } from '@gitemon/shared';
 export interface Me extends MapGitemon {
   hidden: number;
   legend: { key: string; rank: number; tier: string; title: string | null; woken: boolean } | null;
+  walk: {
+    budget: number;
+    walked: number;
+    streak: number;
+    seen: string[];
+    tally: Record<string, number>;
+  };
   admin: boolean;
   bonus: number;
   town: { id: number; name: string } | null;
@@ -55,6 +62,18 @@ export const api = {
       `/api/find?login=${encodeURIComponent(login)}`,
     ),
   detail: (id: number) => get<Detail>(`/api/gitemon/${id}`),
+  sight: (key: string, x: number, z: number, walked: number) =>
+    post<{ ok?: boolean; new?: boolean; seen?: number; streak?: number; error?: string }>(
+      '/api/walk/sight',
+      { key, x, z, walked },
+    ),
+  bless: (key: string, x: number, z: number, walked: number) =>
+    post<{ ok?: boolean; until?: string; streak?: number; error?: string }>('/api/walk/bless', {
+      key,
+      x,
+      z,
+      walked,
+    }),
   wake: () => post<{ ok: boolean; woken: boolean }>('/api/legend/wake', {}),
   removeLegend: () => post<{ ok: boolean }>('/api/legend/remove', {}),
   dex: () => get<{ dex: (MapGitemon & { bonded: boolean; caughtAt: string })[] }>('/api/dex'),

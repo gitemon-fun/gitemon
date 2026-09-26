@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { TOWN_Y, type Island } from '@gitemon/shared';
+import { TOWN_Y, gridHeight, type Island, type Spot } from '@gitemon/shared';
+import { Walk, Walkable } from './walker';
 import { Crowd, type Placed } from './crowd';
 import { buildTown } from './town';
 
@@ -251,6 +252,8 @@ export class CityScene {
     }
     // tapping the ground zooms toward it
     const g = this.groundAt(px, py);
+    // v6: a signed-in player's tap on the ground walks their Gitemon there
+    if (g && this.onGround?.(g.x, g.z)) return;
     if (g) this.flyTo(g.x, g.z, Math.min(4, this.zoom * 2.2));
   }
 
@@ -327,6 +330,81 @@ export class CityScene {
     }
     this.labels.visible = false;
     this.scene.add(this.labels);
+  }
+
+  // ---- walking (v6 §3, V6-D1) ------------------------------------------------------------------------
+
+  /** set by the app: return true when a ground tap was used for walking */
+  onGround: ((x: number, z: number) => boolean) | null = null;
+  private walkable: Walkable | null = null;
+  private walker: { i: number; home: Spot; walk: Walk | null; x: number; z: number } | null = null;
+  private walkCity: Island | null = null;
+  /** called about twice a second while walking, with where the walker is */
+  onWalk: ((x: number, z: number, arrived: boolean) => void) | null = null;
+  private lastWalkPing = 0;
+
+  /** make placed resident `i` the player's own walker (home = where it lives) */
+  enableWalker(city: Island, i: number) {
+    const c = this.crowd;
+    if (!c) return;
+    this.walkCity = city;
+    this.walkable ??= new Walkable(city);
+    const p = c.at(i);
+    this.walker = { i, home: { ...p.spot }, walk: null, x: p.spot.x, z: p.spot.z };
+  }
+  get walkerPos(): [number, number] | null {
+    return this.walker ? [this.walker.x, this.walker.z] : null;
+  }
+  get walkerHome(): Spot | null {
+    return this.walker?.home ?? null;
+  }
+  /** plan a walk to (x, z); returns its length in metres, or null when there is no way there */
+  planWalk(x: number, z: number): number | null {
+    if (!this.walker || !this.walkable) return null;
+    return this.walkable.path(this.walker.x, this.walker.z, x, z)?.length ?? null;
+  }
+  walkTo(x: number, z: number): number | null {
+    if (!this.walker || !this.walkable) return null;
+    const path = this.walkable.path(this.walker.x, this.walker.z, x, z);
+    if (!path) return null;
+    this.walker.walk = new Walk(path);
+    this.dirty = true;
+    return path.length;
+  }
+  walkHome() {
+    if (!this.walker) return;
+    this.walkTo(this.walker.home.x, this.walker.home.z);
+  }
+  /** back home at once (the tab was hidden: nothing to watch) */
+  snapHome() {
+    const w = this.walker;
+    if (!w || !this.crowd) return;
+    w.walk = null;
+    w.x = w.home.x;
+    w.z = w.home.z;
+    this.crowd.setPos(w.i, w.home.x, w.home.z, w.home.y);
+    this.dirty = true;
+  }
+  private stepWalker(dt: number) {
+    const w = this.walker;
+    if (!w?.walk || !this.crowd || !this.walkCity) return;
+    const [x, z] = w.walk.step(dt);
+    w.x = x;
+    w.z = z;
+    const r = Math.hypot(x, z);
+    const y = r < 72 ? TOWN_Y : Math.max(TOWN_Y, gridHeight(this.walkCity.grid, x, z));
+    this.crowd.setPos(w.i, x, z, y);
+    // the camera follows the walker
+    this.target.x += (x - this.target.x) * 0.08;
+    this.target.z += (z - this.target.z) * 0.08;
+    const now = performance.now();
+    const arrived = w.walk.done;
+    if (arrived || now - this.lastWalkPing > 500) {
+      this.lastWalkPing = now;
+      this.onWalk?.(x, z, arrived);
+    }
+    if (arrived) w.walk = null;
+    this.dirty = true;
   }
 
   // ---- staging (v6 §5, V6-D7) ---------------------------------------------------------------------
@@ -423,11 +501,12 @@ export class CityScene {
     if (document.hidden) return;
     // walkers only matter when they are big enough to see: animate at street and district zoom
     const animate = this.crowd && this.zoom > 0.45;
-    if (!animate && !this.dirty && !this.anim) return;
+    if (!animate && !this.dirty && !this.anim && !this.walker?.walk) return;
     if (now - this.last < 32) return; // ~30 fps is plenty for a city and kind to phones
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     if (animate) this.clock += dt;
+    this.stepWalker(dt);
     if (this.anim) {
       const k = Math.min(1, (performance.now() - this.anim.t0) / 700);
       const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;

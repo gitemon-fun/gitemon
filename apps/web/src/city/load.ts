@@ -24,7 +24,7 @@ export type Row = [
   number,
   number,
   number,
-  number,
+  number | string,
   string | null,
 ];
 /** [key, rank, tier, title, species, t1, t2, shape, form, shiny, id|null, login|null] from /api/city */
@@ -72,6 +72,8 @@ export const fromRow = (r: Row): MapGitemon => ({
   lv: r[7],
   st: r[8] ? 'c' : 'w',
   a: r[9] ? 1 : 0,
+  // v6: '<tier>:<level>' while blessed by the legend of the day; 'f' = the friendship aura
+  ...(typeof r[9] === 'string' && r[9] && r[9] !== 'f' ? { at: r[9] } : {}),
 });
 
 /**

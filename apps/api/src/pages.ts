@@ -185,7 +185,9 @@ export const homePage = (count: number) =>
 <div class="btns"><a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn" href="/map">Open the island</a></div></section>
 <section class="card"><h2>How it works</h2><ul>
 <li><b>Hatch.</b> Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you.</li>
-<li><b>Catch.</b> Catch other players' Gitemon. Worked together for real? It's a bonded catch.</li>
+<li><b>Walk.</b> Tap the map to walk your Gitemon anywhere — it walks home when you stop. Real GitHub work (merged pull requests, reviews, active weeks) earns more steps each day.</li>
+<li><b>Catch.</b> Walk up to another player's Gitemon and catch it. Worked together for real? It's a bonded catch.</li>
+<li><b>Find the legends.</b> Every legend you walk past goes into your Legend Log. One is the legend of the day: stand near it and your Gitemon glows for six hours. The Rare move every day.</li>
 <li><b>Sealed legends.</b> 500 creatures belong to developers who shaped the tech world. They sleep on the island, nameless, until their own developer signs in — who can wake theirs or remove it.</li>
 <li><b>Belong.</b> Every language has a home in one of nine climates. The stronger a Gitemon, the nearer the town it lives; claimed Gitemon live in town with their tamer.</li></ul>
 <p class="sub">We never read private repositories, never store where you live, and never contact anyone.</p></section>`,
