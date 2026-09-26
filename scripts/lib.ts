@@ -1,6 +1,5 @@
 /** Shared helpers for the trusted fetcher scripts (seed, drain). Run on a machine that holds a GitHub token. */
 import { fetchSnapshot, GitHubError } from '@gitemon/ingest';
-import { parseLocation } from '../packages/ingest/src/geo.ts';
 import type { Snapshot } from '@gitemon/shared';
 
 export const ORIGIN = process.env.GITEMON_ORIGIN ?? 'https://gitemon.fun';
@@ -52,10 +51,7 @@ export async function pump(logins: string[], log = (s: string) => process.stderr
       try {
         const s = await fetchSnapshot(login, GH);
         if ('notFound' in s) missing.push(login);
-        else {
-          s.home = await parseLocation(s.location);
-          batch.push(s);
-        }
+        else batch.push(s);
         log('.');
       } catch (e) {
         if (e instanceof GitHubError && e.rateLimited) {

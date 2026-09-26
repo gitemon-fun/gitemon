@@ -1,11 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
-    COUNTRY_NAME,
     SHAPE_NAME,
     STAT_MEANING,
     TYPE_INFO,
-    flag,
     type MapGitemon,
     type Stats,
   } from '@gitemon/shared';
@@ -96,16 +94,15 @@
     searching = true;
     try {
       const r = await api.find(login);
-      if (r.status === 202) say('That Gitemon is hatching. Try again in a few minutes.');
-      else if (r.data.g) {
+      if (r.data.g) {
         show(r.data.g, zoom);
-        if (!town?.byId.has(r.data.g.id))
-          say('Just hatched. It moves into the city within ten minutes.');
         panel = null;
         if (location.pathname !== '/map') history.replaceState({}, '', '/map');
       } else
         say(
-          r.status === 400 ? 'That is not a GitHub username.' : 'No GitHub developer by that name.',
+          r.status === 400
+            ? 'That is not a GitHub username.'
+            : 'Not on the island yet. Every Gitemon hatches when its own developer signs in.',
         );
     } finally {
       searching = false;
@@ -171,14 +168,6 @@
   }
   async function afterMove() {
     await Promise.all([loadMe(), loadTowns()]);
-  }
-
-  async function setHometown(showIt: boolean) {
-    busy = true;
-    await api.hometown(showIt);
-    busy = false;
-    await loadMe();
-    say(showIt ? 'Your hometown shows on your profile.' : 'Your hometown is hidden.');
   }
 
   async function signOut() {
@@ -333,9 +322,7 @@
         {/each}
       </div>
       <p class="dim small">
-        {TYPE_INFO[picked.t1].biome}{detail.town ? ` · ${detail.town.name}` : ''} · caught by {detail.caughtCount}{detail.home
-          ? ` · ${flag(detail.home.cc)} ${detail.home.city ? `${detail.home.city}, ` : ''}${COUNTRY_NAME[detail.home.cc] ?? detail.home.cc}`
-          : ''}
+        {TYPE_INFO[picked.t1].biome}{detail.town ? ` · ${detail.town.name}` : ''} · caught by {detail.caughtCount}
       </p>
     {/if}
     <div class="actions">
@@ -448,16 +435,6 @@
           ? ` and belong to ${me.town.name}`
           : ''}.
       </p>
-      {#if me.home}
-        <p class="dim">
-          Hometown: {flag(me.home.cc)}
-          {me.home.city ? `${me.home.city}, ` : ''}{COUNTRY_NAME[me.home.cc] ?? me.home.cc}
-          ({me.home.shown ? 'shown' : 'hidden'} on your profile).
-          <button class="link" disabled={busy} onclick={() => setHometown(!me!.home!.shown)}
-            >{me.home.shown ? 'Hide it' : 'Show it'}</button
-          >
-        </p>
-      {/if}
       <div class="actions">
         <a class="btn" href={'/' + me.login}>Public profile</a>
         {#if me.hidden}

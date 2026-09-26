@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono';
-import { fetchSnapshot, isValidLogin, GitHubError } from '@gitemon/ingest';
+import { fetchSnapshot, isValidLogin } from '@gitemon/ingest';
 import { SCORER_VERSION } from '@gitemon/scorer';
 import {
   BIOME_ORDER,
@@ -16,17 +16,7 @@ import { AuthError, callback, currentPlayer, loginRedirect, logout, playerToken 
 import { safeEqual } from './crypto.js';
 import { bonusLevels, checkBonded, doCatch, foundTown, joinTown, leaveTown } from './game.js';
 import { ogPng, spritePng } from './og.js';
-import {
-  homePage,
-  messagePage,
-  pendingPage,
-  privacyPage,
-  profilePage,
-  termsPage,
-  worldPage,
-  type WorldCity,
-  type WorldCountry,
-} from './pages.js';
+import { homePage, messagePage, privacyPage, profilePage, termsPage } from './pages.js';
 import {
   byId,
   byLogin,
@@ -74,29 +64,6 @@ async function tokenFor(c: Context<AppEnv>): Promise<string | null> {
   if (c.env.GITHUB_TOKEN) return c.env.GITHUB_TOKEN;
   const p = c.get('player');
   return p ? playerToken(c.env, p.id) : null;
-}
-
-async function hatch(c: Context<AppEnv>, login: string): Promise<Row | 'missing' | 'pending'> {
-  const token = await tokenFor(c);
-  if (!token) {
-    await c.env.DB.prepare('INSERT OR IGNORE INTO pending (login, requested_at) VALUES (?, ?)')
-      .bind(login, now())
-      .run();
-    return 'pending';
-  }
-  try {
-    const snap = await fetchSnapshot(login, token);
-    if ('notFound' in snap) return 'missing';
-    return await ingest(c.env.DB, snap);
-  } catch (e) {
-    if (e instanceof GitHubError && e.rateLimited) {
-      await c.env.DB.prepare('INSERT OR IGNORE INTO pending (login, requested_at) VALUES (?, ?)')
-        .bind(login, now())
-        .run();
-      return 'pending';
-    }
-    throw e;
-  }
 }
 
 function refreshLater(c: Context<AppEnv>, r: Row) {
@@ -218,7 +185,6 @@ app.get('/api/me', async (c) => {
     player: {
       ...toMap(r),
       hidden: r.hidden,
-      home: r.country ? { cc: r.country, city: r.city, shown: !r.hide_home } : null,
       admin: !!p.is_admin,
       bonus: await bonusLevels(c.env.DB, p.id),
       town,
@@ -354,11 +320,10 @@ app.get('/api/city', (c) =>
 app.get('/api/find', async (c) => {
   const login = (c.req.query('login') ?? '').trim().replace(/^@/, '');
   if (!isValidLogin(login)) return c.json({ error: 'bad-login' }, 400);
-  let r: Row | null | 'missing' | 'pending' = await byLogin(c.env.DB, login);
-  if (!r) r = await hatch(c, login);
-  if (r === 'missing') return c.json({ error: 'not-found' }, 404);
-  if (r === 'pending') return c.json({ pending: true }, 202);
-  if (r.hidden) return c.json({ error: 'not-found' }, 404);
+  // v5 (V5-D2, V5-D9): searching never hatches anyone. Someone who has not joined — including the
+  // developer behind a sealed legend — gets the same answer as a name that does not exist.
+  const r = await byLogin(c.env.DB, login);
+  if (!r || r.hidden) return c.json({ error: 'not-joined' }, 404);
   refreshLater(c, r);
   return c.json({ g: toMap(r) });
 });
@@ -384,7 +349,6 @@ app.get('/api/gitemon/:id', async (c) => {
     machine: !!r.machine,
     town,
     caughtByMe: caught ? { bonded: !!caught.bonded } : null,
-    home: r.country && !r.hide_home ? { cc: r.country, city: r.city } : null,
   });
 });
 
@@ -562,13 +526,13 @@ app.get('/internal/pending', async (c) => {
 
 app.get('/internal/stale', async (c) => {
   const limit = Math.min(200, Number(c.req.query('limit') ?? 50));
-  const wildCut = new Date(Date.now() - 7 * 86_400_000).toISOString();
   const claimedCut = new Date(Date.now() - 86_400_000).toISOString();
+  // v5: only signed-in players are refreshed; nobody else's profile is fetched (V5-D2)
   const rows = await c.env.DB.prepare(
-    `SELECT login FROM gitemon WHERE hidden = 0 AND ((status = 'wild' AND fetched_at < ?) OR (status = 'claimed' AND fetched_at < ?))
+    `SELECT login FROM gitemon WHERE hidden = 0 AND status = 'claimed' AND fetched_at < ?
      ORDER BY fetched_at LIMIT ?`,
   )
-    .bind(wildCut, claimedCut, limit)
+    .bind(claimedCut, limit)
     .all<{ login: string }>();
   return c.json({ logins: rows.results.map((r) => r.login) });
 });
@@ -643,56 +607,6 @@ app.get('/', async (c) =>
     });
   }),
 );
-app.get('/world', async (c) => {
-  const cache = (caches as unknown as { default: Cache }).default;
-  const key = new Request(new URL('/world', c.req.url).toString());
-  const hit = await cache.match(key);
-  if (hit) return hit;
-  const db = c.env.DB;
-  const [countries, cities, counts] = await db.batch([
-    db.prepare(
-      `SELECT country, n, login AS top_login, level AS top_level, t1 AS top_t1 FROM (
-         SELECT country, login, level, t1, COUNT(*) OVER (PARTITION BY country) AS n,
-                ROW_NUMBER() OVER (PARTITION BY country ORDER BY notable DESC, id) AS rk
-         FROM gitemon WHERE country IS NOT NULL AND hidden = 0 AND hide_home = 0)
-       WHERE rk = 1 ORDER BY n DESC, country LIMIT 120`,
-    ),
-    db.prepare(
-      `SELECT country, city, COUNT(*) AS n FROM gitemon
-       WHERE city IS NOT NULL AND hidden = 0 AND hide_home = 0
-       GROUP BY country, city ORDER BY n DESC, city LIMIT 60`,
-    ),
-    db.prepare(
-      `SELECT SUM(country IS NOT NULL AND hide_home = 0) AS placed, COUNT(*) AS total FROM gitemon WHERE hidden = 0`,
-    ),
-  ]);
-  const cnt = counts!.results[0] as { placed: number; total: number };
-  const res = html(
-    c,
-    worldPage(
-      countries!.results as unknown as WorldCountry[],
-      cities!.results as unknown as WorldCity[],
-      cnt.placed ?? 0,
-      cnt.total,
-    ),
-    200,
-    3600,
-  );
-  c.executionCtx.waitUntil(cache.put(key, res.clone()));
-  return res;
-});
-
-/** The owner's choice to show or hide their hometown (shown by default, V2-D6). */
-app.post('/api/me/hometown', async (c) => {
-  const p = c.get('player');
-  if (!p) return c.json({ error: 'signin' }, 401);
-  const { show } = await c.req.json<{ show: boolean }>();
-  await c.env.DB.prepare('UPDATE gitemon SET hide_home = ? WHERE id = ?')
-    .bind(show ? 0 : 1, p.id)
-    .run();
-  return c.json({ ok: true, show: !!show });
-});
-
 app.get('/privacy', (c) => html(c, privacyPage(), 200, 3600));
 app.get('/terms', (c) => html(c, termsPage(), 200, 3600));
 
@@ -709,16 +623,15 @@ app.get('*', async (c) => {
   const seg = decodeURIComponent(path.slice(1).replace(/\/$/, ''));
   if (!seg.includes('/') && isValidLogin(seg)) {
     c.set('player', await currentPlayer(c));
-    let r: Row | null | 'missing' | 'pending' = await byLogin(c.env.DB, seg);
-    if (!r) r = await hatch(c, seg);
-    if (r === 'pending') return html(c, pendingPage(seg), 202, 0);
-    if (r === 'missing' || r.hidden)
+    // v5: a profile address never hatches anyone; not joined = not here (V5-D2, V5-D9)
+    const r = await byLogin(c.env.DB, seg);
+    if (!r || r.hidden)
       return html(
         c,
         messagePage(
           404,
-          'No such developer',
-          `There is no GitHub developer called “${seg}”, or they released their Gitemon.`,
+          'Not on the island yet',
+          'This developer has no Gitemon on the island. Every Gitemon hatches when its own developer signs in with GitHub.',
         ),
         404,
       );

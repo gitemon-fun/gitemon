@@ -1,11 +1,4 @@
-import {
-  COUNTRY_NAME,
-  SHAPE_NAME,
-  STAT_MEANING,
-  TYPE_INFO,
-  flag,
-  type Stats,
-} from '@gitemon/shared';
+import { SHAPE_NAME, STAT_MEANING, TYPE_INFO, type Stats } from '@gitemon/shared';
 import type { Row } from './world.js';
 
 const esc = (s: string) =>
@@ -70,7 +63,7 @@ export function layout(o: {
 <style>${CSS}</style></head><body>
 <header><a class="brand" href="/">Gitemon</a><a href="/map">Open the city</a></header>
 <main>${o.body}</main>
-<footer><a href="/map">Map</a><a href="/world">World</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/gitemon-fun/gitemon">Source (AGPL)</a><span>Made by AIgnited</span></footer>
+<footer><a href="/map">Map</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/gitemon-fun/gitemon">Source (AGPL)</a><span>Made by AIgnited</span></footer>
 </body></html>`;
 }
 
@@ -101,7 +94,6 @@ export function profilePage(r: Row, bonus: number, town: string | null, caughtBy
       <span class="chip plain">${SHAPE_NAME[r.shape]}</span><span class="chip plain">Form ${r.form}</span>
     </div>
     <p class="sub">${wild ? `Lives in ${esc(town ?? t1.biome)}` : `Has a house in ${esc(t1.biome)}${town ? ` · ${esc(town)}` : ''}`} · caught by ${caughtBy} ${caughtBy === 1 ? 'player' : 'players'}</p>
-    ${hometown(r)}
     <div class="btns">
       <a class="btn primary" href="/map?${wild ? 'focus' : 'house'}=${encodeURIComponent(r.login)}">${wild ? 'See in the city' : 'Visit house'}</a>
       ${wild ? `<a class="btn" href="/auth/login?next=/map?focus=${encodeURIComponent(r.login)}">Is this you? Claim it</a>` : ''}
@@ -116,64 +108,6 @@ export function profilePage(r: Row, bonus: number, town: string | null, caughtBy
     description: `${r.login}'s Gitemon: a level ${r.level} ${t1.name} ${SHAPE_NAME[r.shape]} from ${t1.biome}. Catch it on gitemon.fun.`,
     path: `/${r.login}`,
     image: `https://gitemon.fun/og/${r.id}.png?v=${r.scorer_version}${r.level}${r.form}`,
-    body,
-  });
-}
-
-/** Hometown line (V2-D6): shown by default, hidden when the owner opted out. */
-function hometown(r: Row): string {
-  if (!r.country || r.hide_home || !COUNTRY_NAME[r.country]) return '';
-  const place = r.city
-    ? `${esc(r.city)}, ${esc(COUNTRY_NAME[r.country]!)}`
-    : esc(COUNTRY_NAME[r.country]!);
-  return `<p class="sub">Hometown: <a href="/world#${r.country}">${flag(r.country)} ${place}</a></p>`;
-}
-
-export interface WorldCountry {
-  country: string;
-  n: number;
-  top_login: string;
-  top_level: number;
-  top_t1: string;
-}
-export interface WorldCity {
-  country: string;
-  city: string;
-  n: number;
-}
-
-/** /world: countries and cities ranked by how many developers live there (V2-D6). */
-export function worldPage(
-  countries: WorldCountry[],
-  cities: WorldCity[],
-  placed: number,
-  total: number,
-) {
-  const rows = countries
-    .map(
-      (
-        c,
-        i,
-      ) => `<tr id="${c.country}"><td class="rk">${i + 1}</td><td>${flag(c.country)} ${esc(COUNTRY_NAME[c.country] ?? c.country)}</td>
-<td class="num">${c.n.toLocaleString('en')}</td><td><a href="/${encodeURIComponent(c.top_login)}">${esc(c.top_login)}</a> <span class="dim">Lv ${c.top_level}</span></td></tr>`,
-    )
-    .join('');
-  const cityRows = cities
-    .map(
-      (c, i) =>
-        `<tr><td class="rk">${i + 1}</td><td>${flag(c.country)} ${esc(c.city)}</td><td class="num">${c.n.toLocaleString('en')}</td></tr>`,
-    )
-    .join('');
-  const body = `
-<section class="card"><h1>Gitemon of the world</h1>
-<p class="sub">Where developers say they live, from the location on their public GitHub profile. ${placed.toLocaleString('en')} of ${total.toLocaleString('en')} Gitemon have a hometown we could read. Hometown is identity only: on Gitemon Island every Gitemon lives in its climate region.</p></section>
-<section class="card"><h2>Countries</h2><table class="rank"><thead><tr><th></th><th>Country</th><th class="num">Gitemon</th><th>Top Gitemon</th></tr></thead><tbody>${rows}</tbody></table></section>
-<section class="card"><h2>Cities</h2><table class="rank"><thead><tr><th></th><th>City</th><th class="num">Gitemon</th></tr></thead><tbody>${cityRows}</tbody></table>
-<p class="sub" style="margin-top:16px">Place names from <a href="https://www.geonames.org" rel="nofollow">GeoNames</a> (CC BY 4.0). Owners can hide their hometown.</p></section>`;
-  return layout({
-    title: 'Gitemon of the world — developers by country and city',
-    description: `Where ${total.toLocaleString('en')} GitHub developers in Gitemon live, ranked by country and city.`,
-    path: '/world',
     body,
   });
 }
@@ -249,7 +183,6 @@ export const homePage = (count: number) =>
 <li><b>Hatch.</b> Every GitHub developer already exists as a wild Gitemon.</li>
 <li><b>Catch.</b> Sign in and catch the developers you admire. Worked together for real? It's a bonded catch.</li>
 <li><b>Claim.</b> When someone you caught signs in, you both get a friendship buff.</li>
-<li><b>Belong.</b> Every language has a home in one of nine climates. The most notable developers stand on the central plaza and the stronger a Gitemon, the nearer the town it lives; claim yours and it moves into a house in town.</li>
-<li><b>Hometown.</b> Your GitHub location becomes a flag on your profile. See <a href="/world">Gitemon of the world</a>.</li></ul>
+<li><b>Belong.</b> Every language has a home in one of nine climates. The most notable developers stand on the central plaza and the stronger a Gitemon, the nearer the town it lives; claim yours and it moves into a house in town.</li></ul>
 <p class="sub">We never read private repositories and never contact anyone.</p></section>`,
   });

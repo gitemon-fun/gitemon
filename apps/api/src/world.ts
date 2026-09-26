@@ -37,9 +37,6 @@ export interface Row {
   claimed_at: string | null;
   town_id: number | null;
   caught_count: number;
-  country: string | null;
-  city: string | null;
-  hide_home: number;
 }
 
 export const chunkOf = (x: number, y: number) =>
@@ -185,12 +182,6 @@ export async function ingest(db: D1Database, snap: Snapshot): Promise<Row> {
         snap.userId,
       )
       .run();
-    // Hometown: only a snapshot from the trusted fetcher carries it; others keep what is stored.
-    if (snap.home !== undefined)
-      await db
-        .prepare('UPDATE gitemon SET country = ?, city = ? WHERE id = ?')
-        .bind(snap.home?.cc ?? null, snap.home?.city ?? null, snap.userId)
-        .run();
     // Main language changed and it lives outside a town: move it to its new biome.
     if (existing.t1 !== cols.t1) await movePop(db, existing.t1, cols.t1);
     if (existing.t1 !== cols.t1 && existing.town_id == null) {
@@ -212,8 +203,8 @@ export async function ingest(db: D1Database, snap: Snapshot): Promise<Row> {
       await db
         .prepare(
           `INSERT INTO gitemon (id, login, name, status, hidden, x, y, chunk, t1, t2, shape, form, shiny, machine, level,
-           notable, stats, scorer_version, snapshot, fetched_at, created_at, country, city)
-           VALUES (?, ?, ?, 'wild', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           notable, stats, scorer_version, snapshot, fetched_at, created_at)
+           VALUES (?, ?, ?, 'wild', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           snap.userId,
@@ -235,8 +226,6 @@ export async function ingest(db: D1Database, snap: Snapshot): Promise<Row> {
           JSON.stringify(snap),
           snap.fetchedAt,
           now(),
-          snap.home?.cc ?? null,
-          snap.home?.city ?? null,
         )
         .run();
       await movePop(db, null, cols.t1);
