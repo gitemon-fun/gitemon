@@ -7,6 +7,13 @@ import {
   TYPES,
   WORLD_H,
   WORLD_W,
+  AURA_H,
+  SIGHT_M,
+  auraLevel,
+  dayOf,
+  legendOfDayRank,
+  nextStreak,
+  walkBudget,
   type Snapshot,
   type TypeId,
 } from '@gitemon/shared';
@@ -196,6 +203,7 @@ app.get('/api/me', async (c) => {
     player: {
       ...toMap(r),
       hidden: r.hidden,
+      ...(await walkState(c, p.id, r)),
       // only ever sent to the developer themselves (V5-D4)
       legend: legend
         ? {
@@ -329,7 +337,8 @@ app.get('/api/district/:t', async (c) => {
 app.get('/api/city', (c) =>
   edgeCached(c, 600, async () => {
     const rows = await c.env.DB.prepare(
-      `SELECT id, login, t1, t2, shape, form, shiny, level, status = 'claimed', COALESCE(aura_until > ?, 0), claimed_at
+      `SELECT id, login, t1, t2, shape, form, shiny, level, status = 'claimed',
+              CASE WHEN aura_until > ? THEN COALESCE(aura_tier, 'f') ELSE '' END, claimed_at
        FROM gitemon WHERE hidden = 0 ORDER BY notable DESC, id LIMIT 40000`,
     )
       .bind(now())
@@ -343,7 +352,11 @@ app.get('/api/city', (c) =>
        FROM legend l LEFT JOIN gitemon g ON g.id = l.id AND g.hidden = 0
        ORDER BY l.rank`,
     ).raw();
-    return c.json({ g: rows, l: legends });
+    // v6: the day's frozen layout (the daily job writes it), so every client builds the same island
+    const layout = await c.env.DB.prepare("SELECT value FROM meta WHERE key = 'layout'").first<{
+      value: string;
+    }>();
+    return c.json({ g: rows, l: legends, layout: layout ? JSON.parse(layout.value) : null });
   }),
 );
 
@@ -421,6 +434,116 @@ app.post('/api/catch/:id', async (c) => {
     })(),
   );
   return c.json(res);
+});
+
+// ---- v6: walking, the Legend Log, the blessing ------------------------------------------------------
+
+/** the player's walk state for today: budget, walked, streak, Log (V6-D3…D6) */
+async function walkState(c: Context<AppEnv>, id: number, r: Row) {
+  const today = dayOf();
+  const p = await c.env.DB.prepare(
+    'SELECT streak, streak_day, walked_m, walk_day FROM players WHERE id = ?',
+  )
+    .bind(id)
+    .first<{
+      streak: number;
+      streak_day: string | null;
+      walked_m: number;
+      walk_day: string | null;
+    }>();
+  const seen = await c.env.DB.prepare(
+    'SELECT s.key, l.tier FROM legend_seen s LEFT JOIN legend l ON l.key = s.key WHERE s.player_id = ?',
+  )
+    .bind(id)
+    .all<{ key: string; tier: string | null }>();
+  const tally: Record<string, number> = {};
+  for (const x of seen.results) if (x.tier) tally[x.tier] = (tally[x.tier] ?? 0) + 1;
+  const streakAlive = p?.streak_day === today || nextStreak(1, p?.streak_day ?? null, today) > 1;
+  return {
+    walk: {
+      budget: walkBudget(JSON.parse(r.snapshot) as Snapshot),
+      walked: p?.walk_day === today ? p.walked_m : 0,
+      streak: streakAlive ? (p?.streak ?? 0) : 0,
+      seen: seen.results.map((x) => x.key),
+      tally,
+    },
+  };
+}
+
+/** checks shared by a sighting and a blessing: signed in, today's spot known, near it, within budget */
+async function walkCheck(c: Context<AppEnv>) {
+  const p = c.get('player');
+  if (!p) return { error: 'signin', status: 401 as const };
+  const { key, x, z, walked } = await c.req.json<{
+    key: string;
+    x: number;
+    z: number;
+    walked: number;
+  }>();
+  const today = dayOf();
+  const spot = await c.env.DB.prepare('SELECT x, z FROM legend_spot WHERE day = ? AND key = ?')
+    .bind(today, String(key))
+    .first<{ x: number; z: number }>();
+  if (!spot) return { error: 'no-spot', status: 409 as const };
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(z) ||
+    Math.hypot(x - spot.x, z - spot.z) > SIGHT_M + 1
+  )
+    return { error: 'far', status: 400 as const };
+  const me = await byId(c.env.DB, p.id);
+  if (!me) return { error: 'not-found', status: 404 as const };
+  const budget = walkBudget(JSON.parse(me.snapshot) as Snapshot);
+  const w = Math.max(0, Number(walked) || 0);
+  if (w > budget + 5) return { error: 'budget', status: 400 as const };
+  const pl = await c.env.DB.prepare(
+    'SELECT streak, streak_day, walked_m, walk_day FROM players WHERE id = ?',
+  )
+    .bind(p.id)
+    .first<{
+      streak: number;
+      streak_day: string | null;
+      walked_m: number;
+      walk_day: string | null;
+    }>();
+  const walkedToday = Math.max(w, pl?.walk_day === today ? pl.walked_m : 0);
+  const streak = nextStreak(pl?.streak ?? 0, pl?.streak_day ?? null, today);
+  await c.env.DB.prepare(
+    'UPDATE players SET walked_m = ?, walk_day = ?, streak = ?, streak_day = ? WHERE id = ?',
+  )
+    .bind(walkedToday, today, streak, today, p.id)
+    .run();
+  return { p, key: String(key), today, streak };
+}
+
+/** Walking within 10 m of a legend records it in the Legend Log (V6-D3). Names nobody. */
+app.post('/api/walk/sight', async (c) => {
+  const ck = await walkCheck(c);
+  if ('error' in ck) return c.json({ error: ck.error }, ck.status);
+  const r = await c.env.DB.prepare(
+    'INSERT OR IGNORE INTO legend_seen (player_id, key, day) VALUES (?, ?, ?)',
+  )
+    .bind(ck.p.id, ck.key, ck.today)
+    .run();
+  const n = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM legend_seen WHERE player_id = ?')
+    .bind(ck.p.id)
+    .first<{ n: number }>();
+  return c.json({ ok: true, new: r.meta.changes > 0, seen: n?.n ?? 0, streak: ck.streak });
+});
+
+/** Standing near the legend of the day blesses your Gitemon for 6 hours (V6-D4). */
+app.post('/api/walk/bless', async (c) => {
+  const ck = await walkCheck(c);
+  if ('error' in ck) return c.json({ error: ck.error }, ck.status);
+  const l = await c.env.DB.prepare('SELECT rank, tier FROM legend WHERE key = ?')
+    .bind(ck.key)
+    .first<{ rank: number; tier: string }>();
+  if (!l || l.rank !== legendOfDayRank(ck.today)) return c.json({ error: 'not-today' }, 400);
+  const until = new Date(Date.now() + AURA_H * 3_600_000).toISOString();
+  await c.env.DB.prepare('UPDATE gitemon SET aura_until = ?, aura_tier = ? WHERE id = ?')
+    .bind(until, `${l.tier}:${auraLevel(ck.streak)}`, ck.p.id)
+    .run();
+  return c.json({ ok: true, until, streak: ck.streak });
 });
 
 /** A listed developer wakes their sealed legend: it shows with their name from now on (V5-D4). */
@@ -620,6 +743,42 @@ app.post('/internal/legends', async (c) => {
       .run();
   }
   return c.json({ ok: true, upserted: stmts.length });
+});
+
+/** v6 daily job: which day the stored layout is for (the Galahad fetcher checks this). */
+app.get('/internal/layout-day', async (c) => {
+  const m = await c.env.DB.prepare("SELECT value FROM meta WHERE key = 'layout'").first<{
+    value: string;
+  }>();
+  return c.json({ day: m ? (JSON.parse(m.value) as { day: string }).day : null });
+});
+
+/** v6 daily job: the day's frozen layout + every legend's spot (one JSON parameter per statement). */
+app.post('/internal/layout', async (c) => {
+  const { day, pops, specials, spots } = await c.req.json<{
+    day: string;
+    pops: Record<string, number>;
+    specials: Record<string, { mini: number; rare: number }>;
+    spots: { key: string; x: number; z: number }[];
+  }>();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return c.json({ error: 'bad-day' }, 400);
+  const db = c.env.DB;
+  await db.batch([
+    db
+      .prepare(
+        "INSERT INTO meta (key, value) VALUES ('layout', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .bind(JSON.stringify({ day, pops, specials })),
+    db
+      .prepare(
+        `INSERT OR REPLACE INTO legend_spot (day, key, x, z)
+         SELECT ?, json_extract(value, '$.key'), json_extract(value, '$.x'), json_extract(value, '$.z')
+         FROM json_each(?)`,
+      )
+      .bind(day, JSON.stringify(spots ?? [])),
+    db.prepare('DELETE FROM legend_spot WHERE day < ?').bind(day),
+  ]);
+  return c.json({ ok: true, spots: (spots ?? []).length });
 });
 
 /** Re-score from stored snapshots after a scorer change (no GitHub calls). */

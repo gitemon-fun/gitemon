@@ -1,7 +1,10 @@
 import {
   BIOME_ORDER,
   TYPE_INFO,
+  dayOf,
+  dayShuffle,
   island,
+  legendOfDayRank,
   type Island,
   type MapGitemon,
   type Shape,
@@ -78,10 +81,19 @@ export const fromRow = (r: Row): MapGitemon => ({
  * at a town house, machines in the industrial quarter, everyone else in their type's habitats,
  * nearest the town first (rank = distance to the centre, V4-D3).
  */
+/** v6: the day's frozen layout from the daily job — every client builds the same island all day */
+export interface DayLayout {
+  day: string;
+  pops: Partial<Record<TypeId, number>>;
+  specials: Partial<Record<TypeId, { mini: number; rare: number }>>;
+}
+
 export function place(
   all: MapGitemon[],
   claimedAt: Map<number, string>,
   legends: MapGitemon[] = [],
+  layout: DayLayout | null = null,
+  day = dayOf(),
 ) {
   const woken = new Set(legends.filter((l) => !l.special!.sealed).map((l) => l.id));
   const players = all.filter((g) => !woken.has(g.id));
@@ -96,14 +108,24 @@ export function place(
     else if (tier === 'rare') c.rare++;
   }
   const plazaN = Math.max(24, Math.min(190, Math.round((players.length + legends.length) / 40)));
-  const city = island(pops, plazaN, specials);
+  // the day's frozen layout wins: players who join during the day slot into its spare room
+  const city = island(layout?.pops ?? pops, plazaN, layout?.specials ?? specials);
   const placed: Placed[] = [];
   let onPlaza = 0;
   // the specials, in rank order: the plaza keeps the top ten; Mythic then Epic stand on their
   // region's mini plaza; each Rare stands at the heart of one of its type's groups in the wild
   const miniNext = new Map<TypeId, number>();
   const denNext = new Map<TypeId, number>();
-  for (const l of [...legends].sort((a, b) => a.special!.rank - b.special!.rank)) {
+  // the Rare move to new group hearts every day (V6-D5): a per-day order within each type
+  const rareOrder = new Map<number, number>();
+  for (const l of legends)
+    if (l.special!.tier === 'rare') rareOrder.set(l.id, dayShuffle(l.special!.key, day));
+  const ordered = [...legends].sort((a, b) =>
+    a.special!.tier === 'rare' && b.special!.tier === 'rare'
+      ? rareOrder.get(a.id)! - rareOrder.get(b.id)!
+      : a.special!.rank - b.special!.rank,
+  );
+  for (const l of ordered) {
     const { rank, tier } = l.special!;
     let spot;
     if (rank === 1) spot = city.monument;
@@ -154,7 +176,9 @@ export function place(
     next.set(g.t1, k + 1);
     placed.push({ g, spot });
   }
-  return { city, placed, homes };
+  const todayRank = legendOfDayRank(day);
+  const today = legends.find((l) => l.special!.rank === todayRank)?.special!.key ?? null;
+  return { city, placed, homes, today, pops, specials };
 }
 
 export interface LoadedCity {
@@ -170,13 +194,16 @@ export interface LoadedCity {
 export async function loadCity(): Promise<LoadedCity | null> {
   const r = await fetch('/api/city');
   if (!r.ok) return null;
-  const data = (await r.json()) as { g: Row[]; l?: LegendRow[] };
+  const data = (await r.json()) as { g: Row[]; l?: LegendRow[]; layout?: DayLayout | null };
   const rows = data.g;
+  const day = data.layout?.day ?? dayOf();
   const claimedAt = new Map(rows.filter((x) => x[10]).map((x) => [x[0], x[10]!]));
-  const { city, placed, homes } = place(
+  const { city, placed, homes, today } = place(
     rows.map(fromRow),
     claimedAt,
     (data.l ?? []).map(fromLegend),
+    data.layout ?? null,
+    day,
   );
-  return { city, placed, homes, byId: new Map(placed.map((p) => [p.g.id, p])) };
+  return { city, placed, homes, today, byId: new Map(placed.map((p) => [p.g.id, p])) };
 }
