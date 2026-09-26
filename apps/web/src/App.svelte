@@ -85,7 +85,7 @@
     if (r.status === 200 && picked?.id === g.id) detail = r.data;
   }
 
-  async function search(e?: Event) {
+  async function search(e?: Event, zoom = 3.2) {
     e?.preventDefault();
     const login = query.trim().replace(/^@/, '');
     if (!login) return;
@@ -94,7 +94,7 @@
       const r = await api.find(login);
       if (r.status === 202) say('That Gitemon is hatching. Try again in a few minutes.');
       else if (r.data.g) {
-        show(r.data.g);
+        show(r.data.g, zoom);
         if (!town?.byId.has(r.data.g.id))
           say('Just hatched. It moves into the city within ten minutes.');
         panel = null;
@@ -185,6 +185,7 @@
 
   onMount(() => {
     scene = new CityScene(host, (p) => select(p ? p.g : null));
+    if (location.search.includes('debug')) (window as unknown as { city: CityScene }).city = scene;
     window.addEventListener('popstate', route);
     route();
     (async () => {
@@ -199,10 +200,16 @@
       scene!.setCreatures(loadedCity.placed);
       scene!.fitCity(loadedCity.city.radius);
       loaded = true;
-      const focus = new URLSearchParams(location.search).get('focus');
-      if (focus) {
+      const qs = new URLSearchParams(location.search);
+      const house = qs.get('house');
+      const focus = qs.get('focus') ?? house;
+      // ?at=<type> frames a district square (share links, screenshots); ?z= sets the zoom
+      const at = loadedCity.city.districts.find((d) => d.t === qs.get('at'));
+      if (at) scene!.flyTo(at.square.x, at.square.z, Number(qs.get('z')) || 1.6);
+      else if (focus) {
         query = focus;
-        await search();
+        // ?house=<login> (profile "Visit house", V3-D2): the same flight, closer, onto the door
+        await search(undefined, house ? 4 : 3.2);
       } else if (me && !me.hidden && town.byId.has(me.id)) show(me, 2.6);
       else scene!.flyTo(0, 0, 1.3);
     })();

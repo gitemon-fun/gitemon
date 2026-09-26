@@ -1,24 +1,13 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import {
-  AVENUE,
-  CANAL_IN,
-  CANAL_OUT,
-  PLAZA_R,
-  RING0,
-  TYPE_INFO,
-  hash32,
-  type City,
-  type TypeId,
-} from '@gitemon/shared';
+import type { City } from '@gitemon/shared';
 import { Crowd, type Placed } from './crowd';
-import { DISTRICT_STYLE, archetype, homeParts } from './buildings';
+import { buildTown } from './town';
 
 /**
- * Gitemon City renderer (GRANDPLAN v2 §3, §7): Transit-style low-poly blocks under a fixed
- * isometric camera with 4 snap rotations. Buildings are instanced per district style; the crowd is
- * one instanced draw of pixel sprites (crowd.ts). Frames are capped at 30 fps, and the loop idles
- * when nothing moves on screen or the tab is hidden.
+ * Gitemon City renderer (GRANDPLAN v2 §3, v3 §3): a fixed isometric camera with 4 snap rotations
+ * over the kit-built town (town.ts). One shadow map, rendered once when the city is built — the
+ * city never moves. The crowd is one instanced draw of pixel sprites (crowd.ts). Frames are capped
+ * at 30 fps, and the loop idles when nothing moves on screen or the tab is hidden.
  */
 
 export type { Placed };
@@ -37,6 +26,9 @@ export class CityScene {
   private clock = 0;
   private last = 0;
   private ring: THREE.Mesh;
+  private sun: THREE.DirectionalLight;
+  private detail: THREE.Object3D[] = [];
+  private detailOn = true;
   private pointers = new Map<number, { x: number; y: number }>();
   private pinch: { d: number; z: number } | null = null;
   private moved = 0;
@@ -61,11 +53,22 @@ export class CityScene {
     host.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.touchAction = 'none';
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 3000);
-    this.scene.fog = new THREE.Fog('#bfdcf0', 900, 1800);
-    this.scene.add(new THREE.HemisphereLight('#fff6e8', '#6f7f96', 1.9));
-    const sun = new THREE.DirectionalLight('#fff1d6', 1.6);
-    sun.position.set(-200, 400, 120);
-    this.scene.add(sun);
+    // the camera sits 1200 units out: fog must start beyond it or the whole city goes pale
+    this.scene.fog = new THREE.Fog('#bfdcf0', 1500, 2800);
+    this.scene.add(new THREE.HemisphereLight('#fff6e8', '#7f8aa0', 1.75));
+    const sun = new THREE.DirectionalLight('#fff1d6', 1.9);
+    sun.position.set(-160, 300, 110);
+    this.scene.add(sun, sun.target);
+    this.sun = sun;
+    // static city: the shadow map is drawn once after build (v3 §3, G5), never per frame
+    const big = this.renderer.capabilities.maxTextureSize >= 4096;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(big ? 4096 : 2048, big ? 4096 : 2048);
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.35;
     this.ring = new THREE.Mesh(
       new THREE.TorusGeometry(1.1, 0.12, 6, 24),
       new THREE.MeshBasicMaterial({ color: '#ffffff' }),
@@ -270,220 +273,23 @@ export class CityScene {
 
   // ---- building the city ---------------------------------------------------------------------------
 
-  /** homes: lot index → the owner's roof colour (claimed players, V2-D5) */
+  /** homes: lot index → the owner's colour (claimed players, V2-D5 / V3-D2) */
   build(city: City, homes = new Map<number, string>()) {
-    const g = new THREE.Group();
-    this.scene.add(g);
-    const flat = (geo: THREE.BufferGeometry, color: string, y = 0) => {
-      const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color }));
-      m.rotation.x = -Math.PI / 2;
-      m.position.y = y;
-      g.add(m);
-      return m;
-    };
-    // island-less ground: a big soft disc, then each district's wedge
-    flat(new THREE.CircleGeometry(city.radius + 60, 96), '#d9d2c3', -0.2);
-    for (const d of city.districts) {
-      const st = DISTRICT_STYLE[d.t];
-      // RingGeometry's theta runs counter-clockwise in its own plane; after rotating flat, angle -> -angle
-      flat(
-        new THREE.RingGeometry(CANAL_OUT, RING0 + d.bands * 26 + 4, 12, 1, -d.a1, d.a1 - d.a0),
-        st.ground,
-        -0.1,
-      );
-    }
-    // plaza + canal
-    flat(new THREE.CircleGeometry(PLAZA_R + 2, 64), '#e8e0d0', 0);
-    flat(new THREE.RingGeometry(PLAZA_R - 6, PLAZA_R - 5.4, 64), '#cfc4b0', 0.02);
-    flat(new THREE.RingGeometry(14, 14.6, 48), '#cfc4b0', 0.02);
-    flat(new THREE.RingGeometry(CANAL_IN, CANAL_OUT, 96), '#5fb2d8', 0.01);
-    flat(new THREE.RingGeometry(CANAL_IN - 1.2, CANAL_IN, 96), '#9d9384', 0.03);
-    flat(new THREE.RingGeometry(CANAL_OUT, CANAL_OUT + 1.2, 96), '#9d9384', 0.03);
-    this.buildRoads(city, g);
-    this.buildBuildings(city, g, homes);
-    this.buildDecor(city, g);
+    const t0 = performance.now();
+    const town = buildTown(city, homes);
+    this.stats.buildMs = Math.round(performance.now() - t0);
+    this.stats.homes = homes.size;
+    this.scene.add(town.group);
+    this.detail = town.detail;
+    const cam = this.sun.shadow.camera;
+    const r = city.radius + 30;
+    cam.left = cam.bottom = -r;
+    cam.right = cam.top = r;
+    cam.near = 1;
+    cam.far = 1200;
+    cam.updateProjectionMatrix();
+    this.renderer.shadowMap.needsUpdate = true;
     this.dirty = true;
-  }
-
-  private buildRoads(city: City, g: THREE.Group) {
-    const pave: THREE.BufferGeometry[] = [];
-    const road: THREE.BufferGeometry[] = [];
-    const strip = (pts: [number, number][], w: number, y: number, out: THREE.BufferGeometry[]) => {
-      for (let i = 0; i < pts.length - 1; i++) {
-        const [x0, z0] = pts[i];
-        const [x1, z1] = pts[i + 1];
-        const len = Math.hypot(x1 - x0, z1 - z0);
-        const geo = new THREE.PlaneGeometry(len + w * 0.3, w);
-        geo.rotateX(-Math.PI / 2);
-        geo.rotateY(-Math.atan2(z1 - z0, x1 - x0));
-        geo.translate((x0 + x1) / 2, y, (z0 + z1) / 2);
-        out.push(geo);
-      }
-    };
-    for (const r of city.roads) {
-      strip(r.pts, r.w + 6, 0.02, pave);
-      strip(r.pts, r.w, 0.05, road);
-    }
-    g.add(
-      new THREE.Mesh(mergeGeometries(pave)!, new THREE.MeshLambertMaterial({ color: '#c9c0ae' })),
-    );
-    g.add(
-      new THREE.Mesh(mergeGeometries(road)!, new THREE.MeshLambertMaterial({ color: '#5d5a60' })),
-    );
-    // bridges over the canal on every avenue
-    const planks: THREE.BufferGeometry[] = [];
-    for (const d of city.districts) {
-      const geo = new THREE.BoxGeometry(CANAL_OUT - CANAL_IN + 3, 0.5, AVENUE);
-      geo.rotateY(-d.a0);
-      const r = (CANAL_IN + CANAL_OUT) / 2;
-      geo.translate(Math.cos(d.a0) * r, 0.25, Math.sin(d.a0) * r);
-      planks.push(geo);
-    }
-    g.add(
-      new THREE.Mesh(mergeGeometries(planks)!, new THREE.MeshLambertMaterial({ color: '#b08a5a' })),
-    );
-  }
-
-  private buildBuildings(city: City, g: THREE.Group, homes: Map<number, string>) {
-    // one instanced archetype per district style (buildings.ts): cosy low-rise, facing its road
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    const col = new THREE.Color();
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-    const place = (l: City['lots'][number]) => {
-      const a = Math.atan2(l.z, l.x);
-      // the front (+z of the archetype) looks at the road it faces
-      q.setFromAxisAngle(up, Math.atan2(-Math.cos(a) * l.face, -Math.sin(a) * l.face));
-    };
-    if (homes.size) {
-      const { walls, roof } = homeParts();
-      const wm = new THREE.InstancedMesh(walls, mat, homes.size);
-      const rm = new THREE.InstancedMesh(roof, mat, homes.size);
-      let k = 0;
-      for (const [i, colour] of homes) {
-        const l = city.lots[i]!;
-        place(l);
-        m.compose(
-          new THREE.Vector3(l.x, 0, l.z),
-          q,
-          new THREE.Vector3(l.w * 0.8, 6.4, l.depth * 0.8),
-        );
-        wm.setMatrixAt(k, m);
-        rm.setMatrixAt(k, m);
-        wm.setColorAt(k, col.set('#ffffff'));
-        rm.setColorAt(k++, col.set(colour));
-      }
-      g.add(wm, rm);
-    }
-    city.districts.forEach((d, di) => {
-      const lots = city.lots.filter((l, i) => l.d === di && !homes.has(i));
-      if (!lots.length) return;
-      const mesh = new THREE.InstancedMesh(archetype(DISTRICT_STYLE[d.t]), mat, lots.length);
-      lots.forEach((l, k) => {
-        place(l);
-        const h = hash32(`b${di}:${k}`);
-        const sw = l.w * (0.78 + (h % 12) / 100);
-        const sd = l.depth * (0.8 + ((h >>> 4) % 10) / 100);
-        // storeys: houses stay small, downtown (taller lots) gets a little more height
-        const sy = l.house ? 6 : 6.4 + (l.h - 5) * 0.3 + ((h >>> 8) % 10) / 8;
-        m.compose(new THREE.Vector3(l.x, 0, l.z), q, new THREE.Vector3(sw, sy, sd));
-        mesh.setMatrixAt(k, m);
-        const t = 0.9 + ((h >>> 12) % 16) / 100;
-        mesh.setColorAt(k, col.setRGB(t, t, t));
-      });
-      g.add(mesh);
-    });
-  }
-
-  private buildDecor(city: City, g: THREE.Group) {
-    // trees between plaza and canal, and around each district square
-    const trunk = new THREE.CylinderGeometry(0.25, 0.35, 1.6, 5);
-    trunk.translate(0, 0.8, 0);
-    const crown = new THREE.IcosahedronGeometry(1.4, 0);
-    crown.translate(0, 2.6, 0);
-    const spots: { x: number; z: number; t: TypeId | null }[] = [];
-    for (let k = 0; k < 40; k++) {
-      const a = (k / 40) * Math.PI * 2;
-      spots.push({ x: Math.cos(a) * (PLAZA_R + 1.5), z: Math.sin(a) * (PLAZA_R + 1.5), t: null });
-    }
-    for (const d of city.districts) {
-      const { x, z, r } = d.square;
-      for (const [sx, sz] of [
-        [1, 1],
-        [1, -1],
-        [-1, 1],
-        [-1, -1],
-      ])
-        spots.push({ x: x + sx * (r + 1.2), z: z + sz * (r + 1.2), t: d.t });
-    }
-    // yard trees behind some lots, so blocks read as gardens, not a parking lot of boxes
-    city.lots.forEach((l, k) => {
-      const h = hash32(`yard${k}`);
-      if (h % 5 > 1) return;
-      const a = Math.atan2(l.z, l.x);
-      const back = (l.depth / 2 + 0.4) * l.face;
-      const side = ((h >>> 3) % 2 ? 1 : -1) * l.w * 0.42;
-      spots.push({
-        x: l.x + Math.cos(a) * back - Math.sin(a) * side,
-        z: l.z + Math.sin(a) * back + Math.cos(a) * side,
-        t: city.districts[l.d]!.t,
-      });
-    });
-    const m = new THREE.Matrix4();
-    const col = new THREE.Color();
-    const tr = new THREE.InstancedMesh(
-      trunk,
-      new THREE.MeshLambertMaterial({ flatShading: true }),
-      spots.length,
-    );
-    const cr = new THREE.InstancedMesh(
-      crown,
-      new THREE.MeshLambertMaterial({ flatShading: true }),
-      spots.length,
-    );
-    spots.forEach((s, k) => {
-      const sc = 0.8 + (hash32(`tree${k}`) % 40) / 100;
-      m.makeScale(sc, sc, sc).setPosition(s.x, 0, s.z);
-      tr.setMatrixAt(k, m);
-      cr.setMatrixAt(k, m);
-      const st = s.t ? DISTRICT_STYLE[s.t] : null;
-      tr.setColorAt(k, col.set(st ? st.tree[0] : '#6b4a2e'));
-      cr.setColorAt(k, col.set(st ? st.tree[1] : '#5fa84a'));
-    });
-    g.add(tr, cr);
-    // district landmarks: an obelisk with a glowing cap in the district's colour
-    for (const d of city.districts) {
-      const st = { walls: [DISTRICT_STYLE[d.t].wall] };
-      const ob = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.9, 1.6, 12, 4),
-        new THREE.MeshLambertMaterial({ color: st.walls[0], flatShading: true }),
-      );
-      ob.position.set(d.square.x, 6, d.square.z);
-      const cap = new THREE.Mesh(
-        new THREE.OctahedronGeometry(1.6, 0),
-        new THREE.MeshBasicMaterial({ color: TYPE_INFO[d.t].colors[0] }),
-      );
-      cap.position.set(d.square.x, 13.4, d.square.z);
-      g.add(ob, cap);
-    }
-    // the plaza monument
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(5.5, 6.5, 2, 8),
-      new THREE.MeshLambertMaterial({ color: '#bdb3a2', flatShading: true }),
-    );
-    base.position.y = 1;
-    const column = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.4, 2, 16, 8),
-      new THREE.MeshLambertMaterial({ color: '#e7dfd0', flatShading: true }),
-    );
-    column.position.y = 10;
-    const orb = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(2.6, 1),
-      new THREE.MeshLambertMaterial({ color: '#f2c94c', emissive: '#6a4a00', flatShading: true }),
-    );
-    orb.position.y = 20.5;
-    g.add(base, column, orb);
   }
 
   // ---- creatures -------------------------------------------------------------------------------------
@@ -530,10 +336,26 @@ export class CityScene {
     }
     this.dirty = false;
     this.placeCamera();
+    // LOD: windows, add-ons and street furniture only where they can be seen (v3 build file 08)
+    const near = this.zoom > 0.42;
+    if (near !== this.detailOn) {
+      this.detailOn = near;
+      for (const o of this.detail) o.visible = near;
+    }
     if (this.crowd) {
       const right = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       this.crowd.update(this.clock, right, this.grow, this.upScale);
     }
+    const t = performance.now();
     this.renderer.render(this.scene, this.camera);
+    this.stats.frames++;
+    this.stats.ms += performance.now() - t;
   };
+
+  /** render counters for ?debug and the perf check (v3 build file 08) */
+  readonly stats = { frames: 0, ms: 0, buildMs: 0, homes: 0 };
+  get info() {
+    const r = this.renderer.info.render;
+    return { calls: r.calls, triangles: r.triangles, ...this.stats };
+  }
 }

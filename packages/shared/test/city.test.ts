@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { BIOME_ORDER, layout, PLAZA_R, CANAL_OUT, WALK } from '../src/index.js';
+import { BIOME_ORDER, layout, PLAZA_R, CANAL_OUT, WALK, type Lot } from '../src/index.js';
+
+/** how far (x, z) sits inside a plot's footprint, shrunk by `m` on every side; > 0 = inside */
+const inside = (l: Lot, x: number, z: number, m = 0.3) => {
+  const dx = x - l.x;
+  const dz = z - l.z;
+  const along = Math.abs(dx * -l.fz + dz * l.fx);
+  const across = Math.abs(dx * l.fx + dz * l.fz);
+  return Math.min(l.w / 2 - m - along, l.depth / 2 - m - across);
+};
 
 const pops = Object.fromEntries(BIOME_ORDER.map((t, i) => [t, 50 + i * 90]));
 
@@ -29,30 +38,48 @@ describe('city layout', () => {
   });
 
   it('never puts a spot inside a building', () => {
-    let worst = Infinity;
-    for (const l of city.lots) {
-      const r = Math.min(l.w, l.depth) / 2 - 0.3;
-      for (const s of city.spots[l.d]!) {
-        const d = Math.hypot(s.x - l.x, s.z - l.z);
-        if (d < r) worst = Math.min(worst, d - r);
-      }
-    }
-    expect(worst).toBe(Infinity);
+    let hits = 0;
+    for (const l of city.lots)
+      for (const s of city.spots[l.d]!) if (inside(l, s.x, s.z) > 0) hits++;
+    expect(hits).toBe(0);
   });
 
   it('never walks a resident into a building', () => {
     let hits = 0;
-    for (const l of city.lots) {
-      const r = Math.min(l.w, l.depth) / 2 - 0.3;
+    for (const l of city.lots)
       for (const s of city.spots[l.d]!) {
         if (!s.tx && !s.tz) continue;
-        for (const k of [-1, 1]) {
-          const d = Math.hypot(s.x + s.tx * WALK * k - l.x, s.z + s.tz * WALK * k - l.z);
-          if (d < r) hits++;
-        }
+        for (const k of [-1, 1])
+          if (inside(l, s.x + s.tx * WALK * k, s.z + s.tz * WALK * k) > 0) hits++;
       }
-    }
     expect(hits).toBe(0);
+  });
+
+  it('builds rows that touch: neighbours share a wall (v3 §5)', () => {
+    let gaps = 0;
+    for (const l of city.lots) {
+      if (l.prev < 0) continue;
+      const p = city.lots[l.prev]!;
+      const d = Math.hypot(l.x - p.x, l.z - p.z);
+      if (Math.abs(d - (l.w + p.w) / 2) > 0.6) gaps++;
+    }
+    expect(gaps).toBe(0);
+  });
+
+  it('keeps neighbouring storeys within one step, corners tallest in their row', () => {
+    for (const l of city.lots) {
+      if (l.prev < 0) continue;
+      expect(Math.abs(l.storeys - city.lots[l.prev]!.storeys)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('fills courts before doorways before sidewalks, band by band', () => {
+    const order = { court: 0, doorway: 1, street: 2 } as Record<string, number>;
+    city.spots.forEach((list) => {
+      const rest = list.filter((s) => s.kind !== 'square');
+      expect(rest.some((s) => s.kind === 'court')).toBe(true);
+      expect(order[rest[0]!.kind]).toBe(0);
+    });
   });
 
   it('gives every door a house, nearest the square first', () => {

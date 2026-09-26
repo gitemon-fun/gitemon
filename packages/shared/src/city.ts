@@ -17,16 +17,20 @@ export const CANAL_IN = 38;
 export const CANAL_OUT = 45;
 export const RING0 = 49; // first ring road
 export const BAND = 26; // distance between ring roads
-export const ROAD = 5; // road width
-export const AVENUE = 7; // radial avenue width
+export const ROAD = 3.5; // road width (v3: narrower, G3)
+export const AVENUE = 5; // radial avenue width
+/** sidewalk width on each side of every road */
+export const SW = 2.4;
+/** depth of a row of buildings along a block edge (v3 §5) */
+export const ROW = 5.6;
 export const MAX_BANDS = 24;
 /** how far a street resident walks either way from its spot */
 export const WALK = 3.6;
-const SPACING = 2.9;
+const SPACING = 4.0;
 const SQUARE_SPACING = 3.3;
-const ROWS = [ROAD / 2 + 1.1, ROAD / 2 + 2.5];
+const ROWS = [ROAD / 2 + 0.7, ROAD / 2 + 1.7];
 
-export type SpotKind = 'plaza' | 'square' | 'street' | 'door';
+export type SpotKind = 'plaza' | 'square' | 'street' | 'door' | 'court' | 'doorway';
 
 export interface Spot {
   x: number;
@@ -39,19 +43,29 @@ export interface Spot {
   tz: number;
 }
 
+/**
+ * One building plot in a row along a block edge (v3 §5). Rows share walls: the plots of a row
+ * touch. The front faces the street (fx, fz); `w` runs along the street, `depth` away from it.
+ */
 export interface Lot {
   x: number;
   z: number;
-  /** footprint along the road, across the road */
   w: number;
   depth: number;
-  /** rotation around the vertical axis (radians) */
-  rot: number;
-  h: number;
+  /** unit vector the front faces (toward its street) */
+  fx: number;
+  fz: number;
+  storeys: number;
   d: number;
   house: boolean;
-  /** which road the front faces: 1 = the inner ring road, -1 = the outer one */
-  face: 1 | -1;
+  /** the plot at the end of a row, where two streets meet (tallest in its block, V3-D5) */
+  corner: boolean;
+  /** stable per-plot seed for the building kit */
+  seed: number;
+  /** the previous plot in the same row, or -1 (the kit keeps neighbours different, G1) */
+  prev: number;
+  /** band index (0 = next to the canal); band 1 is the square */
+  band: number;
 }
 
 export interface Road {
@@ -72,6 +86,16 @@ export interface District {
   labelAt: [number, number];
 }
 
+/** the open inside of a block, between its rows (an annular sector) */
+export interface Court {
+  d: number;
+  r0: number;
+  r1: number;
+  a0: number;
+  a1: number;
+  tree: boolean;
+}
+
 export interface City {
   districts: District[];
   roads: Road[];
@@ -83,6 +107,7 @@ export interface City {
   doors: Spot[][];
   /** for each door, the index of its house in `lots` */
   doorLots: number[][];
+  courts: Court[];
   radius: number;
 }
 
@@ -91,6 +116,46 @@ const WEDGE = (Math.PI * 2) / N;
 const polar = (r: number, a: number): [number, number] => [Math.cos(a) * r, Math.sin(a) * r];
 const rnd = (seed: string) => hash32(seed) / 4294967296;
 
+/**
+ * Split a row of length `len` into plot widths that touch end to end: narrow, standard and wide
+ * plots in a seeded mix. `corners` makes both ends square (ROW × ROW) corner plots.
+ */
+function splitRow(len: number, seed: string, corners: boolean): number[] {
+  const MIN = 3.4;
+  if (len < MIN * 1.5) return [Math.max(len, 1)];
+  const out: number[] = [];
+  let left = len;
+  const endW = corners && len > ROW * 2 + MIN ? ROW : 0;
+  if (endW) left -= endW * 2;
+  for (let i = 0; left >= MIN; i++) {
+    const u = rnd(`${seed}:${i}`);
+    const w = u < 0.3 ? 3.4 + u * 2.6 : u < 0.75 ? 4.2 + (u - 0.3) * 2.2 : 5.2 + (u - 0.75) * 4;
+    if (left - w < MIN) {
+      out.push(left);
+      left = 0;
+      break;
+    }
+    out.push(w);
+    left -= w;
+  }
+  if (left > 0 && out.length) {
+    // spread a short remainder over the row so no sliver plot is left
+    const add = left / out.length;
+    for (let i = 0; i < out.length; i++) out[i]! += add;
+  }
+  return endW ? [endW, ...out, endW] : out;
+}
+
+/** storeys: taller next to the square (V3-D5), corners one more, neighbours step by ≤ 1 */
+function storeysFor(band: number, corner: boolean, seed: number, prev: number): number {
+  const near = band === 0 || band === 2 ? 1 : 0;
+  let s = 1 + near + (rnd(`${seed}st`) < 0.45 ? 1 : 0);
+  if (corner) s += 1;
+  s = Math.min(3, s);
+  if (prev) s = Math.max(prev - 1, Math.min(prev + 1, s));
+  return s;
+}
+
 export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60): City {
   const districts: District[] = [];
   const roads: Road[] = [];
@@ -98,6 +163,7 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
   const spots: Spot[][] = [];
   const doors: Spot[][] = [];
   const doorLots: number[][] = [];
+  const courts: Court[] = [];
   let radius = RING0;
 
   BIOME_ORDER.forEach((t, d) => {
@@ -117,7 +183,7 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
       }
     sq.sort((p, q) => Math.hypot(p.x - sx, p.z - sz) - Math.hypot(q.x - sx, q.z - sz));
     list.push(...sq);
-    const street: (Spot & { r: number })[] = [];
+    const street: (Spot & { r: number; k: number; p: number })[] = [];
     const door: (Spot & { lot: number })[] = [];
 
     const need = (pops[t] ?? 0) * 1.1 - sq.length;
@@ -127,6 +193,9 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
       if (k === 1) continue; // the square band
       const rIn = RING0 + k * BAND;
       const rOut = rIn + BAND;
+      // inner bands are too narrow to split: the middle street starts where a half is still a block
+      const split = (rIn + BAND / 2) * WEDGE > 48;
+      if (split) roads.push({ pts: [polar(rIn, am), polar(rOut, am)], w: ROAD, kind: 'street' });
       // sidewalks along the two ring roads that bound the band (outer side of rIn, inner side of rOut)
       for (const [r, dir] of [
         [rIn, 1],
@@ -137,15 +206,25 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
           const n = Math.floor((rr * (WEDGE - 0.04)) / SPACING);
           for (let s = 0; s < n; s++) {
             const a = a0 + 0.02 + ((s + 0.5) / n) * (WEDGE - 0.04);
-            if (Math.abs(a - am) < 0.02) continue;
+            if (split && Math.abs(a - am) < 0.03) continue;
             const [x, z] = polar(rr, a);
-            street.push({ x, z, d, kind: 'street', r: rr, tx: -Math.sin(a), tz: Math.cos(a) });
+            street.push({
+              x,
+              z,
+              d,
+              kind: 'street',
+              r: rr,
+              k,
+              p: 2,
+              tx: -Math.sin(a),
+              tz: Math.cos(a),
+            });
           }
         }
       }
       // sidewalks along the middle street and the two borders, inside the wedge
       for (const [a, sides] of [
-        [am, [1, -1]],
+        ...(split ? ([[am, [1, -1]]] as const) : []),
         [a0, [1]],
         [a1, [-1]],
       ] as const) {
@@ -158,40 +237,126 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
               const [x0, z0] = polar(r, a);
               const x = x0 - Math.sin(a) * perp;
               const z = z0 + Math.cos(a) * perp;
-              street.push({ x, z, d, kind: 'street', r, tx: Math.cos(a), tz: Math.sin(a) });
+              street.push({
+                x,
+                z,
+                d,
+                kind: 'street',
+                r,
+                k,
+                p: 2,
+                tx: Math.cos(a),
+                tz: Math.sin(a),
+              });
             }
           }
       }
-      // lots: two rows per half-block, facing the ring roads
-      for (const half of [0, 1]) {
-        const ha0 = half ? am : a0;
-        const ha1 = half ? a1 : am;
-        for (const [row, face] of [
-          [0, 1],
-          [1, -1],
+      // blocks: each half-band between the ring roads, the middle street and the border avenue.
+      // Buildings stand in rows along every street edge; the inside is a court (v3 §5).
+      const rB0 = rIn + ROAD / 2 + SW;
+      const rB1 = rOut - ROAD / 2 - SW;
+      for (const half of split ? [0, 1] : [2]) {
+        const ha0 = half === 1 ? am : a0;
+        const ha1 = half === 0 ? am : a1;
+        const m0 = (half === 1 ? ROAD / 2 : AVENUE / 2) + SW;
+        const m1 = (half === 0 ? ROAD / 2 : AVENUE / 2) + SW;
+        const rM = (rB0 + rB1) / 2;
+        const sides = rM * (ha1 - ha0) - m0 - m1 > ROW * 2 + 5;
+        const bseed = `${t}:${k}:${half}`;
+        // rows along the two ring roads: front faces the road, corners at both ends
+        for (const [rC, face] of [
+          [rB0 + ROW / 2, -1],
+          [rB1 - ROW / 2, 1],
         ] as const) {
-          const depth = BAND / 2 - ROAD / 2 - 4.2;
-          const rC =
-            row === 0 ? rIn + ROAD / 2 + 3.4 + depth / 2 : rOut - ROAD / 2 - 3.4 - depth / 2;
-          // keep clear of the border avenue and the middle street (and their sidewalks)
-          const m0 = (half ? ROAD / 2 : AVENUE / 2) + 3.4;
-          const m1 = (half ? AVENUE / 2 : ROAD / 2) + 3.4;
-          const arcLen = rC * (ha1 - ha0) - m0 - m1;
-          const n = Math.max(1, Math.round(arcLen / 9));
-          for (let s = 0; s < n; s++) {
-            const a = ha0 + m0 / rC + ((s + 0.5) / n) * (arcLen / rC);
+          const span = rC * (ha1 - ha0) - m0 - m1;
+          const widths = splitRow(span, `${bseed}:${face}`, true);
+          let at = 0;
+          let prev = -1;
+          widths.forEach((w, s) => {
+            const a = ha0 + (m0 + at + w / 2) / rC;
+            at += w;
             const [x, z] = polar(rC, a);
-            const seed = `${t}:${k}:${half}:${row}:${s}`;
-            const house = k >= 2 && row === 0 && rnd(seed + 'h') < 0.45;
-            const downtown = Math.max(0, 1 - k / 6);
-            const h = house ? 4.5 : 5 + rnd(seed) * 9 + downtown * 7;
-            lots.push({ x, z, w: (arcLen / n) * 0.82, depth, rot: -a, h, d, house, face });
-            if (house) {
-              const [dx, dz] = polar(rC - (depth / 2 + 1.2) * face, a);
-              door.push({ x: dx, z: dz, d, kind: 'door', tx: 0, tz: 0, lot: lots.length - 1 });
+            const seed = hash32(`${bseed}:${face}:${s}`);
+            const corner = s === 0 || s === widths.length - 1;
+            const house = k >= 2 && !corner && rnd(`${seed}h`) < 0.7;
+            const storeys = storeysFor(k, corner, seed, prev < 0 ? 0 : lots[prev]!.storeys);
+            lots.push({
+              x,
+              z,
+              w: w + 0.12,
+              depth: ROW,
+              fx: Math.cos(a) * face,
+              fz: Math.sin(a) * face,
+              storeys,
+              d,
+              house,
+              corner,
+              seed,
+              prev,
+              band: k,
+            });
+            const li = lots.length - 1;
+            prev = li;
+            const [ex, ez] = polar(rC + face * (ROW / 2 + 0.9), a);
+            if (house) door.push({ x: ex, z: ez, d, kind: 'door', tx: 0, tz: 0, lot: li });
+            else if (!corner && rnd(`${seed}w`) < 0.35) {
+              const [wx, wz] = polar(rC + face * (ROW / 2 + 0.6), a);
+              street.push({ x: wx, z: wz, d, kind: 'doorway', r: rC, k, p: 1, tx: 0, tz: 0 });
             }
+          });
+        }
+        // side rows along the radial streets, between the two ring rows (wide blocks only)
+        let c0 = ha0 + m0 / rM;
+        let c1 = ha1 - m1 / rM;
+        if (sides) {
+          for (const side of [0, 1]) {
+            const widths = splitRow(rB1 - rB0 - ROW * 2, `${bseed}:s${side}`, false);
+            let at = rB0 + ROW;
+            let prev = -1;
+            widths.forEach((w, s) => {
+              const r = at + w / 2;
+              at += w;
+              const a = side ? ha1 - (m1 + ROW / 2) / r : ha0 + (m0 + ROW / 2) / r;
+              const [x, z] = polar(r, a);
+              const dir = side ? 1 : -1;
+              const seed = hash32(`${bseed}:s${side}:${s}`);
+              lots.push({
+                x,
+                z,
+                w: w + 0.12,
+                depth: ROW,
+                fx: -Math.sin(a) * dir,
+                fz: Math.cos(a) * dir,
+                storeys: storeysFor(k, false, seed, prev < 0 ? 0 : lots[prev]!.storeys),
+                d,
+                house: false,
+                corner: false,
+                seed,
+                prev,
+                band: k,
+              });
+              prev = lots.length - 1;
+            });
+          }
+          c0 = ha0 + (m0 + ROW) / rM;
+          c1 = ha1 - (m1 + ROW) / rM;
+        }
+        // the court: residents gather here first (v3 §8); a tree marks the middle of wide courts
+        const cr0 = rB0 + ROW + 1.2;
+        const cr1 = rB1 - ROW - 1.2;
+        const courtW = (c1 - c0) * rM;
+        const hasTree = courtW >= 8;
+        const [tx0, tz0] = polar(rM, (c0 + c1) / 2);
+        for (let r = cr0; r <= cr1 + 0.01; r += 2.4) {
+          const n = Math.floor(((c1 - c0) * r - 2.4) / 2.6);
+          for (let s = 0; s < n; s++) {
+            const a = c0 + (1.2 + (s + 0.5) * (((c1 - c0) * r - 2.4) / n)) / r;
+            const [x, z] = polar(r, a);
+            if (hasTree && Math.hypot(x - tx0, z - tz0) < 2) continue;
+            street.push({ x, z, d, kind: 'court', r, k, p: 0, tx: 0, tz: 0 });
           }
         }
+        courts.push({ d, r0: rB0 + ROW, r1: rB1 - ROW, a0: c0, a1: c1, tree: hasTree });
       }
     }
     const rOuter = RING0 + bands * BAND;
@@ -212,15 +377,9 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
       for (let s = 0; s <= 6; s++) pts.push(polar(r, a0 + (WEDGE * s) / 6));
       roads.push({ pts, w: ROAD, kind: 'ring' });
     }
-    roads.push({ pts: [polar(CANAL_OUT - 1, a0), polar(rOuter, a0)], w: AVENUE, kind: 'avenue' });
-    roads.push({ pts: [polar(RING0, am), polar(RING0 + BAND, am)], w: ROAD, kind: 'street' });
-    if (bands > 2)
-      roads.push({
-        pts: [polar(RING0 + BAND * 2, am), polar(rOuter, am)],
-        w: ROAD,
-        kind: 'street',
-      });
-    street.sort((p, q) => p.r - q.r);
+    roads.push({ pts: [polar(CANAL_OUT + 3.5, a0), polar(rOuter, a0)], w: AVENUE, kind: 'avenue' });
+    // courts first, then doorways, then sidewalks — band by band, outward (v3 §5)
+    street.sort((p, q) => p.k - q.k || p.p - q.p || p.r - q.r);
     list.push(...street.map(({ x, z, d: dd, kind, tx, tz }) => ({ x, z, d: dd, kind, tx, tz })));
     spots.push(list);
     door.sort((p, q) => Math.hypot(p.x - sx, p.z - sz) - Math.hypot(q.x - sx, q.z - sz));
@@ -252,5 +411,5 @@ export function layout(pops: Partial<Record<TypeId, number>>, plazaTarget = 60):
   };
   plaza.forEach((sp, i) => loosen(sp, `p${i}`));
   spots.forEach((list, d) => list.forEach((sp, i) => loosen(sp, `${d}:${i}`)));
-  return { districts, roads, lots, plaza, spots, doors, doorLots, radius };
+  return { districts, roads, lots, plaza, spots, doors, doorLots, courts, radius };
 }

@@ -1,420 +1,607 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TypeId } from '@gitemon/shared';
+import type { PropId, RoofId } from './kit';
 
 /**
- * Cosy low-rise architecture per district (Dedi: skyscrapers are the wrong asset). Each style is
- * one archetype geometry on a 1×1 footprint, merged with vertex colours, instanced per lot.
- * Height is in "storeys" (1 ≈ 3 units); the renderer scales footprint and height per lot.
+ * District skins (GRANDPLAN v3 §6, V3-D4): one city skeleton, 18 skins. A skin changes three
+ * things only: the roof silhouette (a shared set + one signature roof), the palette, and one
+ * signature prop along its streets. Look target: the v3 concept art (GRANDPLAN §3.1).
  */
 
-type Arch =
-  | 'hut'
-  | 'workshop'
-  | 'stilt'
-  | 'cottage'
-  | 'dome'
-  | 'beach'
-  | 'igloo'
-  | 'adobe'
-  | 'mushroom'
-  | 'tower'
-  | 'wizard'
-  | 'cave'
-  | 'library'
-  | 'shell'
-  | 'barn'
-  | 'factory';
-
-export interface DistrictStyle {
-  arch: Arch;
-  wall: string;
-  roof: string;
+export interface Skin {
+  /** wall tones; each building picks one and varies its lightness a little */
+  walls: string[];
+  roofs: string[];
   trim: string;
+  /** awnings, doors */
+  accent: string;
   ground: string;
-  tree: [string, string];
-  /** extra light: glowing windows/chimneys */
+  /** court paving, lighter than the district ground */
+  court: string;
+  /** lit windows (unlit material) — omitted = dark glass */
   glow?: string;
+  /** shared roof set, most common first */
+  roofSet: RoofId[];
+  /** the district's signature roof and how often it appears */
+  sig: RoofId;
+  sigP: number;
+  odds: { chimney: number; awning: number; balcony: number; flowers: number; dormer: number };
+  lamp: 'lampHead' | 'crystal' | 'lantern';
+  lampColor: string;
+  tree: [string, string];
+  /** signature street prop, placed in courts and along streets */
+  prop: PropId;
+  propColor: string;
 }
 
-export const DISTRICT_STYLE: Record<TypeId, DistrictStyle> = {
+const O = (chimney: number, awning: number, balcony: number, flowers: number, dormer: number) => ({
+  chimney,
+  awning,
+  balcony,
+  flowers,
+  dormer,
+});
+
+export const SKINS: Record<TypeId, Skin> = {
   forge: {
-    arch: 'hut',
-    wall: '#4a3b36',
-    roof: '#2f2624',
-    trim: '#ff7a2e',
-    ground: '#6b5850',
-    tree: ['#2a2220', '#8a3a24'],
-    glow: '#ffb35c',
+    walls: ['#5a4640', '#6e4a3c', '#4a3d3a'],
+    roofs: ['#3a3134', '#4a3a36'],
+    trim: '#8a5a40',
+    accent: '#e8a060',
+    ground: '#8a7468',
+    court: '#a8958a',
+    glow: '#ffb25c',
+    roofSet: ['gable', 'gableX', 'hip'],
+    sig: 'gableX',
+    sigP: 0.3,
+    odds: O(0.9, 0.45, 0.15, 0.25, 0.1),
+    lamp: 'lantern',
+    lampColor: '#ffb25c',
+    tree: ['#5a4030', '#9aa860'],
+    prop: 'boulder',
+    propColor: '#5a4a44',
   },
   iron: {
-    arch: 'workshop',
-    wall: '#8d949b',
-    roof: '#5b636c',
+    walls: ['#9aa1a8', '#b3b8bd', '#8a9198'],
+    roofs: ['#5b636c', '#6d757e'],
     trim: '#c8ced4',
-    ground: '#9aa0a6',
-    tree: ['#5a4a3a', '#6f8f6a'],
+    accent: '#6f8fb0',
+    ground: '#a8adb2',
+    court: '#c2c6ca',
+    roofSet: ['flat', 'lean', 'gable'],
+    sig: 'saw',
+    sigP: 0.2,
+    odds: O(0.3, 0.3, 0.2, 0.1, 0),
+    lamp: 'lampHead',
+    lampColor: '#fff3d0',
+    tree: ['#5a4a3a', '#7f9f78'],
+    prop: 'tank',
+    propColor: '#8a9198',
   },
   serpent: {
-    arch: 'stilt',
-    wall: '#b8905a',
-    roof: '#6d8f3a',
-    trim: '#4a3220',
-    ground: '#6fa05a',
+    walls: ['#c8a46a', '#b8905a', '#d4b27c'],
+    roofs: ['#6d8f3a', '#5a7a30'],
+    trim: '#5a3a22',
+    accent: '#c0703a',
+    ground: '#7fae66',
+    court: '#a8c890',
+    roofSet: ['hip', 'tent', 'gable'],
+    sig: 'tent',
+    sigP: 0.35,
+    odds: O(0.05, 0.2, 0.35, 0.3, 0),
+    lamp: 'lantern',
+    lampColor: '#ffd070',
     tree: ['#5a3f24', '#3f8a3a'],
+    prop: 'bush',
+    propColor: '#4f9a44',
   },
   spark: {
-    arch: 'cottage',
-    wall: '#f3ead2',
-    roof: '#e8b830',
+    walls: ['#f6eed6', '#f0e2b8', '#faf3e0'],
+    roofs: ['#e8b830', '#d9a020'],
     trim: '#8a6d10',
-    ground: '#c9c07a',
-    tree: ['#6b4a2e', '#8fb85a'],
+    accent: '#f0c040',
+    ground: '#d8cf8a',
+    court: '#ece4b0',
+    roofSet: ['gable', 'gableX', 'hip'],
+    sig: 'tent',
+    sigP: 0.15,
+    odds: O(0.4, 0.4, 0.3, 0.3, 0.3),
+    lamp: 'lampHead',
+    lampColor: '#fff080',
+    tree: ['#6b4a2e', '#9ac060'],
+    prop: 'bush',
+    propColor: '#9ac060',
   },
   prism: {
-    arch: 'dome',
-    wall: '#dbe8f7',
-    roof: '#6fa3e0',
-    trim: '#3b7de0',
-    ground: '#aebfd6',
-    tree: ['#6b5a4a', '#7fb0d8'],
-    glow: '#bfe3ff',
+    walls: ['#eef2fa', '#e2eaf6', '#f6f8fc'],
+    roofs: ['#8fb4e8', '#a8c4ee'],
+    trim: '#c8d6ec',
+    accent: '#7fa6e0',
+    ground: '#c0cde0',
+    court: '#dde5f0',
+    roofSet: ['gable', 'gableX', 'hip'],
+    sig: 'dome',
+    sigP: 0.3,
+    odds: O(0.35, 0.3, 0.45, 0.35, 0.1),
+    lamp: 'crystal',
+    lampColor: '#9fb4ff',
+    tree: ['#6b5a4a', '#6f9f6a'],
+    prop: 'bush',
+    propColor: '#7aa874',
   },
   tide: {
-    arch: 'beach',
-    wall: '#f5ecd8',
-    roof: '#2fb3c9',
-    trim: '#d9c58a',
-    ground: '#e6d6a8',
-    tree: ['#8a5a2e', '#4fa06a'],
+    walls: ['#f3e6cc', '#efdcc0', '#f7eedc'],
+    roofs: ['#d98a6a', '#6f93b8', '#e0b07a', '#8fb8b0'],
+    trim: '#5e9aa0',
+    accent: '#6fb0b8',
+    ground: '#e0d4b8',
+    court: '#efe6d2',
+    roofSet: ['gable', 'gableX', 'hip'],
+    sig: 'vaultX',
+    sigP: 0.15,
+    odds: O(0.5, 0.45, 0.2, 0.35, 0.2),
+    lamp: 'lampHead',
+    lampColor: '#fff3d0',
+    tree: ['#6b5a44', '#8fb070'],
+    prop: 'buoy',
+    propColor: '#5fb0b8',
   },
   frost: {
-    arch: 'igloo',
-    wall: '#f4f8fb',
-    roof: '#d8e8f2',
-    trim: '#8fb7cf',
-    ground: '#e9f1f6',
-    tree: ['#6b5a4a', '#e8f2f8'],
+    walls: ['#dde6f0', '#e8edf4', '#cfdbe8'],
+    roofs: ['#ffffff', '#f4f8fc'],
+    trim: '#b8c8da',
+    accent: '#a8bcd4',
+    ground: '#e6edf4',
+    court: '#f4f7fb',
+    glow: '#ffd89a',
+    roofSet: ['vault', 'gable', 'hip'],
+    sig: 'vault',
+    sigP: 0.35,
+    odds: O(0.7, 0.2, 0.4, 0.2, 0.15),
+    lamp: 'lampHead',
+    lampColor: '#fff0c0',
+    tree: ['#6b5a4a', '#e8f0f4'],
+    prop: 'pine',
+    propColor: '#dfe9ee',
   },
   garnet: {
-    arch: 'adobe',
-    wall: '#d98b6a',
-    roof: '#a8463a',
-    trim: '#6e1a2f',
-    ground: '#c58a74',
-    tree: ['#6b4a2e', '#a85a4a'],
+    walls: ['#d98b6a', '#e0a07a', '#c87a5a'],
+    roofs: ['#9a4a3a', '#b05a44'],
+    trim: '#f0d0b0',
+    accent: '#c8503a',
+    ground: '#d8a888',
+    court: '#ecc8a8',
+    roofSet: ['flat', 'hip', 'lean'],
+    sig: 'mansard',
+    sigP: 0.2,
+    odds: O(0.2, 0.45, 0.35, 0.45, 0),
+    lamp: 'lantern',
+    lampColor: '#ffc080',
+    tree: ['#6b4a30', '#8aa860'],
+    prop: 'bush',
+    propColor: '#7a9a50',
   },
   moss: {
-    arch: 'mushroom',
-    wall: '#e6dcc8',
-    roof: '#7a4f9a',
-    trim: '#a8ff6a',
-    ground: '#5d6b4c',
-    tree: ['#3a3a2a', '#6a5a8a'],
-    glow: '#b8ff7a',
+    walls: ['#ece4cc', '#dfe4c8', '#e8dcc0'],
+    roofs: ['#7f9f5a', '#6f8f4a', '#8aa864'],
+    trim: '#6b5a3a',
+    accent: '#a8845a',
+    ground: '#9ab87a',
+    court: '#bcd29e',
+    roofSet: ['gable', 'gableX', 'hip'],
+    sig: 'cap',
+    sigP: 0.18,
+    odds: O(0.45, 0.35, 0.3, 0.45, 0.15),
+    lamp: 'lantern',
+    lampColor: '#ffe0a0',
+    tree: ['#6b4a2e', '#5f9a4a'],
+    prop: 'bush',
+    propColor: '#5f9a4a',
   },
   wing: {
-    arch: 'tower',
-    wall: '#f0e0c8',
-    roof: '#e0782a',
-    trim: '#8a4412',
-    ground: '#d8b58a',
-    tree: ['#6b4a2e', '#c9913f'],
+    walls: ['#f4e8d4', '#eee0c8', '#faf2e4'],
+    roofs: ['#7fa8d8', '#9ab8e0'],
+    trim: '#d8c8a8',
+    accent: '#8ab0e0',
+    ground: '#dcd6c2',
+    court: '#eeeadc',
+    roofSet: ['gableX', 'gable', 'tent'],
+    sig: 'tent',
+    sigP: 0.35,
+    odds: O(0.3, 0.3, 0.4, 0.3, 0.2),
+    lamp: 'lampHead',
+    lampColor: '#fff3d0',
+    tree: ['#6b5a44', '#9ac080'],
+    prop: 'bush',
+    propColor: '#9ac080',
   },
   rune: {
-    arch: 'wizard',
-    wall: '#b8a8d8',
-    roof: '#5a3a8a',
-    trim: '#d6b8ff',
-    ground: '#8a7aa8',
-    tree: ['#4a3a5a', '#7a5aa8'],
-    glow: '#e0c8ff',
+    walls: ['#c8b6e6', '#b8a4dc', '#d6c8ee'],
+    roofs: ['#4a4470', '#5a5080'],
+    trim: '#e8dcf6',
+    accent: '#8a70d0',
+    ground: '#b8aed0',
+    court: '#d4cce4',
+    roofSet: ['gableX', 'gable', 'hip'],
+    sig: 'spire',
+    sigP: 0.28,
+    odds: O(0.6, 0.35, 0.25, 0.4, 0.2),
+    lamp: 'lantern',
+    lampColor: '#ffd890',
+    tree: ['#6b5a4a', '#b0a060'],
+    prop: 'bush',
+    propColor: '#8a9a60',
   },
   shade: {
-    arch: 'cave',
-    wall: '#4a4d55',
-    roof: '#33363c',
-    trim: '#5cff9a',
-    ground: '#55585f',
-    tree: ['#2a2c30', '#3a5a4a'],
-    glow: '#5cff9a',
+    walls: ['#55585f', '#4a4d55', '#62656c'],
+    roofs: ['#2e2a3a', '#3a3448'],
+    trim: '#8a8494',
+    accent: '#7a5aa0',
+    ground: '#6a6d74',
+    court: '#83868c',
+    glow: '#c890ff',
+    roofSet: ['gableX', 'gable', 'mansard'],
+    sig: 'spire',
+    sigP: 0.2,
+    odds: O(0.5, 0.15, 0.2, 0.1, 0.25),
+    lamp: 'lantern',
+    lampColor: '#c890ff',
+    tree: ['#3a3440', '#5a5068'],
+    prop: 'boulder',
+    propColor: '#4a4d55',
   },
   bloom: {
-    arch: 'cottage',
-    wall: '#fff3f7',
-    roof: '#e55ea8',
-    trim: '#7a2358',
-    ground: '#8ec77a',
-    tree: ['#6b4a2e', '#f5a8c8'],
+    walls: ['#fff0f4', '#fbe2ea', '#fff8f0'],
+    roofs: ['#e87a9a', '#f098b0'],
+    trim: '#f4c8d4',
+    accent: '#e87a9a',
+    ground: '#e8d2d8',
+    court: '#f6e6ea',
+    roofSet: ['hip', 'gable', 'gableX'],
+    sig: 'mansard',
+    sigP: 0.15,
+    odds: O(0.3, 0.45, 0.4, 0.8, 0.2),
+    lamp: 'lampHead',
+    lampColor: '#fff0f6',
+    tree: ['#6b4a3a', '#f0a0c0'],
+    prop: 'bush',
+    propColor: '#e888a8',
   },
   coral: {
-    arch: 'shell',
-    wall: '#ffd8cc',
-    roof: '#ff7a8a',
-    trim: '#16705a',
-    ground: '#9fd6c4',
-    tree: ['#8a5a2e', '#3fc9a0'],
+    walls: ['#ffe0d2', '#ffd0c0', '#fff0e6'],
+    roofs: ['#f08a6a', '#e87858'],
+    trim: '#fff4ea',
+    accent: '#f0a080',
+    ground: '#f0d0c0',
+    court: '#faeade',
+    roofSet: ['hip', 'gable', 'flat'],
+    sig: 'dome',
+    sigP: 0.15,
+    odds: O(0.2, 0.45, 0.35, 0.4, 0),
+    lamp: 'lampHead',
+    lampColor: '#fff3e0',
+    tree: ['#8a6a4a', '#8ac0a0'],
+    prop: 'buoy',
+    propColor: '#f08a6a',
   },
   quill: {
-    arch: 'library',
-    wall: '#f1e6c8',
-    roof: '#3a5a8a',
-    trim: '#7a6530',
-    ground: '#d8c9a3',
-    tree: ['#6b4a2e', '#8aa05a'],
+    walls: ['#f1e6c8', '#e8dab4', '#f6eed8'],
+    roofs: ['#8a3a34', '#a04a40'],
+    trim: '#5a3a2a',
+    accent: '#8a3a34',
+    ground: '#d8ceb0',
+    court: '#ece4cc',
+    glow: '#ffd890',
+    roofSet: ['gableX', 'gable', 'mansard'],
+    sig: 'mansard',
+    sigP: 0.2,
+    odds: O(0.55, 0.3, 0.2, 0.3, 0.35),
+    lamp: 'lantern',
+    lampColor: '#ffd890',
+    tree: ['#6b4a2e', '#8aa860'],
+    prop: 'bench',
+    propColor: '#7a5230',
   },
   stone: {
-    arch: 'hut',
-    wall: '#a39888',
-    roof: '#6e6255',
-    trim: '#5a3f24',
-    ground: '#a8987e',
-    tree: ['#5a4a3a', '#6f8a4a'],
+    walls: ['#a8a090', '#b8b0a0', '#9a9282'],
+    roofs: ['#5a5a60', '#6a6a70'],
+    trim: '#d0c8b8',
+    accent: '#8a7a60',
+    ground: '#b0a898',
+    court: '#c8c0b0',
+    roofSet: ['hip', 'gable', 'gableX'],
+    sig: 'hip',
+    sigP: 0.2,
+    odds: O(0.6, 0.2, 0.15, 0.2, 0.15),
+    lamp: 'lantern',
+    lampColor: '#ffe0a0',
+    tree: ['#5a4a3a', '#7a9a60'],
+    prop: 'boulder',
+    propColor: '#8a8478',
   },
   wild: {
-    arch: 'barn',
-    wall: '#f3ead8',
-    roof: '#b83a2e',
-    trim: '#46662a',
-    ground: '#8fbf5a',
-    tree: ['#6b4a2e', '#5fa84a'],
+    walls: ['#f3ead8', '#ece0c4', '#f8f0e0'],
+    roofs: ['#5a8a44', '#6a9a50'],
+    trim: '#7a5a3a',
+    accent: '#c08a4a',
+    ground: '#9ac07a',
+    court: '#bcd89e',
+    roofSet: ['gable', 'hip', 'tent'],
+    sig: 'hip',
+    sigP: 0.25,
+    odds: O(0.35, 0.3, 0.3, 0.35, 0.15),
+    lamp: 'lantern',
+    lampColor: '#ffe0a0',
+    tree: ['#6b4a2e', '#4f8a3a'],
+    prop: 'pine',
+    propColor: '#4f8a3a',
   },
   machine: {
-    arch: 'factory',
-    wall: '#6e7680',
-    roof: '#44484f',
-    trim: '#b8f24b',
-    ground: '#5c6168',
-    tree: ['#3a3d42', '#6e7680'],
-    glow: '#d8ff7a',
+    walls: ['#8a929c', '#e6c8a4', '#c8b8a4', '#9aa4ae'],
+    roofs: ['#4f6a8a', '#5f7a9a'],
+    trim: '#c8a040',
+    accent: '#d8a050',
+    ground: '#9aa0a8',
+    court: '#b8bcc2',
+    roofSet: ['gable', 'saw', 'flat'],
+    sig: 'saw',
+    sigP: 0.35,
+    odds: O(0.5, 0.2, 0.2, 0.15, 0),
+    lamp: 'lampHead',
+    lampColor: '#fff3d0',
+    tree: ['#5a4a3a', '#7f9a78'],
+    prop: 'tank',
+    propColor: '#8a929c',
   },
 };
 
-type Col = 'wall' | 'roof' | 'trim' | 'glow' | 'dark' | 'wood';
+// ---- landmarks (one per district square, v3 §6; built in code, V3-D7) ----------------------------------
 
-function part(geo: THREE.BufferGeometry, color: THREE.Color): THREE.BufferGeometry {
-  const g = geo.index ? geo.toNonIndexed() : geo;
-  const n = g.getAttribute('position').count;
-  const c = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) c.set([color.r, color.g, color.b], i * 3);
-  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
-  g.deleteAttribute('uv');
-  return g;
+type P = [THREE.BufferGeometry, string];
+/** merge parts into one geometry with baked vertex colours (colour × a soft height shade) */
+function bake(parts: P[]): THREE.BufferGeometry {
+  const out = parts.map(([g, col]) => {
+    const n = g.index ? g.toNonIndexed() : g;
+    n.deleteAttribute('uv');
+    const c = new THREE.Color(col);
+    const pos = n.getAttribute('position');
+    const arr = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const k = pos.getY(i) < 0.05 ? 0.7 : 1;
+      arr[i * 3] = c.r * k;
+      arr[i * 3 + 1] = c.g * k;
+      arr[i * 3 + 2] = c.b * k;
+    }
+    n.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+    if (n.getAttribute('normal')) n.deleteAttribute('normal');
+    return n;
+  });
+  const m = mergeGeometries(out)!;
+  m.computeVertexNormals();
+  return m;
 }
-
-const box = (w: number, h: number, d: number, x = 0, y = 0, z = 0) =>
-  new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, z);
-const cyl = (r0: number, r1: number, h: number, seg: number, x = 0, y = 0, z = 0) =>
+const cyl = (r0: number, r1: number, h: number, seg: number, y = 0, x = 0, z = 0) =>
   new THREE.CylinderGeometry(r0, r1, h, seg).translate(x, y + h / 2, z);
-const pyramid = (w: number, h: number, y: number) =>
-  new THREE.ConeGeometry(w * 0.72, h, 4).rotateY(Math.PI / 4).translate(0, y + h / 2, 0);
-/** a gable roof: a triangular prism along x */
-const gable = (w: number, d: number, h: number, y: number) =>
-  new THREE.CylinderGeometry(d * 0.62, d * 0.62, w, 3)
-    .rotateZ(Math.PI / 2)
-    .rotateX(Math.PI / 2)
-    .scale(1, h / (d * 0.62 * 1.5), 1)
-    .translate(0, y + h * 0.33, 0);
-const dome = (r: number, y = 0, squash = 1) =>
-  new THREE.SphereGeometry(r, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2)
-    .scale(1, squash, 1)
-    .translate(0, y, 0);
-const windowRow = (w: number, y: number, z: number, n: number) => {
-  const out: THREE.BufferGeometry[] = [];
-  for (let i = 0; i < n; i++) out.push(box(0.1, 0.14, 0.02, -w / 2 + ((i + 0.5) / n) * w, y, z));
-  return out;
-};
+const box = (w: number, h: number, d: number, y = 0, x = 0, z = 0) =>
+  new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, z);
+const cone = (r: number, h: number, seg: number, y = 0, x = 0, z = 0) =>
+  new THREE.ConeGeometry(r, h, seg).translate(x, y + h / 2, z);
+const ball = (r: number, y: number, x = 0, z = 0, d = 1) =>
+  new THREE.IcosahedronGeometry(r, d).translate(x, y, z);
 
-/**
- * A player's house (V2-D5): a cottage whose walls are cream and whose roof is WHITE in the vertex
- * colours, so the instance colour paints the roof in the owner's type colour. Returned in two parts.
- */
-export function homeParts(): { walls: THREE.BufferGeometry; roof: THREE.BufferGeometry } {
-  const cream = new THREE.Color('#f6efe2');
-  const wood = new THREE.Color('#7a5230');
-  const glow = new THREE.Color('#ffe08a');
-  const white = new THREE.Color('#ffffff');
-  const walls = mergeGeometries([
-    part(box(0.8, 0.55, 0.6), cream),
-    part(box(0.16, 0.3, 0.02, 0, 0, 0.301), wood),
-    ...windowRow(0.55, 0.28, 0.301, 2).map((g) => part(g, glow)),
-    part(cyl(0.02, 0.02, 0.35, 5, 0.46, 0, 0.42), wood),
-    part(box(0.12, 0.08, 0.06, 0.46, 0.35, 0.42), wood),
-  ])!;
-  const roof = mergeGeometries([
-    part(gable(0.92, 0.74, 0.42, 0.55), white),
-    part(box(0.1, 0.22, 0.1, -0.24, 0.72, -0.1), white),
-  ])!;
-  return { walls, roof };
-}
-
-/** Archetype geometry on a 1×1 footprint, ~1 storey (≈1 unit before scaling) per `h`. */
-export function archetype(s: DistrictStyle): THREE.BufferGeometry {
-  const C = (k: Col) =>
-    new THREE.Color(
-      k === 'wall'
-        ? s.wall
-        : k === 'roof'
-          ? s.roof
-          : k === 'trim'
-            ? s.trim
-            : k === 'glow'
-              ? (s.glow ?? '#ffe08a')
-              : k === 'wood'
-                ? '#7a5230'
-                : '#2a2530',
-    );
-  const P: [THREE.BufferGeometry, Col][] = [];
-  const win = (w: number, y: number, z: number, n: number) =>
-    windowRow(w, y, z, n).forEach((g) => P.push([g, 'glow']));
-  switch (s.arch) {
-    case 'hut':
+export function landmark(t: TypeId): THREE.BufferGeometry {
+  const s = SKINS[t];
+  const [w0, w1] = s.walls;
+  const [r0] = s.roofs;
+  const P: P[] = [[cyl(4.3, 4.6, 0.5, 16), '#d8d0c0']];
+  switch (t) {
+    case 'rune':
       P.push(
-        [box(0.8, 0.55, 0.7), 'wall'],
-        [pyramid(1.05, 0.5, 0.55), 'roof'],
-        [cyl(0.08, 0.1, 0.5, 5, 0.25, 0.7, -0.1), 'dark'],
-        [box(0.12, 0.08, 0.12, 0.25, 1.2, -0.1), 'trim'],
-      );
-      win(0.5, 0.25, 0.351, 2);
-      break;
-    case 'workshop':
-      P.push(
-        [box(0.9, 0.6, 0.7), 'wall'],
-        [box(0.95, 0.08, 0.75, 0, 0.6), 'roof'],
-        [cyl(0.07, 0.07, 0.5, 6, -0.3, 0.6, 0.15), 'roof'],
-        [box(0.3, 0.35, 0.02, 0.2, 0, 0.351), 'dark'],
-      );
-      win(0.4, 0.35, 0.351, 2);
-      break;
-    case 'stilt':
-      for (const [x, z] of [
-        [-0.3, -0.25],
-        [0.3, -0.25],
-        [-0.3, 0.25],
-        [0.3, 0.25],
-      ])
-        P.push([cyl(0.04, 0.04, 0.4, 5, x, 0, z), 'wood']);
-      P.push(
-        [box(0.8, 0.45, 0.65, 0, 0.4), 'wall'],
-        [pyramid(1.1, 0.5, 0.85), 'roof'],
-        [box(0.3, 0.04, 0.3, 0, 0.35, 0.45), 'wood'],
+        [cyl(2.2, 2.6, 13, 10, 0.5), w0!],
+        [cyl(3, 3, 0.5, 10, 6), s.trim],
+        [cyl(2.8, 2.8, 0.5, 10, 10.5), s.trim],
+        [cone(3.1, 9, 10, 13.5), r0!],
+        [ball(0.7, 23.4, 0, 0, 0), s.lampColor],
       );
       break;
-    case 'cottage':
-    case 'library':
+    case 'forge':
       P.push(
-        [box(0.85, 0.55, 0.65), 'wall'],
-        [gable(0.95, 0.8, 0.45, 0.55), 'roof'],
-        [box(0.18, 0.3, 0.02, 0, 0, 0.326), 'trim'],
+        [box(7, 6, 5.5, 0.5), w0!],
+        [box(7.4, 1, 5.9, 6.5), r0!],
+        [cyl(1.1, 1.4, 16, 8, 0.5, -2, -1.2), '#3a3336'],
+        [cyl(1.3, 1.3, 0.6, 8, 16.5, -2, -1.2), '#5a4a44'],
+        [box(2.2, 3, 0.2, 0.5, 1, 2.8), s.glow!],
       );
-      win(0.6, 0.28, 0.326, 2);
-      if (s.arch === 'library')
+      break;
+    case 'frost':
+      P.push(
+        [box(4, 13, 4, 0.5), w0!],
+        [box(4.6, 1.2, 4.6, 13.5), '#ffffff'],
+        [
+          new THREE.CylinderGeometry(1.1, 1.1, 0.2, 12).rotateX(Math.PI / 2).translate(0, 10, 2.05),
+          '#f4f8fc',
+        ],
+        [cone(2.6, 5, 4, 14.7).rotateY(Math.PI / 4), '#ffffff'],
+        [cone(0.4, 2.4, 6, 19.6), s.trim],
+      );
+      break;
+    case 'prism':
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        const h = 7 + (k % 3) * 3;
+        P.push([
+          new THREE.OctahedronGeometry(1, 0)
+            .scale(1.1, h / 2, 1.1)
+            .translate(Math.cos(a) * 1.8, h / 2 + 0.5, Math.sin(a) * 1.8),
+          k % 2 ? '#b8c8ff' : '#d8e0ff',
+        ]);
+      }
+      P.push([
+        new THREE.OctahedronGeometry(1, 0).scale(1.6, 11, 1.6).translate(0, 11.5, 0),
+        '#c8d4ff',
+      ]);
+      break;
+    case 'moss':
+      P.push(
+        [cyl(1.6, 2.6, 8, 8, 0.5), '#7a5a3a'],
+        [ball(4.6, 11, 0, 0, 0), '#5f9a4a'],
+        [ball(3.2, 13, -2.6, 1.2, 0), '#6fa854'],
+        [ball(3, 12, 2.4, -1.5, 0), '#548a40'],
+      );
+      break;
+    case 'tide':
+      P.push(
+        [cyl(1.8, 2.4, 4, 10, 0.5), '#f4f0e6'],
+        [cyl(1.6, 1.8, 4, 10, 4.5), '#d8584a'],
+        [cyl(1.4, 1.6, 4, 10, 8.5), '#f4f0e6'],
+        [cyl(1.9, 1.9, 0.4, 10, 12.5), s.trim],
+        [cyl(1, 1, 1.6, 8, 12.9), '#fff4c0'],
+        [cone(1.6, 1.6, 10, 14.5), s.trim],
+      );
+      break;
+    case 'machine':
+      P.push(
+        [box(3.8, 14, 3.8, 0.5), w0!],
+        [box(4.4, 0.6, 4.4, 14.5), s.trim],
+        [cone(2.6, 3, 4, 15.1).rotateY(Math.PI / 4), r0!],
+        [
+          cyl(1.5, 1.5, 0.3, 10)
+            .rotateX(Math.PI / 2)
+            .translate(0, 11, 1.95),
+          s.trim,
+        ],
+        [
+          cyl(1.1, 1.1, 0.3, 8)
+            .rotateZ(Math.PI / 2)
+            .translate(1.95, 7, 0),
+          s.trim,
+        ],
+      );
+      break;
+    case 'iron':
+      P.push(
+        [box(4.4, 11, 4.4, 0.5), w0!],
+        [box(6, 1.2, 3, 11.5), '#5b636c'],
+        [box(2.4, 2, 2.4, 12.7), w1!],
+      );
+      break;
+    case 'serpent':
+      P.push(
+        [box(8, 1.6, 8, 0.5), w0!],
+        [box(6.2, 1.6, 6.2, 2.1), w1!],
+        [box(4.4, 1.6, 4.4, 3.7), w0!],
+        [box(2.8, 2.4, 2.8, 5.3), w1!],
+        [cone(2.4, 2.6, 4, 7.7).rotateY(Math.PI / 4), r0!],
+      );
+      break;
+    case 'spark':
+      P.push(
+        [cyl(0.5, 1.4, 16, 4, 0.5), '#8a8a90'],
+        [ball(1.3, 17.6, 0, 0, 0), '#fff080'],
+        [box(3.4, 3, 3.4, 0.5), w0!],
+        [cone(2.6, 2, 4, 3.5).rotateY(Math.PI / 4), r0!],
+      );
+      break;
+    case 'garnet':
+      for (let k = 0; k < 4; k++)
         P.push(
-          [cyl(0.14, 0.14, 0.9, 8, 0.38, 0, -0.2), 'wall'],
-          [new THREE.ConeGeometry(0.18, 0.3, 8).translate(0.38, 1.05, -0.2), 'roof'],
+          [box(5 - k, 2.6, 5 - k, 0.5 + k * 3.2), w0!],
+          [cone((5 - k) * 0.9, 1.2, 4, 3.1 + k * 3.2).rotateY(Math.PI / 4), r0!],
         );
       break;
-    case 'dome':
+    case 'wing':
       P.push(
-        [cyl(0.45, 0.45, 0.18, 10), 'wall'],
-        [dome(0.45, 0.18, 1.1), 'roof'],
-        [box(0.18, 0.28, 0.1, 0, 0, 0.42), 'trim'],
-        [new THREE.OctahedronGeometry(0.1).translate(0, 0.75, 0), 'glow'],
+        [cyl(1.6, 2.4, 11, 8, 0.5), w0!],
+        [cone(2, 2.6, 8, 11.5), r0!],
+        [box(0.5, 13, 0.5).translate(0, -6.5, 0).rotateZ(0.5).translate(0, 10, 2.2), '#8a6a4a'],
+        [
+          box(0.5, 13, 0.5)
+            .translate(0, -6.5, 0)
+            .rotateZ(0.5 + Math.PI / 2)
+            .translate(0, 10, 2.2),
+          '#8a6a4a',
+        ],
       );
       break;
-    case 'beach':
+    case 'shade':
       P.push(
-        [box(0.7, 0.45, 0.6, 0, 0.12), 'wall'],
-        [gable(0.8, 0.75, 0.35, 0.57), 'roof'],
-        [box(0.9, 0.05, 0.8, 0, 0.07), 'wood'],
-      );
-      for (const [x, z] of [
-        [-0.4, -0.35],
-        [0.4, -0.35],
-        [-0.4, 0.35],
-        [0.4, 0.35],
-      ])
-        P.push([cyl(0.03, 0.03, 0.12, 5, x, 0, z), 'wood']);
-      break;
-    case 'igloo':
-      P.push(
-        [dome(0.45, 0, 0.9), 'wall'],
-        [box(0.22, 0.22, 0.3, 0, 0, 0.42), 'roof'],
-        [box(0.12, 0.14, 0.02, 0, 0, 0.571), 'dark'],
+        [cyl(1.8, 2.4, 12, 7, 0.5).rotateZ(0.08), w0!],
+        [cone(2.6, 8, 7, 12.3).rotateZ(-0.12).translate(0.6, 0, 0), r0!],
+        [ball(0.8, 20.5, 1.4, 0, 0), s.glow!],
       );
       break;
-    case 'adobe':
+    case 'bloom':
       P.push(
-        [box(0.8, 0.5, 0.7), 'wall'],
-        [box(0.5, 0.35, 0.45, -0.1, 0.5, -0.1), 'wall'],
-        [box(0.82, 0.04, 0.72, 0, 0.5), 'roof'],
-        [box(0.16, 0.26, 0.02, 0.15, 0, 0.351), 'trim'],
+        [cyl(3.4, 3.6, 0.9, 14, 0.5), s.trim],
+        [cyl(0.5, 0.7, 4, 8, 1.4), s.trim],
+        [cyl(2, 1.2, 0.6, 12, 5.4), s.trim],
+        [ball(2.4, 8.6, 0, 0, 1), '#f098b8'],
+        [ball(1.4, 10, 1.6, 0.6, 0), '#f8c0d4'],
       );
       break;
-    case 'mushroom':
+    case 'coral':
       P.push(
-        [cyl(0.2, 0.26, 0.55, 8), 'wall'],
-        [dome(0.5, 0.5, 0.7), 'roof'],
-        [box(0.14, 0.24, 0.02, 0, 0, 0.25), 'dark'],
+        [cyl(3.2, 3.4, 3, 14, 0.5), w0!],
+        [
+          new THREE.SphereGeometry(3.3, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2)
+            .scale(1, 1.3, 1)
+            .translate(0, 3.5, 0),
+          r0!,
+        ],
+        [cone(0.9, 4, 10, 7.6), s.trim],
       );
+      break;
+    case 'quill':
+      P.push(
+        [box(5, 12, 5, 0.5), w0!],
+        [box(5.4, 0.6, 5.4, 12.5), s.trim],
+        [cone(3.9, 6, 4, 13.1).rotateY(Math.PI / 4), r0!],
+        [box(2, 3, 0.2, 0.5, 0, 2.55), s.glow!],
+      );
+      break;
+    case 'stone':
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2;
+        P.push([
+          box(1.2, 4 + (k % 3), 0.8, 0.5, Math.cos(a) * 3.2, Math.sin(a) * 3.2).rotateY(-a),
+          w0!,
+        ]);
+      }
+      P.push([box(2, 7, 1.4, 0.5), w1!]);
+      break;
+    case 'wild':
       for (let k = 0; k < 5; k++) {
         const a = (k / 5) * Math.PI * 2;
         P.push([
-          new THREE.SphereGeometry(0.06, 5, 4).translate(
-            Math.cos(a) * 0.3,
-            0.72,
-            Math.sin(a) * 0.3,
-          ),
-          'trim',
+          cone(1.8, 6 + (k % 2) * 3, 6, 0.5, Math.cos(a) * 2.4, Math.sin(a) * 2.4),
+          '#4f8a3a',
         ]);
       }
-      break;
-    case 'tower':
-      P.push(
-        [cyl(0.28, 0.32, 1.1, 8), 'wall'],
-        [new THREE.ConeGeometry(0.38, 0.4, 8).translate(0, 1.3, 0), 'roof'],
-        [box(0.5, 0.05, 0.5, 0, 0.7), 'trim'],
-      );
-      win(0.2, 0.8, 0.29, 1);
-      break;
-    case 'wizard':
-      P.push(
-        [cyl(0.3, 0.34, 0.9, 8), 'wall'],
-        [new THREE.ConeGeometry(0.4, 0.7, 8).translate(0, 1.25, 0), 'roof'],
-        [new THREE.OctahedronGeometry(0.08).translate(0, 1.7, 0), 'glow'],
-      );
-      win(0.2, 0.55, 0.31, 1);
-      break;
-    case 'cave':
-      P.push(
-        [new THREE.IcosahedronGeometry(0.5, 0).scale(1, 0.7, 0.9).translate(0, 0.3, 0), 'wall'],
-        [box(0.26, 0.3, 0.1, 0, 0, 0.42), 'glow'],
-      );
-      break;
-    case 'shell':
-      P.push(
-        [dome(0.45, 0, 1), 'wall'],
-        [new THREE.ConeGeometry(0.2, 0.5, 8).translate(0.1, 0.55, -0.1), 'roof'],
-        [box(0.14, 0.24, 0.02, 0, 0, 0.44), 'trim'],
-      );
-      break;
-    case 'barn':
-      P.push(
-        [box(0.9, 0.6, 0.7), 'wall'],
-        [gable(1, 0.8, 0.5, 0.6), 'roof'],
-        [box(0.3, 0.4, 0.02, 0, 0, 0.351), 'roof'],
-        [cyl(0.16, 0.16, 0.9, 8, 0.55, 0, -0.1), 'trim'],
-      );
-      break;
-    case 'factory':
-      P.push(
-        [box(0.95, 0.55, 0.75), 'wall'],
-        [box(0.95, 0.12, 0.25, 0, 0.55, -0.2), 'roof'],
-        [box(0.95, 0.12, 0.25, 0, 0.55, 0.15), 'roof'],
-        [cyl(0.08, 0.1, 0.7, 6, 0.3, 0.55, -0.2), 'dark'],
-      );
-      win(0.7, 0.3, 0.376, 3);
+      P.push([cone(2.2, 12, 6, 0.5), '#3f7a30']);
       break;
   }
-  return mergeGeometries(P.map(([g, c]) => part(g, C(c))))!;
+  return bake(P);
+}
+
+/** the plaza monument (v3 concept 08): a stacked golden spire on a stepped stone base */
+export function monument(): THREE.BufferGeometry {
+  const gold = '#f2c24c';
+  const P: P[] = [
+    [cyl(6.4, 7, 1, 8), '#d8d0c0'],
+    [cyl(5, 5.6, 1, 8, 1), '#e4dccc'],
+    [cyl(2.6, 3.4, 4, 8, 2), gold],
+    [cyl(3.2, 3.2, 0.6, 8, 6), '#e0b040'],
+    [cyl(1.8, 2.4, 5, 8, 6.6), gold],
+    [cyl(2.4, 2.4, 0.5, 8, 11.6), '#e0b040'],
+    [cyl(1, 1.6, 5, 8, 12.1), gold],
+    [cone(1.2, 6, 8, 17.1), gold],
+    [ball(0.8, 23.6, 0, 0, 1), '#fff0b0'],
+  ];
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+    P.push([cyl(0.5, 0.7, 2.6, 6, 2, Math.cos(a) * 3.9, Math.sin(a) * 3.9), gold]);
+    P.push([ball(0.55, 5.2, Math.cos(a) * 3.9, Math.sin(a) * 3.9, 0), gold]);
+  }
+  return bake(P);
 }
