@@ -4,8 +4,8 @@
 
 > **Read first:** `.claude/ai_context/` is the **source of truth for intent + design, kept in sync
 > with the code** (drift is a bug, fixed in the same change).
-> Entry: `.claude/ai_context/development/v3/implementation/00_INDEX.md` · Live cursor: `…/STATUS.md`
-> · Blueprint: `…/v3/GRANDPLAN.md (v2 = base, still binding)` · Locked decisions: `…/DECISIONS.md` · Raw intent:
+> Entry: `.claude/ai_context/development/v4/implementation/00_INDEX.md` · Live cursor: `…/STATUS.md`
+> · Blueprint: `…/v4/GRANDPLAN.md (v2 + v3 = base, still binding)` · Locked decisions: `…/DECISIONS.md` · Raw intent:
 > `.claude/ai_context/raw_materials/` · Methodology: `.claude/FRAMEWORK.md`.
 > **When docs disagree, `DECISIONS.md` wins.**
 > ⚠ This file is tracked in a **public** repo. It must stay safe-as-public: no internal paths beyond
