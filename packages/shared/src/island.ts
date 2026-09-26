@@ -124,6 +124,8 @@ export interface Island {
   miniPlazas: { x: number; z: number; y: number; r: number; region: number }[];
   /** per type (BIOME_ORDER index): its mini-plaza spots, inner ring first */
   mini: Spot[][];
+  /** per type: the heart of each wild group, nearest the town first (sealed Rare stand here) */
+  dens: Spot[][];
   /** the machine quarter's angular window in the outer town row */
   quarter: { a0: number; a1: number };
   volcano: { x: number; z: number };
@@ -212,8 +214,11 @@ const rnd = (seed: string) => hash32(seed) / 4294967296;
 export function island(
   pops: Partial<Record<TypeId, number>>,
   plazaTarget = 60,
-  /** v5: how many Epic + Rare specials each type holds (sizes its mini plaza) */
-  specials: Partial<Record<TypeId, number>> = {},
+  /**
+   * v5: per type, how many specials stand on its mini plaza (Mythic + Epic) and how many Rare live in
+   * the wild — one at the heart of each of its nearest groups
+   */
+  specials: Partial<Record<TypeId, { mini: number; rare: number }>> = {},
 ): Island {
   // region widths ∝ population (min 22°), frost centred at the top of the screen (-3π/4)
   const MIN = (22 / 180) * Math.PI;
@@ -321,11 +326,12 @@ export function island(
 
   // v5 mini plazas (V5-D6): one per region beside its road just outside the gate, sized by the
   // Epic + Rare specials it holds; rings of spots round the region's landmark in the middle
-  const MP_RINGS = [6.2, 8.6, 11, 13.4, 15.8, 18.2, 20.6];
-  const MP_GAP = 2.5;
-  const ringCap = (rr: number) => Math.floor((TAU * rr) / MP_GAP);
+  // the first ring (Mythic, the region's champions) is looser; specials are drawn bigger than
+  // players, so every ring leaves more room than a wild group does
+  const MP_RINGS = [6.8, 9.9, 13, 16.1, 19.2, 22.3];
+  const ringCap = (rr: number) => Math.floor((TAU * rr) / (rr < 7 ? 4.3 : 3.5));
   const miniDefs = regions.map((g, i) => {
-    const need = g.types.map((t) => specials[t] ?? 0);
+    const need = g.types.map((t) => specials[t]?.mini ?? 0);
     // rings until every type's share of the circle holds its specials
     let rings = 1;
     const share = g.types.length > 1 ? 0.5 : 1;
@@ -574,9 +580,9 @@ export function island(
     return { x, z, y: TOWN_Y, d: -1, kind: 'plaza' as const, tx: 0, tz: 0 };
   });
   const plaza: Spot[] = [];
-  for (let r = 18; r <= PLAZA_R - 3 && plaza.length < plazaTarget * 2; r += 3) {
+  for (let r = 18; r <= PLAZA_R - 3 && plaza.length < plazaTarget * 2; r += 3.4) {
     // v5: the plaza now also holds the 40 Mythic specials — a little denser than v4
-    const n = Math.floor((TAU * r) / 3.2);
+    const n = Math.floor((TAU * r) / 4.2);
     for (let s = 0; s < n; s++) {
       const a = (s / n) * TAU + r;
       const [x, z] = polar(r, a);
@@ -586,6 +592,8 @@ export function island(
 
   // ---- habitats: groups of spots at open ground, nearest the town first (V4-D3, G4) ------------------
   const spots: Spot[][] = BIOME_ORDER.map(() => []);
+  /** v5: the heart of each wild group, nearest the town first — a sealed Rare stands there */
+  const dens: Spot[][] = BIOME_ORDER.map(() => []);
   const habitats: Habitat[] = [];
   const RINGS = [0, 2.2, 4.4, 6.4];
   const CAP = 30;
@@ -596,11 +604,18 @@ export function island(
     const rugged = ['frost', 'volcano', 'canyon'].includes(regions[i]!.climate);
     const maxSlope = rugged ? 1.1 : 0.55;
     const need = Math.ceil((pops[t] ?? 0) * 1.3) + 12;
+    const rareNeed = specials[t]?.rare ?? 0;
     let step = 17;
     let list: Spot[] = [];
+    let den: Spot[] = [];
     let habs: Habitat[] = [];
-    for (let attempt = 0; attempt < 4 && list.length < need; attempt++, step *= 0.84) {
+    for (
+      let attempt = 0;
+      attempt < 4 && (list.length < need || habs.length < rareNeed);
+      attempt++, step *= 0.84
+    ) {
       list = [];
+      den = [];
       habs = [];
       const cands: { x: number; z: number; r: number }[] = [];
       for (let r = TOWN_R + 14; r < COAST - 10; r += step) {
@@ -623,8 +638,9 @@ export function island(
       cands.sort((p, q) => p.r - q.r);
       for (const c of cands) {
         // stop once this type has room enough: further-out habitats are never used
-        if (list.length >= need) break;
+        if (list.length >= need && habs.length >= rareNeed) break;
         const group: Spot[] = [];
+        let heart: Spot | null = null;
         for (const rr of RINGS) {
           const n = rr ? Math.round((TAU * rr) / 2.2) : 1;
           // an uneven group: the outer ring is stretched one way and loses a few members
@@ -648,6 +664,11 @@ export function island(
               nearRoad(x, z, i) < 3
             )
               continue;
+            // the heart of the group is kept for a sealed Rare (v5); players stand round it
+            if (!rr) {
+              heart = { x, z, y, d, kind: 'wild', tx: 0, tz: 0 };
+              continue;
+            }
             // the outer ring strolls round its group; the middle stands
             const walks = rr >= 3.8 && rnd(`w${t}${c.x}${s}`) < 0.5;
             group.push({
@@ -661,12 +682,14 @@ export function island(
             });
           }
         }
-        if (group.length < 6) continue;
+        if (group.length < 6 || !heart) continue;
         habs.push({ x: c.x, z: c.z, y: hq(c.x, c.z), t, n: group.length });
         list.push(...group);
+        den.push(heart);
       }
     }
     spots[d] = list;
+    dens[d] = den;
     habitats.push(...habs);
   }
 
@@ -782,6 +805,7 @@ export function island(
     legendRing,
     miniPlazas,
     mini,
+    dens,
     quarter,
     volcano: { x: vx, z: vz },
     grid,

@@ -86,27 +86,38 @@ export function place(
   const woken = new Set(legends.filter((l) => !l.special!.sealed).map((l) => l.id));
   const players = all.filter((g) => !woken.has(g.id));
   const pops: Partial<Record<TypeId, number>> = {};
-  const specials: Partial<Record<TypeId, number>> = {};
+  const specials: Partial<Record<TypeId, { mini: number; rare: number }>> = {};
   for (const g of players) pops[g.t1] = (pops[g.t1] ?? 0) + 1;
   for (const l of legends) {
     pops[l.t1] = (pops[l.t1] ?? 0) + 1;
     const tier = l.special!.tier;
-    if (tier === 'epic' || tier === 'rare') specials[l.t1] = (specials[l.t1] ?? 0) + 1;
+    const c = (specials[l.t1] ??= { mini: 0, rare: 0 });
+    if (tier === 'mythic' || tier === 'epic') c.mini++;
+    else if (tier === 'rare') c.rare++;
   }
   const plazaN = Math.max(24, Math.min(190, Math.round((players.length + legends.length) / 40)));
-  const city = island(pops, plazaN + 50, specials);
+  const city = island(pops, plazaN, specials);
   const placed: Placed[] = [];
   let onPlaza = 0;
-  // the specials, in rank order (Epic before Rare inside each mini plaza)
+  // the specials, in rank order: the plaza keeps the top ten; Mythic then Epic stand on their
+  // region's mini plaza; each Rare stands at the heart of one of its type's groups in the wild
   const miniNext = new Map<TypeId, number>();
+  const denNext = new Map<TypeId, number>();
   for (const l of [...legends].sort((a, b) => a.special!.rank - b.special!.rank)) {
     const { rank, tier } = l.special!;
     let spot;
     if (rank === 1) spot = city.monument;
     else if (rank <= 3) spot = city.plinths[rank - 2];
     else if (tier === 'legendary') spot = city.legendRing[rank - 4];
-    else if (tier === 'mythic') spot = city.plaza[onPlaza++];
-    else {
+    else if (
+      tier === 'rare' &&
+      (denNext.get(l.t1) ?? 0) < (city.dens[BIOME_ORDER.indexOf(l.t1)]?.length ?? 0)
+    ) {
+      const k = denNext.get(l.t1) ?? 0;
+      spot = city.dens[BIOME_ORDER.indexOf(l.t1)]![k];
+      denNext.set(l.t1, k + 1);
+    } else {
+      // Mythic, Epic — and a Rare whose type ran out of group hearts — stand on the mini plaza
       const k = miniNext.get(l.t1) ?? 0;
       spot = city.mini[BIOME_ORDER.indexOf(l.t1)]?.[k];
       miniNext.set(l.t1, k + 1);

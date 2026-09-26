@@ -105,18 +105,39 @@ describe('island layout', () => {
 
   it('gives every special a place: monument, plinths, legend ring, mini plazas (V5-D6)', () => {
     // 450 Epic + Rare spread like the live list (uneven per type)
-    const specials: Record<string, number> = {};
-    BIOME_ORDER.forEach((t, i) => {
-      if (t !== 'machine') specials[t] = 8 + ((i * 13) % 45);
-    });
-    const v5 = island(pops, 240, specials);
+    // the live Legends list on 2026-09-26: Mythic + Epic on the mini plaza, Rare in the wild
+    const specials: Record<string, { mini: number; rare: number }> = {
+      serpent: { mini: 50, rare: 68 },
+      spark: { mini: 39, rare: 64 },
+      iron: { mini: 31, rare: 24 },
+      prism: { mini: 7, rare: 31 },
+      bloom: { mini: 13, rare: 23 },
+      tide: { mini: 9, rare: 20 },
+      frost: { mini: 8, rare: 18 },
+      shade: { mini: 4, rare: 13 },
+      garnet: { mini: 6, rare: 5 },
+      wing: { mini: 2, rare: 9 },
+      coral: { mini: 4, rare: 7 },
+      wild: { mini: 6, rare: 5 },
+      forge: { mini: 3, rare: 7 },
+      moss: { mini: 2, rare: 4 },
+      stone: { mini: 3, rare: 2 },
+      rune: { mini: 2, rare: 0 },
+      quill: { mini: 1, rare: 0 },
+    };
+    const v5 = island(pops, 190, specials);
     expect(v5.plinths).toHaveLength(2);
     expect(v5.legendRing).toHaveLength(7);
     expect(Math.hypot(v5.monument.x, v5.monument.z)).toBeLessThan(6);
-    for (const [t, n] of Object.entries(specials))
-      expect(v5.mini[BIOME_ORDER.indexOf(t as never)]!.length, t).toBeGreaterThanOrEqual(n);
-    // 40 Mythic + plaza players fit on the plaza, clear of the plinths and the legend ring
-    expect(v5.plaza.length).toBeGreaterThanOrEqual(40 + 190);
+    for (const [t, n] of Object.entries(specials)) {
+      const d = BIOME_ORDER.indexOf(t as never);
+      expect(v5.mini[d]!.length, t).toBeGreaterThanOrEqual(n.mini);
+      // every Rare has a group heart of its own type, nearest the town first
+      expect(v5.dens[d]!.length, t).toBeGreaterThanOrEqual(n.rare);
+      for (const h of v5.dens[d]!) expect(v5.at(h.x, h.z)?.type).toBe(t);
+    }
+    // the plaza holds players only now, clear of the plinths and the legend ring
+    expect(v5.plaza.length).toBeGreaterThanOrEqual(130);
     for (const s of v5.plaza)
       for (const p of v5.plinths) expect(Math.hypot(s.x - p.x, s.z - p.z)).toBeGreaterThan(2);
     // mini plazas stand on level, dry ground, and no wild habitat sits on one

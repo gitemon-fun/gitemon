@@ -219,7 +219,7 @@ function townGround(isl: Island): THREE.Object3D[] {
         pave,
       ),
     );
-    for (let rr = 7.4; rr < m.r - 1; rr += 4.8)
+    for (let rr = 8.3; rr < m.r - 1; rr += 3.1)
       flat.push(
         coloured(
           new THREE.RingGeometry(rr, rr + 0.5, 40)
