@@ -223,6 +223,7 @@
       sealed = loadedCity.placed.filter((p) => p.g.special?.sealed).length;
       scene!.build(loadedCity.city, loadedCity.homes);
       scene!.setCreatures(loadedCity.placed);
+      scene!.stage(loadedCity.city, loadedCity.placed, loadedCity.today ?? null);
       scene!.fitCity(loadedCity.city.radius);
       loaded = true;
       const qs = new URLSearchParams(location.search);
@@ -230,6 +231,8 @@
       const focus = qs.get('focus') ?? house;
       // ?at=<type> frames that type's mini plaza (share links, screenshots); ?z= sets the zoom
       // ?at=<type> frames that type's nearest habitat (its best residents)
+      // ?turn=0..3 sets the camera rotation (screenshots of every side)
+      for (let k = 0; k < (Number(qs.get('turn')) || 0) % 4; k++) scene!.rotate(1);
       const atType = qs.get('at');
       const region = loadedCity.city.regions.findIndex((r) => r.types.includes(atType as never));
       // v5: a type's mini plaza (its specials) first, else its nearest habitat

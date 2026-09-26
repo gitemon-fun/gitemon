@@ -158,6 +158,8 @@ export function place(
 }
 
 export interface LoadedCity {
+  /** v6: the legend of the day's key (V6-D5) */
+  today?: string | null;
   city: Island;
   placed: Placed[];
   homes: Map<number, string>;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Island } from '@gitemon/shared';
+import { TOWN_Y, type Island } from '@gitemon/shared';
 import { Crowd, type Placed } from './crowd';
 import { buildTown } from './town';
 
@@ -329,6 +329,72 @@ export class CityScene {
     this.scene.add(this.labels);
   }
 
+  // ---- staging (v6 §5, V6-D7) ---------------------------------------------------------------------
+
+  private staging = new THREE.Group();
+  /** pillar materials with their full opacity: they fade as the camera comes close */
+  private beams: [THREE.MeshBasicMaterial, number][] = [];
+  /**
+   * Light pillars over the top ten (visible from the whole island) and a beacon over every mini
+   * plaza. `today` = the legend of the day's key: its pillar burns brighter (V6-D5).
+   */
+  stage(city: Island, placed: Placed[], today: string | null = null) {
+    this.staging.clear();
+    this.beams = [];
+    const GLOW = { legendary: '#ffcf5a', mythic: '#b98cff', epic: '#6cb8ff', rare: '#72f29a' };
+    const beam = (
+      x: number,
+      y: number,
+      z: number,
+      colour: string,
+      r: number,
+      h: number,
+      o: number,
+    ) => {
+      const m = new THREE.Mesh(
+        new THREE.CylinderGeometry(r * 0.35, r, h, 16, 1, true).translate(0, h / 2, 0),
+        new THREE.MeshBasicMaterial({
+          color: colour,
+          transparent: true,
+          opacity: o,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        }),
+      );
+      m.position.set(x, y, z);
+      m.renderOrder = 5;
+      this.beams.push([m.material, o]);
+      this.staging.add(m);
+    };
+    for (const p of placed) {
+      const sp = p.g.special;
+      if (!sp) continue;
+      const isToday = today != null && sp.key === today;
+      if (sp.rank <= 10 || isToday)
+        beam(
+          p.spot.x,
+          sp.rank === 1 ? TOWN_Y : p.spot.y,
+          p.spot.z,
+          GLOW[sp.tier],
+          sp.rank === 1 ? 1.7 : 1.1,
+          sp.rank <= 3 ? 90 : 60,
+          isToday ? 0.34 : 0.2,
+        );
+    }
+    for (const m of city.miniPlazas) {
+      const orb = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(1.3, 1),
+        new THREE.MeshBasicMaterial({ color: '#fff4c8' }),
+      );
+      orb.position.set(m.x, m.y + 24, m.z);
+      this.staging.add(orb);
+      beam(m.x, m.y + 17, m.z, '#fff0b0', 1.1, 7, 0.22);
+    }
+    this.scene.add(this.staging);
+    this.dirty = true;
+  }
+
   // ---- creatures -------------------------------------------------------------------------------------
 
   setCreatures(placed: Placed[]) {
@@ -376,6 +442,9 @@ export class CityScene {
     // LOD: windows, add-ons and street furniture only where they can be seen (v3 build file 08)
     const near = this.zoom > 0.42;
     this.labels.visible = this.zoom < 0.55;
+    // pillars are for finding legends from afar: close up they fade so the creatures read
+    const fade = this.zoom < 0.7 ? 1 : Math.max(0.12, (0.7 / this.zoom) ** 1.4);
+    for (const [mat, o] of this.beams) mat.opacity = o * fade;
     if (near !== this.detailOn) {
       this.detailOn = near;
       for (const o of this.detail) o.visible = near;

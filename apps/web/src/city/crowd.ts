@@ -95,7 +95,8 @@ function buildAtlas(list: Placed[]) {
 }
 
 /** v5 specials: bigger by tier (The Origin biggest), and the glow colour of a sealed one */
-const SPECIAL_SCALE = { legendary: 1.55, mythic: 1.3, epic: 1.15, rare: 1.05 } as const;
+// v6 staging (V6-D7): the top tiers read from afar; the lower ones stay near player size
+const SPECIAL_SCALE = { legendary: 1.8, mythic: 1.4, epic: 1.2, rare: 1.1 } as const;
 const GLOW: Record<string, [number, number, number]> = {
   legendary: [1.0, 0.8, 0.3],
   mythic: [0.72, 0.5, 1.0],
@@ -106,7 +107,7 @@ const GLOW: Record<string, [number, number, number]> = {
 function specialAttr(g: MapGitemon): [number, number, number, number, number] {
   const sp = g.special;
   if (!sp) return [1, 0, 0, 0, 0];
-  const scale = sp.rank === 1 ? 2.3 : sp.rank <= 3 ? 1.9 : SPECIAL_SCALE[sp.tier];
+  const scale = sp.rank === 1 ? 3 : sp.rank <= 3 ? 2.3 : SPECIAL_SCALE[sp.tier];
   const [r, gg, b] = GLOW[sp.tier]!;
   return [scale, sp.sealed ? 1 : 0, r, gg, b];
 }

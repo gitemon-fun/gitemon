@@ -558,19 +558,11 @@ export function island(
   });
 
   // plaza rings, inner first; plaza residents stroll their ring
-  // v5 (V5-D6): The Origin on the monument's base, facing the opening camera; the two Guardians on
+  // v5 (V5-D6): the two Guardians on
   // plinths either side of it; Legendary 4–10 on the ring round them; everyone else from r = 17
   const FRONT = Math.PI / 4;
-  const mon = polar(4.3, FRONT);
-  const monument: Spot = {
-    x: mon[0],
-    z: mon[1],
-    y: TOWN_Y + 2,
-    d: -1,
-    kind: 'plaza',
-    tx: 0,
-    tz: 0,
-  };
+  // The Origin floats above the golden spire: seen from every camera rotation (V6-D7, G7)
+  const monument: Spot = { x: 0, z: 0, y: TOWN_Y + 25.5, d: -1, kind: 'plaza', tx: 0, tz: 0 };
   const plinths: Spot[] = [-0.95, 0.95].map((da) => {
     const [x, z] = polar(10.5, FRONT + da);
     return { x, z, y: TOWN_Y + 1.2, d: -1, kind: 'plaza' as const, tx: 0, tz: 0 };
