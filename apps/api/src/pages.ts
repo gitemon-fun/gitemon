@@ -61,7 +61,7 @@ export function layout(o: {
 <meta property="og:image" content="${img}"><meta property="og:image:alt" content="${esc(o.title)} — pixel creature card">
 <meta name="twitter:card" content="summary_large_image"><meta name="theme-color" content="#0a66d8">
 <style>${CSS}</style></head><body>
-<header><a class="brand" href="/">Gitemon</a><a href="/map">Open the city</a></header>
+<header><a class="brand" href="/">Gitemon</a><a href="/map">Open the island</a></header>
 <main>${o.body}</main>
 <footer><a href="/map">Map</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/gitemon-fun/gitemon">Source (AGPL)</a><span>Made by AIgnited</span></footer>
 </body></html>`;
@@ -149,6 +149,10 @@ export const privacyPage = () =>
 <li>Your GitHub user id and the sign-in account id from our login provider (WorkOS), plus the email GitHub shares with it.</li>
 <li>Your GitHub sign-in token, encrypted. It can only read public profile data, and we use it only to refresh your own Gitemon and to check "bonded" catches.</li>
 <li>Your catches, your Dex and your town.</li></ul>
+<h2>What we never store</h2><ul>
+<li>Where you live. We do not read or keep your GitHub location.</li>
+<li>Anything about developers who have not signed in — with one exception below.</li></ul>
+<h2>Sealed legends</h2><p>The island's 500 sealed legends are ranked from public information (Wikipedia, Wikidata and public GitHub follower counts). For each one we keep only its GitHub user id, its rank and its creature — no profile, no name on the page, no link to a person. Nobody can tell whose legend is whose. If it is yours, sign in with GitHub: you can wake it (it then shows with your name) or remove it, and a removed legend is never added again.</p>
 <h2>Cookies</h2><p>One cookie keeps you signed in. There is no analytics, no advertising and no tracking, so there is nothing to consent to.</p>
 <h2>We never contact you</h2><p>If another player catches your Gitemon, we do not email you, mention you or open issues. You find out when you visit.</p>
 <h2>Remove your Gitemon</h2><p>Sign in with GitHub and choose <b>Release</b> on your Gitemon. It disappears from the map, search, profile pages and every Dex at once. You can bring it back the same way.</p>
@@ -177,12 +181,12 @@ export const homePage = (count: number) =>
     path: '/',
     body: `<section class="card"><h1>Every developer is a creature.</h1>
 <a href="/map"><img src="/og-default.png" width="1200" height="630" alt="Gitemon Island: a round town full of pixel creatures, ringed by snow peaks, jungle, desert, a volcano and the sea" style="width:100%;height:auto;border-radius:14px;margin:4px 0 14px"></a>
-<p class="sub">Your public GitHub work hatches into a pixel Gitemon that lives in Gitemon City with ${count.toLocaleString('en-US')} others. Its type comes from your languages. Its power comes from work other people accepted — never from raw volume.</p>
-<div class="btns"><a class="btn primary" href="/map">Open the city</a><a class="btn" href="/auth/login?next=/map">Sign in with GitHub</a></div></section>
+<p class="sub">Sign in with GitHub and your public work hatches into a pixel Gitemon on Gitemon Island. Its type comes from your languages. Its power comes from work other people accepted — never from raw volume. ${count.toLocaleString('en-US')} developers have hatched so far, and 500 sealed legends are waiting for theirs.</p>
+<div class="btns"><a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn" href="/map">Open the island</a></div></section>
 <section class="card"><h2>How it works</h2><ul>
-<li><b>Hatch.</b> Every GitHub developer already exists as a wild Gitemon.</li>
-<li><b>Catch.</b> Sign in and catch the developers you admire. Worked together for real? It's a bonded catch.</li>
-<li><b>Claim.</b> When someone you caught signs in, you both get a friendship buff.</li>
-<li><b>Belong.</b> Every language has a home in one of nine climates. The most notable developers stand on the central plaza and the stronger a Gitemon, the nearer the town it lives; claim yours and it moves into a house in town.</li></ul>
-<p class="sub">We never read private repositories and never contact anyone.</p></section>`,
+<li><b>Hatch.</b> Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you.</li>
+<li><b>Catch.</b> Catch other players' Gitemon. Worked together for real? It's a bonded catch.</li>
+<li><b>Sealed legends.</b> 500 creatures belong to developers who shaped the tech world. They sleep on the island, nameless, until their own developer signs in — who can wake theirs or remove it.</li>
+<li><b>Belong.</b> Every language has a home in one of nine climates. The stronger a Gitemon, the nearer the town it lives; claimed Gitemon live in town with their tamer.</li></ul>
+<p class="sub">We never read private repositories, never store where you live, and never contact anyone.</p></section>`,
   });

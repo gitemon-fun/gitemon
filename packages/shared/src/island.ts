@@ -574,8 +574,9 @@ export function island(
     return { x, z, y: TOWN_Y, d: -1, kind: 'plaza' as const, tx: 0, tz: 0 };
   });
   const plaza: Spot[] = [];
-  for (let r = 18; r <= PLAZA_R - 3 && plaza.length < plazaTarget * 2; r += 3.4) {
-    const n = Math.floor((TAU * r) / 4.2);
+  for (let r = 18; r <= PLAZA_R - 3 && plaza.length < plazaTarget * 2; r += 3) {
+    // v5: the plaza now also holds the 40 Mythic specials — a little denser than v4
+    const n = Math.floor((TAU * r) / 3.2);
     for (let s = 0; s < n; s++) {
       const a = (s / n) * TAU + r;
       const [x, z] = polar(r, a);

@@ -26,6 +26,8 @@
   let searching = $state(false);
   let toast = $state<string | null>(null);
   let total = $state(0);
+  let sealed = $state(0);
+  let players = $derived(total - sealed);
   let dex = $state<(MapGitemon & { bonded: boolean })[]>([]);
   let towns = $state<Town[]>([]);
   let townName = $state('');
@@ -218,6 +220,7 @@
       }
       town = loadedCity;
       total = loadedCity.placed.length;
+      sealed = loadedCity.placed.filter((p) => p.g.special?.sealed).length;
       scene!.build(loadedCity.city, loadedCity.homes);
       scene!.setCreatures(loadedCity.placed);
       scene!.fitCity(loadedCity.city.radius);
@@ -297,8 +300,9 @@
   <div class="hint">Building the island…</div>
 {:else if !picked && !panel}
   <div class="hint">
-    {total.toLocaleString('en-US')} Gitemon live on the island. The most notable stand on the plaza; the
-    stronger a Gitemon, the nearer the town it lives. Tap anyone.
+    {#if players}{players.toLocaleString('en-US')} Gitemon and
+    {/if}{sealed.toLocaleString('en-US')} sealed legends live on the island. The stronger a Gitemon, the
+    nearer the town it lives. Sign in with GitHub to hatch yours. Tap anyone.
   </div>
 {/if}
 

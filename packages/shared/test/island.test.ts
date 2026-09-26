@@ -102,4 +102,27 @@ describe('island layout', () => {
         );
     });
   });
+
+  it('gives every special a place: monument, plinths, legend ring, mini plazas (V5-D6)', () => {
+    // 450 Epic + Rare spread like the live list (uneven per type)
+    const specials: Record<string, number> = {};
+    BIOME_ORDER.forEach((t, i) => {
+      if (t !== 'machine') specials[t] = 8 + ((i * 13) % 45);
+    });
+    const v5 = island(pops, 240, specials);
+    expect(v5.plinths).toHaveLength(2);
+    expect(v5.legendRing).toHaveLength(7);
+    expect(Math.hypot(v5.monument.x, v5.monument.z)).toBeLessThan(6);
+    for (const [t, n] of Object.entries(specials))
+      expect(v5.mini[BIOME_ORDER.indexOf(t as never)]!.length, t).toBeGreaterThanOrEqual(n);
+    // 40 Mythic + plaza players fit on the plaza, clear of the plinths and the legend ring
+    expect(v5.plaza.length).toBeGreaterThanOrEqual(40 + 190);
+    for (const s of v5.plaza)
+      for (const p of v5.plinths) expect(Math.hypot(s.x - p.x, s.z - p.z)).toBeGreaterThan(2);
+    // mini plazas stand on level, dry ground, and no wild habitat sits on one
+    for (const m of v5.miniPlazas) {
+      expect(m.y).toBeGreaterThan(WATER_Y + 0.5);
+      for (const h of v5.habitats) expect(Math.hypot(h.x - m.x, h.z - m.z)).toBeGreaterThan(m.r);
+    }
+  });
 });
