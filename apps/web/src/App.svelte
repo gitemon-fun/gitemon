@@ -213,6 +213,7 @@
       // ?at=<type> frames that type's nearest habitat (its best residents)
       const at = loadedCity.city.habitats.find((h) => h.t === qs.get('at'));
       if (at) scene!.flyTo(at.x, at.z, Number(qs.get('z')) || 1.6);
+      else if (qs.get('z')) scene!.flyTo(0, 0, Number(qs.get('z')));
       else if (focus) {
         query = focus;
         // ?house=<login> (profile "Visit house", V3-D2): the same flight, closer, onto the door
