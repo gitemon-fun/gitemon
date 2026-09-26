@@ -611,12 +611,12 @@ app.post('/internal/legends', async (c) => {
   }
   if (stmts.length) await db.batch(stmts);
   if (final && Array.isArray(keep)) {
-    const ids = keep.filter(Number.isInteger);
+    // one JSON parameter: D1 caps bound parameters at 100, the list holds 500
     await db
       .prepare(
-        `DELETE FROM legend WHERE woken_at IS NULL AND id NOT IN (${ids.map(() => '?').join(',') || 'NULL'})`,
+        'DELETE FROM legend WHERE woken_at IS NULL AND id NOT IN (SELECT value FROM json_each(?))',
       )
-      .bind(...ids)
+      .bind(JSON.stringify(keep.filter(Number.isInteger)))
       .run();
   }
   return c.json({ ok: true, upserted: stmts.length });
