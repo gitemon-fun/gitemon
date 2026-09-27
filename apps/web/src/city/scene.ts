@@ -5,6 +5,7 @@ import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
 import { buildTown, plotHeight, type Town } from './town';
 import { airField } from './air';
+import { report } from '../lib/clientlog';
 
 /**
  * Gitemon Island renderer (GRANDPLAN v2 §3, v3 §3, v8 §0 V8-D4): a perspective camera with 4 snap
@@ -119,7 +120,7 @@ export class CityScene {
     // static city: the shadow map is drawn once after build (v3 §3, G5), never per frame
     const big = this.renderer.capabilities.maxTextureSize >= 4096;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
     sun.castShadow = true;
     sun.shadow.mapSize.set(big ? 4096 : 2048, big ? 4096 : 2048);
@@ -448,6 +449,69 @@ export class CityScene {
     cam.updateProjectionMatrix();
     this.renderer.shadowMap.needsUpdate = true;
     this.dirty = true;
+    setTimeout(() => {
+      this.probeDue = true;
+      this.dirty = true;
+    }, 1500);
+  }
+
+  // ---- frame check (debugging a blank map on some GPUs) ------------------------------------------------
+
+  private probeDue = false;
+  /** once per visit, after the island is built: did anything draw? Sent to the client log. */
+  private probe() {
+    this.probeDue = false;
+    const gl = this.renderer.getContext();
+    const w = gl.drawingBufferWidth;
+    const h = gl.drawingBufferHeight;
+    const px = new Uint8Array(4);
+    const pts: number[][] = [];
+    for (const [fx, fy] of [
+      [0.5, 0.5],
+      [0.3, 0.4],
+      [0.7, 0.4],
+      [0.35, 0.65],
+      [0.65, 0.65],
+    ]) {
+      gl.readPixels(Math.floor(w * fx!), Math.floor(h * fy!), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      pts.push([...px]);
+    }
+    // the clear colour as the canvas shows it (sRGB bytes), which is also the fog colour
+    const clear = [1, 3, 5].map((i) => parseInt(HORIZON.slice(i, i + 2), 16));
+    const same = pts.filter((p) => p.slice(0, 3).every((v, i) => Math.abs(v - clear[i]!) <= 4));
+    const r = (v: number) => Math.round(v * 10) / 10;
+    const cam = this.camera;
+    const fog = this.scene.fog as THREE.Fog;
+    const bad = this.renderer.info.programs
+      ?.filter(
+        (p) => (p as { diagnostics?: { runnable: boolean } }).diagnostics?.runnable === false,
+      )
+      .map((p) => p.name);
+    report(
+      'frame',
+      JSON.stringify({
+        blank: same.length === pts.length,
+        pts,
+        calls: this.renderer.info.render.calls,
+        tris: this.renderer.info.render.triangles,
+        programs: this.renderer.info.programs?.length,
+        bad,
+        lost: gl.isContextLost(),
+        err: gl.getError(),
+        buf: [w, h],
+        css: [this.host.clientWidth, this.host.clientHeight],
+        dpr: window.devicePixelRatio,
+        aa: gl.getContextAttributes()?.antialias,
+        cam: [cam.position.x, cam.position.y, cam.position.z].map(r),
+        tgt: [this.target.x, this.target.y, this.target.z].map(r),
+        zoom: r(this.zoom),
+        fov: r(cam.fov),
+        nf: [r(cam.near), r(cam.far)],
+        fog: [r(fog.near), r(fog.far)],
+        maxTex: this.renderer.capabilities.maxTextureSize,
+        vtex: this.renderer.capabilities.maxVertexTextures,
+      }),
+    );
   }
 
   /** region names, shown only when zoomed out (v4 Q1) */
@@ -770,6 +834,7 @@ export class CityScene {
     }
     const t = performance.now();
     this.renderer.render(this.scene, this.camera);
+    if (this.probeDue) this.probe();
     this.stats.frames++;
     this.stats.ms += performance.now() - t;
   };

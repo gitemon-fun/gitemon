@@ -389,10 +389,25 @@ app.get('/api/guilds', (c) =>
   }),
 );
 
-/** client error reports (debugging a blank map on some GPUs): logged to the Worker log only */
+/** client reports (debugging a blank map on some GPUs): kept in D1 (newest 500) and the Worker log */
+let logMinute = 0;
+let logCount = 0;
 app.post('/api/clientlog', async (c) => {
   const body = (await c.req.text()).slice(0, 4000);
-  console.log('CLIENTLOG', c.req.header('user-agent')?.slice(0, 160), body);
+  const ua = c.req.header('user-agent')?.slice(0, 160) ?? null;
+  console.log('CLIENTLOG', ua, body);
+  // at most 30 stored reports a minute per isolate, so a flood cannot eat the D1 write budget
+  const minute = Math.floor(Date.now() / 60_000);
+  if (minute !== logMinute) [logMinute, logCount] = [minute, 0];
+  if (++logCount <= 30)
+    await c.env.DB.batch([
+      c.env.DB.prepare('INSERT INTO clientlog (at, ua, body) VALUES (?, ?, ?)').bind(
+        new Date().toISOString(),
+        ua,
+        body,
+      ),
+      c.env.DB.prepare('DELETE FROM clientlog WHERE id <= (SELECT MAX(id) FROM clientlog) - 500'),
+    ]);
   return c.json({ ok: true });
 });
 
