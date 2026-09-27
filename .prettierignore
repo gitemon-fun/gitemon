@@ -4,3 +4,4 @@ dist/
 .claude/
 apps/api/migrations/
 LICENSE
+apps/web/public/sim/

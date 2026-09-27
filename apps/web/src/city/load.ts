@@ -92,8 +92,9 @@ export const fromRow = (r: Row): MapGitemon => ({
 /** v6: the day's frozen layout from the daily job — every client builds the same island all day */
 export interface DayLayout {
   day: string;
-  pops: Partial<Record<TypeId, number>>;
-  specials: Partial<Record<TypeId, { mini: number; rare: number }>>;
+  /** absent (?sim) = worked out from today's population, as the daily job does */
+  pops?: Partial<Record<TypeId, number>>;
+  specials?: Partial<Record<TypeId, { mini: number; rare: number }>>;
   /** v7: merit lines for climbing into each tier; absent = climbing off (V7-D3, §5) */
   calibration?: Partial<Record<'legendary' | 'mythic' | 'epic' | 'rare', number>> | null;
   /** v9 (V9-D3): today's Merit House holders, region → 3 ids (0 = empty), from the daily job */
@@ -310,7 +311,17 @@ export async function loadCity(): Promise<LoadedCity | null> {
       tpls[i % tpls.length] || null,
     ]);
   }
-  if (fake && location.search.includes('climb') && data.layout)
+  // ?sim=NAME (and &climb): a saved population (public/sim/NAME.json, anonymous rows) as if it had
+  // joined yesterday — the island is rebuilt the way the daily job builds it. Nothing is sent anywhere.
+  const sim = new URLSearchParams(location.search).get('sim');
+  if (sim && /^[\w-]+$/.test(sim)) {
+    const s = await fetch(`/sim/${sim}.json`);
+    if (s.ok) {
+      rows.push(...((await s.json()) as Row[]));
+      data.layout = { day: data.layout?.day ?? dayOf(), houses: null };
+    }
+  }
+  if ((fake || sim) && location.search.includes('climb') && data.layout)
     data.layout = {
       ...data.layout,
       calibration: { legendary: 92, mythic: 85, epic: 75, rare: 62 },
