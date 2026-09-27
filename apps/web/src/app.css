@@ -409,3 +409,128 @@ h2 {
 .signline {
   margin: 4px 0;
 }
+
+/* ---- v8 game HUD (V8-D9): pixel icons, compass, minimap, thumb stick ---- */
+.ico {
+  width: 22px;
+  height: 22px;
+  image-rendering: pixelated;
+  vertical-align: -5px;
+  margin-right: 4px;
+}
+.ico + .glyph {
+  display: none;
+}
+.zoom .ico {
+  margin: 0;
+  width: 26px;
+  height: 26px;
+}
+.findbtn .ico {
+  width: 18px;
+  height: 18px;
+  vertical-align: -3px;
+}
+.hud-compass {
+  position: fixed;
+  right: 16px;
+  bottom: 252px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 5;
+}
+.hud-compass img {
+  width: 34px;
+  height: 34px;
+  image-rendering: pixelated;
+  transition: transform 0.3s ease;
+}
+.hud-map {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.hud-map-toggle {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.hud-map-toggle img {
+  width: 30px;
+  height: 30px;
+  image-rendering: pixelated;
+}
+.hud-map-body {
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 3px solid #f4ead2;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  cursor: crosshair;
+  order: -1;
+}
+.hud-map-body canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.hud-map.closed .hud-map-body {
+  display: none;
+}
+.hud-stick {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  margin-left: -56px;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.28);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  touch-action: none;
+  z-index: 6;
+  display: none;
+}
+.hud-knob {
+  position: absolute;
+  left: 30px;
+  top: 30px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+/* the stick is for touch screens; keys do the job on a desktop */
+@media (pointer: coarse) {
+  .hud-stick {
+    display: block;
+  }
+}
+@media (max-width: 600px) {
+  .hud-map-body {
+    width: 112px !important;
+    height: 112px !important;
+  }
+  .hud-compass {
+    bottom: 236px;
+  }
+}

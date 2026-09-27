@@ -445,6 +445,64 @@ export class CityScene {
   onWalk: ((x: number, z: number, arrived: boolean) => void) | null = null;
   private lastWalkPing = 0;
 
+  // ---- steering (v8 §0 V8-D5, build file 06) --------------------------------------------------------
+
+  /** screen-relative stick: x = right, y = up the screen; length ≤ 1 */
+  private stick = { x: 0, y: 0 };
+  /** set by the app: may the walker take another `m` metres? (the v6 step budget) */
+  canSteer: ((m: number) => boolean) | null = null;
+  /** called with the metres just steered */
+  onSteer: ((m: number) => void) | null = null;
+  steer(x: number, y: number) {
+    const l = Math.hypot(x, y);
+    this.stick = l > 1 ? { x: x / l, y: y / l } : { x, y };
+    if (l > 0 && this.walker) {
+      this.walker.walk = null; // steering takes over from a tapped walk
+      if (this.zoom < 2.2) this.flyTo(this.walker.x, this.walker.z, 2.6);
+    }
+    this.dirty = true;
+  }
+  get steering() {
+    return this.stick.x !== 0 || this.stick.y !== 0;
+  }
+  private stepSteer(dt: number) {
+    const w = this.walker;
+    if (!w || !this.walkable || !this.crowd || !this.walkCity || !this.steering) return;
+    // up the screen = away from the camera along the ground
+    const fx = -Math.cos(this.yaw);
+    const fz = -Math.sin(this.yaw);
+    const rx = Math.sin(this.yaw);
+    const rz = -Math.cos(this.yaw);
+    const dx = fx * this.stick.y + rx * this.stick.x;
+    const dz = fz * this.stick.y + rz * this.stick.x;
+    const step = 7 * dt * Math.hypot(this.stick.x, this.stick.y);
+    if (this.canSteer && !this.canSteer(step)) return;
+    const l = Math.hypot(dx, dz) || 1;
+    let nx = w.x + (dx / l) * step;
+    let nz = w.z + (dz / l) * step;
+    // blocked (water, cliff, house row): slide along whichever axis is open
+    if (!this.walkable.walkable(nx, nz)) {
+      if (this.walkable.walkable(nx, w.z)) nz = w.z;
+      else if (this.walkable.walkable(w.x, nz)) nx = w.x;
+      else return;
+    }
+    const moved = Math.hypot(nx - w.x, nz - w.z);
+    w.x = nx;
+    w.z = nz;
+    const r = Math.hypot(nx, nz);
+    const y = r < 72 ? TOWN_Y : Math.max(TOWN_Y, gridHeight(this.walkCity.grid, nx, nz));
+    this.crowd.setPos(w.i, nx, nz, y);
+    this.target.x += (nx - this.target.x) * 0.15;
+    this.target.z += (nz - this.target.z) * 0.15;
+    this.onSteer?.(moved);
+    const now = performance.now();
+    if (now - this.lastWalkPing > 500) {
+      this.lastWalkPing = now;
+      this.onWalk?.(nx, nz, false);
+    }
+    this.dirty = true;
+  }
+
   /** make placed resident `i` the player's own walker (home = where it lives) */
   enableWalker(city: Island, i: number) {
     const c = this.crowd;
@@ -620,7 +678,7 @@ export class CityScene {
     if (document.hidden) return;
     // walkers only matter when they are big enough to see: animate at street and district zoom
     const animate = this.crowd && this.zoom > 0.45;
-    if (!animate && !this.dirty && !this.anim && !this.walker?.walk) return;
+    if (!animate && !this.dirty && !this.anim && !this.walker?.walk && !this.steering) return;
     if (now - this.last < 32) return; // ~30 fps is plenty for a city and kind to phones
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
@@ -635,6 +693,7 @@ export class CityScene {
       this.air.update(this.clock, this.target.x, this.target.z, px, fade);
     }
     this.stepWalker(dt);
+    this.stepSteer(dt);
     if (this.anim) {
       const k = Math.min(1, (performance.now() - this.anim.t0) / 700);
       const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
@@ -665,6 +724,16 @@ export class CityScene {
     this.stats.frames++;
     this.stats.ms += performance.now() - t;
   };
+
+  // ---- HUD (v8 §0 V8-D9) -----------------------------------------------------------------------------
+
+  /** the camera's heading (radians): the compass turns with it */
+  get heading() {
+    return this.yaw;
+  }
+  get view(): { x: number; z: number; span: number } {
+    return { x: this.target.x, z: this.target.z, span: this.span };
+  }
 
   /** render counters for ?debug and the perf check (v3 build file 08) */
   readonly stats = { frames: 0, ms: 0, buildMs: 0, townMs: 0, layoutMs: 0, homes: 0, piecesMs: 0 };

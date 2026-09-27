@@ -1,0 +1,208 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import type { Island } from '@gitemon/shared';
+  import type { CityScene, Placed } from '../city/scene';
+  import { fromMap, islandPicture, toMap } from '../city/minimap';
+
+  /**
+   * The game HUD (GRANDPLAN v8 §0 V8-D5, V8-D9): a minimap you can tap to fly, a compass that turns
+   * with the camera, and — for a player out walking — keys (WASD / arrows) and a thumb stick.
+   */
+  let {
+    scene,
+    isl,
+    placed,
+    walking,
+  }: { scene: CityScene; isl: Island; placed: Placed[]; walking: boolean } = $props();
+
+  const SIZE = 150;
+  let base: HTMLCanvasElement;
+  let dots: HTMLCanvasElement;
+  let needle = $state(0);
+  let open = $state(true);
+  /** island north points at Frost Peaks (the top of the opening view) */
+  const NORTH = (-3 * Math.PI) / 4;
+
+  onMount(() => {
+    const pic = islandPicture(isl, SIZE * 2);
+    base.getContext('2d')!.drawImage(pic, 0, 0, SIZE * 2, SIZE * 2);
+    try {
+      open = localStorage.getItem('gitemon.map') !== 'off';
+    } catch {
+      /* private window: keep the default */
+    }
+    const legends = placed.filter((p) => p.g.special && !p.g.special.sealed);
+    const t = setInterval(() => {
+      const yaw = scene.heading;
+      const f = [-Math.cos(yaw), -Math.sin(yaw)];
+      const r = [Math.sin(yaw), -Math.cos(yaw)];
+      const n = [Math.cos(NORTH), Math.sin(NORTH)];
+      needle =
+        (Math.atan2(n[0]! * r[0]! + n[1]! * r[1]!, n[0]! * f[0]! + n[1]! * f[1]!) * 180) / Math.PI;
+      if (!open || !dots) return;
+      const ctx = dots.getContext('2d')!;
+      const k = 2;
+      ctx.clearRect(0, 0, SIZE * k, SIZE * k);
+      // woken legends: gold dots
+      ctx.fillStyle = '#ffcf5a';
+      for (const p of legends) {
+        const [x, y] = toMap(isl, SIZE * k, p.spot.x, p.spot.z);
+        ctx.fillRect(x - 2, y - 2, 4, 4);
+      }
+      // where the camera looks, and which way
+      const v = scene.view;
+      const [cx, cy] = toMap(isl, SIZE * k, v.x, v.z);
+      const s = Math.max(6, (v.span / (2 * (isl.radius + 20))) * SIZE * k * 0.6);
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, s, Math.atan2(f[1]!, f[0]!) - 0.5, Math.atan2(f[1]!, f[0]!) + 0.5);
+      ctx.closePath();
+      ctx.stroke();
+      // you
+      const me = scene.walkerPos;
+      if (me) {
+        const [x, y] = toMap(isl, SIZE * k, me[0], me[1]);
+        ctx.fillStyle = '#ff4d6d';
+        ctx.strokeStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }, 200);
+    return () => clearInterval(t);
+  });
+
+  function flyFromMap(e: MouseEvent) {
+    const b = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const [x, z] = fromMap(isl, b.width, e.clientX - b.left, e.clientY - b.top);
+    scene.flyTo(x, z, Math.max(1.2, scene.zoom));
+  }
+  function toggle() {
+    open = !open;
+    try {
+      localStorage.setItem('gitemon.map', open ? 'on' : 'off');
+    } catch {
+      /* private window */
+    }
+  }
+
+  // ---- steering: keys + thumb stick ----
+  const keys = new Set<string>();
+  const KEYMAP: Record<string, [number, number]> = {
+    w: [0, 1],
+    arrowup: [0, 1],
+    s: [0, -1],
+    arrowdown: [0, -1],
+    a: [-1, 0],
+    arrowleft: [-1, 0],
+    d: [1, 0],
+    arrowright: [1, 0],
+  };
+  function fromKeys() {
+    let x = 0;
+    let y = 0;
+    for (const k of keys) {
+      const v = KEYMAP[k];
+      if (v) {
+        x += v[0];
+        y += v[1];
+      }
+    }
+    scene.steer(x, y);
+  }
+  function typing(e: KeyboardEvent) {
+    const t = e.target as HTMLElement | null;
+    return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+  }
+  function down(e: KeyboardEvent) {
+    const k = e.key.toLowerCase();
+    if (!walking || typing(e) || !KEYMAP[k]) return;
+    e.preventDefault();
+    keys.add(k);
+    fromKeys();
+  }
+  function up(e: KeyboardEvent) {
+    const k = e.key.toLowerCase();
+    if (!keys.delete(k)) return;
+    fromKeys();
+  }
+
+  let knob = $state({ x: 0, y: 0 });
+  let stickId: number | null = null;
+  let stickEl = $state<HTMLElement>();
+  const R = 44;
+  function stickMove(e: PointerEvent) {
+    if (e.pointerId !== stickId) return;
+    const b = stickEl!.getBoundingClientRect();
+    let x = e.clientX - (b.left + b.width / 2);
+    let y = e.clientY - (b.top + b.height / 2);
+    const l = Math.hypot(x, y);
+    if (l > R) {
+      x = (x / l) * R;
+      y = (y / l) * R;
+    }
+    knob = { x, y };
+    scene.steer(x / R, -y / R);
+  }
+  function stickDown(e: PointerEvent) {
+    stickId = e.pointerId;
+    stickEl!.setPointerCapture(e.pointerId);
+    stickMove(e);
+  }
+  function stickUp(e: PointerEvent) {
+    if (e.pointerId !== stickId) return;
+    stickId = null;
+    knob = { x: 0, y: 0 };
+    scene.steer(0, 0);
+  }
+</script>
+
+<svelte:window onkeydown={down} onkeyup={up} onblur={() => (keys.clear(), scene.steer(0, 0))} />
+
+<div class="hud-compass" title="Compass: the needle points to Frost Peaks">
+  <img
+    src="/ui/compass.png"
+    alt=""
+    style="transform: rotate({needle}deg)"
+    onerror={(e) => ((e.currentTarget as HTMLElement).style.display = 'none')}
+  />
+</div>
+
+<div class="hud-map" class:closed={!open}>
+  <button
+    class="hud-map-toggle"
+    onclick={toggle}
+    aria-label={open ? 'Hide the map' : 'Show the map'}
+  >
+    <img
+      src="/ui/map.png"
+      alt=""
+      onerror={(e) => ((e.currentTarget as HTMLElement).style.display = 'none')}
+    />
+  </button>
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="hud-map-body" onclick={flyFromMap} style="width:{SIZE}px;height:{SIZE}px">
+    <canvas bind:this={base} width={SIZE * 2} height={SIZE * 2}></canvas>
+    <canvas bind:this={dots} width={SIZE * 2} height={SIZE * 2}></canvas>
+  </div>
+</div>
+
+{#if walking}
+  <div
+    class="hud-stick"
+    bind:this={stickEl}
+    onpointerdown={stickDown}
+    onpointermove={stickMove}
+    onpointerup={stickUp}
+    onpointercancel={stickUp}
+    role="slider"
+    aria-label="Walk: drag to steer"
+    aria-valuenow={0}
+    tabindex="-1"
+  >
+    <div class="hud-knob" style="transform: translate({knob.x}px, {knob.y}px)"></div>
+  </div>
+{/if}

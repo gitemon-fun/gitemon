@@ -12,6 +12,7 @@
   import { loadCity, type LoadedCity } from './city/load';
   import { CATCH_M, IDLE_MS, SIGHT_M, SIGN_TEMPLATES, signText } from '@gitemon/shared';
   import Sprite from './lib/Sprite.svelte';
+  import Hud from './lib/Hud.svelte';
 
   // Gitemon Island is the map (GRANDPLAN v4): a centre town and nine climate regions.
   let host: HTMLDivElement;
@@ -179,6 +180,12 @@
       if (!toHome) walked += len;
       armIdle();
       return true;
+    };
+    // v8: steering (keys / thumb stick) spends the same step budget as tapped walks
+    scene.canSteer = (m) => budgetLeft() >= m;
+    scene.onSteer = (m) => {
+      walked += m;
+      armIdle();
     };
     scene.onWalk = (x, z) => checkLegends(x, z);
     armIdle();
@@ -408,7 +415,14 @@
       autocapitalize="off"
       spellcheck="false"
     />
-    <button disabled={searching} aria-label="Find">{searching ? '…' : 'Find'}</button>
+    <button disabled={searching} aria-label="Find" class="findbtn"
+      >{#if !searching}<img
+          class="ico"
+          src="/ui/find.png"
+          alt=""
+          onerror={(e) => (e.currentTarget as HTMLElement).remove()}
+        />{/if}{searching ? '…' : 'Find'}</button
+    >
   </form>
   <nav>
     {#if me}
@@ -438,9 +452,18 @@
   <button onclick={() => scene?.zoomBy(1 / 1.6)} aria-label="Zoom out">−</button>
   <button onclick={() => scene?.rotate(1)} aria-label="Turn the city">⟳</button>
   <button onclick={() => scene?.flyTo(0, 0, homeZoom())} aria-label="Back to the town" class="fit"
-    >⌂</button
+    ><img
+      class="ico"
+      src="/ui/home.png"
+      alt=""
+      onerror={(e) => (e.currentTarget as HTMLElement).remove()}
+    /><span class="glyph">⌂</span></button
   >
 </div>
+
+{#if loaded && scene && town}
+  <Hud {scene} isl={town.city} placed={town.placed} {walking} />
+{/if}
 
 {#if failed}
   <div class="hint">The city could not load. Try again in a minute.</div>
@@ -668,20 +691,35 @@
       {/if}
       <div class="walkstats">
         <p>
-          <b>Legend Log:</b>
+          <img
+            class="ico"
+            src="/ui/log.png"
+            alt=""
+            onerror={(e) => (e.currentTarget as HTMLElement).remove()}
+          /><span class="glyph"></span><b>Legend Log:</b>
           {me.walk.seen.length} of 500 seen{#each ['legendary', 'mythic', 'epic', 'rare'] as t}{#if me.walk.tally[t]}
               · {TIER_NAME[t as keyof typeof TIER_NAME]} {me.walk.tally[t]}{/if}{/each}
         </p>
         <p>
-          <b>Steps today:</b>
+          <img
+            class="ico"
+            src="/ui/steps.png"
+            alt=""
+            onerror={(e) => (e.currentTarget as HTMLElement).remove()}
+          /><span class="glyph"></span><b>Steps today:</b>
           {Math.round(Math.max(0, me.walk.budget - walked))} of {me.walk.budget} m left{#if me.walk.streak}
-            · <b>Streak:</b>
+            · <img
+              class="ico"
+              src="/ui/streak.png"
+              alt=""
+              onerror={(e) => (e.currentTarget as HTMLElement).remove()}
+            /><span class="glyph"></span><b>Streak:</b>
             {me.walk.streak}
             {me.walk.streak === 1 ? 'day' : 'days'}{/if}
         </p>
         <p class="dim small">
-          Tap the map to walk. Walking home is free. Real GitHub work — merged pull requests,
-          reviews, active weeks — earns more steps.
+          Tap the map to walk, or steer with WASD, the arrow keys or the stick. Walking home is
+          free. Real GitHub work — merged pull requests, reviews, active weeks — earns more steps.
         </p>
       </div>
       <div class="walkstats">

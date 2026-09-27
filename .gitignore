@@ -20,3 +20,4 @@ apps/web/public/og-default.png
 packages/ingest/src/geo-data.ts
 # 3D models are copied in from the private art repo (scripts/models.sh), never committed
 apps/web/public/models/
+apps/web/public/ui/
