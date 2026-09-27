@@ -177,10 +177,10 @@ export const homePage = (count: number) =>
   layout({
     title: 'Gitemon — every developer is a creature',
     description:
-      'Your GitHub work, hatched into a pixel creature on one shared island. Catch other developers, claim your own, bring it home to the town.',
+      'Your GitHub work, hatched into a pixel creature on one shared island. Walk it across nine lands, find the sealed legends, catch other developers.',
     path: '/',
     body: `<section class="card"><h1>Every developer is a creature.</h1>
-<a href="/map"><img src="/og-default.png" width="1200" height="630" alt="Gitemon Island: a round town full of pixel creatures, ringed by snow peaks, jungle, desert, a volcano and the sea" style="width:100%;height:auto;border-radius:14px;margin:4px 0 14px"></a>
+<a href="/map"><img src="/og-default.png" width="1200" height="630" alt="Gitemon Island: a round town with a golden spire and stone legend statues, ringed by giant wonders — a frozen waterfall, a blossom tree, a world tree, a volcano forge — and the sea" style="width:100%;height:auto;border-radius:14px;margin:4px 0 14px"></a>
 <p class="sub">Sign in with GitHub and your public work hatches into a pixel Gitemon on Gitemon Island. Its type comes from your languages. Its power comes from work other people accepted — never from raw volume. ${count.toLocaleString('en-US')} developers have hatched so far, and 500 sealed legends are waiting for theirs.</p>
 <div class="btns"><a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn" href="/map">Open the island</a></div></section>
 <section class="card"><h2>How it works</h2><ul>
