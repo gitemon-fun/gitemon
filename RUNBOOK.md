@@ -60,3 +60,11 @@ draw anything: pixels, draw calls, camera, fog) to `POST /api/clientlog`. Report
 (`cd apps/api && npx wrangler tail gitemon --search CLIENTLOG`) and to the D1 table `clientlog`, which
 keeps the newest 500: `npx wrangler d1 execute gitemon --remote -c wrangler.deploy.toml --command
 "SELECT * FROM clientlog ORDER BY id DESC LIMIT 20"`.
+
+## Creature art (v10)
+
+The 54 creatures (18 evolution lines × 3 forms) are made with free Meta AI images, one conversation per
+line so each line stays one creature, then turned into pixel sprites by the private art repo's
+`tools/build_v10.py` (it finds the source's own pixel grid, removes the background, keeps outlines,
+and marks the marking colour as `accent`). Its output is the art repo's `species.ts` + `gaits.ts`;
+`scripts/deploy.sh` copies them in. Changing the art set's `id` refreshes cached profile and share images.

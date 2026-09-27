@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono';
+import { art } from '@gitemon/art';
 import { fetchSnapshot, isValidLogin } from '@gitemon/ingest';
 import { SCORER_VERSION } from '@gitemon/scorer';
 import {
@@ -1054,7 +1055,7 @@ app.get('/og/:file', async (c) => {
   return edgeCached(c, 86400, async () => {
     const r = await byId(c.env.DB, Number(m[1]));
     if (!r || r.hidden) return new Response('not found', { status: 404 });
-    const key = `og/${SCORER_VERSION}/${r.id}-${r.level}-${r.form}-${r.t1}-${r.t2 ?? ''}.png`;
+    const key = `og/${SCORER_VERSION}/${art.id}/${r.id}-${r.level}-${r.form}-${r.t1}-${r.t2 ?? ''}.png`;
     const stored = await c.env.BUCKET.get(key);
     if (stored) return new Response(stored.body, { headers: { 'content-type': 'image/png' } });
     const png = ogPng({ ...spriteParams(r), login: r.login, level: r.level });

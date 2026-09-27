@@ -1,4 +1,5 @@
 import { SHAPE_NAME, STAT_MEANING, TYPE_INFO, type Stats } from '@gitemon/shared';
+import { art } from '@gitemon/art';
 import type { Row } from './world.js';
 
 const esc = (s: string) =>
@@ -85,7 +86,7 @@ export function profilePage(r: Row, bonus: number, town: string | null, caughtBy
     .join('');
   const body = `
 <section class="card hero">
-  <img style="background:radial-gradient(ellipse at 50% 85%, ${t1.colors[1]}55 0%, ${t1.colors[0]}33 38%, transparent 70%),linear-gradient(180deg, #8ec5ee33, transparent)" src="/sprite/${r.id}.png?s=8&v=${r.scorer_version}${r.form}${r.shiny}" width="192" height="192" alt="${esc(r.login)}'s Gitemon, a ${t1.name} ${SHAPE_NAME[r.shape]}">
+  <img style="background:radial-gradient(ellipse at 50% 85%, ${t1.colors[1]}55 0%, ${t1.colors[0]}33 38%, transparent 70%),linear-gradient(180deg, #8ec5ee33, transparent)" src="/sprite/${r.id}.png?s=8&a=${art.id}&v=${r.scorer_version}${r.form}${r.shiny}" width="192" height="192" alt="${esc(r.login)}'s Gitemon, a ${t1.name} ${SHAPE_NAME[r.shape]}">
   <div class="who">
     <h1>${esc(r.login)}</h1>
     <p class="sub">${name}${wild ? 'Wild Gitemon' : 'Claimed Gitemon'}${r.shiny ? ' · ✦ Shiny' : ''}${r.machine ? ' · Agent account' : ''}</p>
@@ -109,7 +110,7 @@ export function profilePage(r: Row, bonus: number, town: string | null, caughtBy
     title: `${r.login} — Lv ${r.level} ${t1.name}${t2 ? `/${t2.name}` : ''} Gitemon`,
     description: `${r.login}'s Gitemon: a level ${r.level} ${t1.name} ${SHAPE_NAME[r.shape]} from ${t1.biome}. Catch it on gitemon.fun.`,
     path: `/${r.login}`,
-    image: `https://gitemon.fun/og/${r.id}.png?v=${r.scorer_version}${r.level}${r.form}`,
+    image: `https://gitemon.fun/og/${r.id}.png?a=${art.id}&v=${r.scorer_version}${r.level}${r.form}`,
     body,
   });
 }
@@ -198,7 +199,7 @@ export const homePage = (count: number) =>
 <p class="sub">Sign in with GitHub and your public work hatches into a pixel Gitemon on Gitemon Island. Its type comes from your languages. Its power comes from work other people accepted — never from raw volume. ${count.toLocaleString('en-US')} developers have hatched so far, and 500 sealed legends are waiting for theirs.</p>
 <div class="btns"><a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn" href="/map">Open the island</a></div></section>
 <section class="card"><h2>How it works</h2><ul>
-<li><b>Hatch.</b> Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you.</li>
+<li><b>Hatch.</b> Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you. No two are the same: your main language picks the creature, your second language colours its markings, and it stands a little taller as your steady work grows.</li>
 <li><b>Walk.</b> Tap the map to walk your Gitemon anywhere — it walks home when you stop. Real GitHub work (merged pull requests, reviews, active weeks) earns more steps each day.</li>
 <li><b>Catch.</b> Walk up to another player's Gitemon and catch it. Worked together for real? It's a bonded catch.</li>
 <li><b>Find the legends.</b> Every legend you walk past goes into your Legend Log. One is the legend of the day: stand near it and your Gitemon glows for six hours. The Rare move every day.</li>

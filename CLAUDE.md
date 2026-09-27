@@ -36,7 +36,7 @@
 
 - Ingest fetches a public GitHub snapshot (GraphQL) → D1. Nobody is hatched without signing in (v5): search and profile pages never create a Gitemon.
 - `packages/scorer` (pure) turns it into stats, type, species, form and **merit** (consistency over volume, v7).
-- `packages/creature-gen` composes a deterministic sprite — in the browser for the map, in the Worker for profile images and share cards.
+- `packages/creature-gen` composes a deterministic sprite — in the browser for the map, in the Worker for profile images and share cards. v10: a species' marking colours (accent) take the player's second type; each species has a gait (hop, waddle, trot, slither, float) that the crowd shader drives by distance travelled (`packages/shared/src/gait.ts`). Bridges are arches the walker stands on (`bridge.ts`).
 - `packages/shared` `island()` derives Gitemon Island from populations: nine climate regions round a centre town, coast, relief, habitats, mini plazas, and the town's 42 detached buildings (9 guild halls, 27 Merit Houses, 6 services — v9). `town.ts` holds the guild and Merit House rules.
 - `/api/city` serves every resident, the 500 sealed legends (no identity until woken) and the day's frozen layout; the client places everyone by rank and merit.
 - A trusted fetcher (`scripts/drain.ts`, on a timer) hatches requested players, refreshes stale ones and runs the daily job (`scripts/daily.ts`: layout, legend spots, Merit House holders).
