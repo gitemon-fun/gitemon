@@ -3,6 +3,8 @@
   import type { Island } from '@gitemon/shared';
   import type { CityScene, Placed } from '../city/scene';
   import { fromMap, islandPicture, toMap } from '../city/minimap';
+  import { Soundscape } from '../city/sound';
+  import { gridRegion } from '@gitemon/shared';
 
   /**
    * The game HUD (GRANDPLAN v8 §0 V8-D5, V8-D9): a minimap you can tap to fly, a compass that turns
@@ -23,7 +25,28 @@
   /** island north points at Frost Peaks (the top of the opening view) */
   const NORTH = (-3 * Math.PI) / 4;
 
+  // ---- sound (V8-D10): off by default; a saved "on" starts at the player's first tap (G7) ----
+  const sound = new Soundscape();
+  let soundOn = $state(false);
+  function setSound(on: boolean) {
+    soundOn = on;
+    if (on) sound.enable();
+    else sound.disable();
+    try {
+      localStorage.setItem('gitemon.sound', on ? 'on' : 'off');
+    } catch {
+      /* private window */
+    }
+  }
+  let lastPos: [number, number] | null = null;
+
   onMount(() => {
+    try {
+      if (localStorage.getItem('gitemon.sound') === 'on')
+        window.addEventListener('pointerdown', () => setSound(true), { once: true });
+    } catch {
+      /* private window: stays off */
+    }
     const pic = islandPicture(isl, SIZE * 2);
     base.getContext('2d')!.drawImage(pic, 0, 0, SIZE * 2, SIZE * 2);
     try {
@@ -39,6 +62,14 @@
       const n = [Math.cos(NORTH), Math.sin(NORTH)];
       needle =
         (Math.atan2(n[0]! * r[0]! + n[1]! * r[1]!, n[0]! * f[0]! + n[1]! * f[1]!) * 180) / Math.PI;
+      if (sound.on) {
+        const v0 = scene.view;
+        const reg = gridRegion(isl.grid, v0.x, v0.z);
+        sound.at(reg >= 0 ? isl.regions[reg]!.climate : reg === -1 ? 'town' : 'sea');
+        const p = scene.walkerPos;
+        if (p && lastPos && Math.hypot(p[0] - lastPos[0], p[1] - lastPos[1]) > 0.5) sound.step();
+        lastPos = p ? [p[0], p[1]] : null;
+      }
       if (!open || !dots) return;
       const ctx = dots.getContext('2d')!;
       const k = 2;
@@ -72,7 +103,7 @@
         ctx.stroke();
       }
     }, 200);
-    return () => clearInterval(t);
+    return () => (clearInterval(t), sound.disable());
   });
 
   function flyFromMap(e: MouseEvent) {
@@ -170,6 +201,19 @@
     onerror={(e) => ((e.currentTarget as HTMLElement).style.display = 'none')}
   />
 </div>
+
+<button
+  class="hud-sound"
+  onclick={() => setSound(!soundOn)}
+  aria-label={soundOn ? 'Sound off' : 'Sound on'}
+  title={soundOn ? 'Sound off' : 'Sound on'}
+>
+  <img
+    src={soundOn ? '/ui/sound-on.png' : '/ui/sound-off.png'}
+    alt=""
+    onerror={(e) => ((e.currentTarget as HTMLElement).style.display = 'none')}
+  /><span class="glyph">{soundOn ? '♪' : '×'}</span>
+</button>
 
 <div class="hud-map" class:closed={!open}>
   <button

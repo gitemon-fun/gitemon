@@ -534,3 +534,31 @@ h2 {
     bottom: 236px;
   }
 }
+.hud-sound {
+  position: fixed;
+  right: 16px;
+  bottom: 306px;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  z-index: 5;
+}
+.hud-sound img {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+}
+.hud-sound img + .glyph {
+  display: none;
+}
+@media (max-width: 600px) {
+  .hud-sound {
+    bottom: 290px;
+  }
+}
