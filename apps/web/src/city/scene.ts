@@ -1,5 +1,13 @@
 import * as THREE from 'three';
-import { TOWN_Y, gridHeight, type Island, type Spot } from '@gitemon/shared';
+import {
+  TOWN_Y,
+  bridgeLift,
+  bridgesOf,
+  gridHeight,
+  type Bridge,
+  type Island,
+  type Spot,
+} from '@gitemon/shared';
 import { Walk, Walkable } from './walker';
 import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
@@ -599,8 +607,7 @@ export class CityScene {
     const moved = Math.hypot(nx - w.x, nz - w.z);
     w.x = nx;
     w.z = nz;
-    const r = Math.hypot(nx, nz);
-    const y = r < 72 ? TOWN_Y : Math.max(TOWN_Y, gridHeight(this.walkCity.grid, nx, nz));
+    const y = this.groundY(nx, nz);
     this.crowd.setPos(w.i, nx, nz, y);
     this.target.x += (nx - this.target.x) * 0.15;
     this.target.z += (nz - this.target.z) * 0.15;
@@ -613,11 +620,20 @@ export class CityScene {
     this.dirty = true;
   }
 
+  /** where the walker's feet go: town ground (on a bridge: its deck, V10-D6), else the terrain */
+  private bridges: Bridge[] = [];
+  private groundY(x: number, z: number) {
+    const city = this.walkCity!;
+    if (Math.hypot(x, z) < 72) return TOWN_Y + bridgeLift(this.bridges, x, z);
+    return Math.max(TOWN_Y, gridHeight(city.grid, x, z));
+  }
+
   /** make placed resident `i` the player's own walker (home = where it lives) */
   enableWalker(city: Island, i: number) {
     const c = this.crowd;
     if (!c) return;
     this.walkCity = city;
+    this.bridges = bridgesOf(city);
     this.walkable ??= new Walkable(city);
     const p = c.at(i);
     this.walker = { i, home: { ...p.spot }, walk: null, x: p.spot.x, z: p.spot.z };
@@ -661,8 +677,7 @@ export class CityScene {
     const [x, z] = w.walk.step(dt);
     w.x = x;
     w.z = z;
-    const r = Math.hypot(x, z);
-    const y = r < 72 ? TOWN_Y : Math.max(TOWN_Y, gridHeight(this.walkCity.grid, x, z));
+    const y = this.groundY(x, z);
     this.crowd.setPos(w.i, x, z, y);
     // the camera follows the walker
     this.target.x += (x - this.target.x) * 0.08;

@@ -9,6 +9,8 @@ import {
   STREET_IN,
   STREET_OUT,
   SW,
+  archHeight,
+  bridgesOf,
   TOWN_R,
   TOWN_Y,
   hash32,
@@ -308,21 +310,36 @@ function townGround(isl: Island): THREE.Object3D[] {
       '#c8bda8',
     ),
   ];
-  // arched bridges: over the canal at every gate, and over each river on both ring streets
-  const bridge = (x: number, z: number, a: number, span: number, w: number) => {
-    for (const p of [
-      new THREE.BoxGeometry(span, 0.45, w).translate(0, Y + 0.25, 0),
-      new THREE.BoxGeometry(span * 0.5, 0.4, w).translate(0, Y + 0.6, 0),
-      new THREE.BoxGeometry(span, 0.8, 0.35).translate(0, Y + 0.85, w / 2),
-      new THREE.BoxGeometry(span, 0.8, 0.35).translate(0, Y + 0.85, -w / 2),
-    ])
-      stone.push(coloured(p.rotateY(-a).translate(x, 0, z), STONE));
-  };
-  for (const g of isl.regions) {
-    const r = (CANAL_IN + CANAL_OUT) / 2;
-    bridge(Math.cos(g.mid) * r, Math.sin(g.mid) * r, g.mid, CANAL_OUT - CANAL_IN + 3, 4.2);
+  // arched bridges (v10, V10-D6): over the canal at every gate and over each river on both ring
+  // streets — a curved deck from short segments with parapets that follow it; the walker's height
+  // uses the same arch (shared bridgeLift), so feet stay on the deck
+  const SEG = 10;
+  for (const b of bridgesOf(isl)) {
+    const a = Math.atan2(b.dz, b.dx);
+    for (let k = 0; k < SEG; k++) {
+      const u0 = -b.span / 2 + (b.span * k) / SEG;
+      const u1 = u0 + b.span / SEG;
+      const h0 = archHeight(u0, b.span);
+      const h1 = archHeight(u1, b.span);
+      const len = Math.hypot(u1 - u0, h1 - h0) + 0.04;
+      const tilt = Math.atan2(h1 - h0, u1 - u0);
+      const um = (u0 + u1) / 2;
+      const hm = (h0 + h1) / 2;
+      for (const [w, dh, off] of [
+        [b.width, 0.34, 0],
+        [0.35, 0.75, b.width / 2],
+        [0.35, 0.75, -b.width / 2],
+      ] as const) {
+        const g = new THREE.BoxGeometry(len, dh, w)
+          .translate(0, dh === 0.34 ? -dh / 2 : dh / 2 - 0.1, off)
+          .rotateZ(tilt)
+          .translate(um, Y + hm, 0)
+          .rotateY(-a)
+          .translate(b.x, 0, b.z);
+        stone.push(coloured(g, STONE));
+      }
+    }
   }
-  for (const b of isl.bridges) bridge(b.x, b.z, b.a + Math.PI / 2, 7.5, ROAD + 1);
   // a low stone wall round the town, open at the gates and the rivers
   const open = [...isl.regions.map((g) => g.mid), ...isl.bridges.map((b) => b.a)];
   const WR = TOWN_R - 1.2;

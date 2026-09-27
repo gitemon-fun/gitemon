@@ -1,4 +1,4 @@
-import type { Shape } from '@gitemon/shared';
+import type { Gait, Shape } from '@gitemon/shared';
 
 /**
  * An art set is one half-body template per shape (the left half; it is mirrored). Each template
@@ -19,6 +19,8 @@ export interface PixelSprite {
   h: number;
   palette: string[];
   px: string;
+  /** v10 (V10-D5): palette indices of the marking colour, recoloured per player by their 2nd type */
+  accent?: number[];
 }
 
 export interface ArtSet {
@@ -29,6 +31,8 @@ export interface ArtSet {
   shapes: Record<Shape, string[]>;
   /** Designed species, keyed `${type}-${form}` (DECISIONS D25). When present, they win. */
   species?: Record<string, PixelSprite>;
+  /** v10 (V10-D3): how each species moves, keyed like `species`; absent = hop. */
+  gaits?: Record<string, Gait>;
   /** Big per-biome landmark sprites for the map, keyed by type. */
   landmarks?: Record<string, PixelSprite>;
 }

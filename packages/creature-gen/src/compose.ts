@@ -34,6 +34,8 @@ export interface Sprite {
   px: Uint8Array;
   /** RGB hex per palette index (index 0 unused) */
   palette: string[];
+  /** v10: palette indices of the marking colour (designed species only) */
+  accent?: number[];
 }
 
 // ---- colour helpers -------------------------------------------------------------------------
@@ -241,8 +243,12 @@ export function compose(art: ArtSet, p: SpriteParams): Sprite {
   return { size: SIZE, px: out, palette: paletteFor(p) };
 }
 
-/** RGBA pixels, scaled by an integer factor (nearest neighbour). */
-export function toRgba(sp: Sprite, scale = 1): Uint8ClampedArray<ArrayBuffer> {
+/**
+ * RGBA pixels, scaled by an integer factor (nearest neighbour). `accentAlpha` (v10, the map atlas)
+ * writes marking pixels with that alpha so the crowd shader can recolour them per player.
+ */
+export function toRgba(sp: Sprite, scale = 1, accentAlpha = 255): Uint8ClampedArray<ArrayBuffer> {
+  const marks = new Set(accentAlpha < 255 ? (sp.accent ?? []) : []);
   const n = sp.size * scale;
   const out = new Uint8ClampedArray(n * n * 4);
   const rgb = sp.palette.map(hexToRgb);
@@ -255,7 +261,7 @@ export function toRgba(sp: Sprite, scale = 1): Uint8ClampedArray<ArrayBuffer> {
       out[o] = c[0];
       out[o + 1] = c[1];
       out[o + 2] = c[2];
-      out[o + 3] = 255;
+      out[o + 3] = marks.has(i) ? accentAlpha : 255;
     }
   return out;
 }
@@ -308,6 +314,11 @@ function composeSpecies(src: PixelSprite, p: SpriteParams): Sprite {
   const dh = p.s ? 150 + (hv % 60) : ((hv % 21) - 10) * 1.2;
   const dl = p.s ? 0.04 : (((hv >>> 8) % 9) - 4) * 0.01;
   const palette = ['#000000', ...src.palette.slice(1).map((c) => shiftHex(c, dh, dl))];
+  // v10 (V10-D5): the markings take the colour of the player's second type, keeping their shading
+  const accent = src.accent ?? [];
+  if (p.t2 && p.t2 !== p.t1 && !p.sp)
+    for (const i of accent)
+      if (palette[i]) palette[i] = recolour(palette[i]!, TYPE_INFO[p.t2].colors[0]);
   const accBase = palette.length;
   palette.push(...ACC_COLORS.slice(1));
   const px = new Uint8Array(N * N);
@@ -351,5 +362,12 @@ function composeSpecies(src: PixelSprite, p: SpriteParams): Sprite {
       px[y * N + x] = accBase + Number(ch) - 1;
     }
   });
-  return { size: N, px, palette };
+  return { size: N, px, palette, accent };
+}
+
+/** `from`'s lightness in `to`'s hue and saturation (shading survives the recolour) */
+export function recolour(from: string, to: string): string {
+  const [, , l] = toHsl(hexToRgb(from));
+  const [h, s] = toHsl(hexToRgb(to));
+  return fromHsl(h, Math.max(0.35, s), l);
 }
