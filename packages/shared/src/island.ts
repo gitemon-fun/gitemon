@@ -270,10 +270,18 @@ export function island(
     );
     return inside ? 1 : 1 - smooth(0, 0.15, d); // 1 over the Tide Coast, fading out past its borders
   };
-  const coastR = (a: number) => {
+  const coastExact = (a: number) => {
     const lobes = vnoise(Math.cos(a) * 1.1 + 9, Math.sin(a) * 1.1 + 9, 41);
-    const bay = (lobes < 0 ? 30 : 14) * lobes * (1 - 1 * tideW(a));
+    const bay = (lobes < 0 ? 30 : 14) * lobes * (1 - tideW(a));
     return COAST + 11 * fbm(Math.cos(a) * 2.2 + 5, Math.sin(a) * 2.2 + 5, 23) + bay;
+  };
+  // the coast is read for every height sample: a table of 720 angles, interpolated (v8 perf)
+  const CT = 720;
+  const coastTab = Float32Array.from({ length: CT + 1 }, (_, k) => coastExact((k / CT) * TAU));
+  const coastR = (a: number) => {
+    const f = (wrap(a) / TAU) * CT;
+    const k = Math.floor(f);
+    return coastTab[k]! + (coastTab[k + 1]! - coastTab[k]!) * (f - k);
   };
   // v8: islets off the coast — small hills in the sea, sand and rock, nobody lives there
   const islets = Array.from({ length: 6 }, (_, k) => {

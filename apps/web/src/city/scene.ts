@@ -4,7 +4,6 @@ import { Walk, Walkable } from './walker';
 import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
 import { buildTown, type Town } from './town';
-import { loadPieces } from './models';
 import { airField } from './air';
 
 /**
@@ -638,6 +637,8 @@ export class CityScene {
   /** load the 3D models; each one replaces its code-built piece or sprite as it arrives */
   async addPieces(city: Island, placed: Placed[]) {
     const t0 = performance.now();
+    // the model loader is its own chunk: it is not needed for the first view
+    const { loadPieces } = await import('./models');
     const pcs = await loadPieces(city, placed);
     if (!pcs) return;
     this.scene.add(pcs.group);

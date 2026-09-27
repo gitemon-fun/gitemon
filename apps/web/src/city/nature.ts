@@ -154,13 +154,19 @@ export function terrain(isl: Island): THREE.Mesh {
     else {
       paint(reg, y, cx, cz, steep);
       // v8 (V8-D6): regions melt into each other over ~14 m instead of meeting at a hard seam —
-      // look round the face; where another region is near, take part of its colour
+      // look a few grid cells round the face (plain array reads: this runs for every face); where
+      // another region is near, take part of its colour
       let other = -9;
       let n = 0;
+      const W1 = N + 1;
+      const kx = k0 % W1;
+      const kz = (k0 - kx) / W1;
       for (let q = 0; q < 6; q++) {
-        const a = q * 1.047 + u(cx, cz, 11) * 1.0;
-        const rr = 4 + 10 * u(cx + q, cz, 13);
-        const g2 = gridRegion(isl.grid, cx + Math.cos(a) * rr, cz + Math.sin(a) * rr);
+        const a = q * 1.047 + u(cx, cz, 11);
+        const rr = 1.2 + 3 * u(cx + q, cz, 13); // cells (~3.4 m each)
+        const ix = Math.min(N, Math.max(0, Math.round(kx + Math.cos(a) * rr)));
+        const iz = Math.min(N, Math.max(0, Math.round(kz + Math.sin(a) * rr)));
+        const g2 = C[iz * W1 + ix]!;
         if (g2 >= 0 && g2 !== reg) {
           other = g2;
           n++;
