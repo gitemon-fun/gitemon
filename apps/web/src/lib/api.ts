@@ -98,6 +98,11 @@ export const api = {
   join: (id: number) => post<{ ok?: boolean; error?: string }>(`/api/towns/${id}/join`),
   leave: () => post<{ ok: boolean }>('/api/towns/leave'),
   logout: () => post<{ ok: boolean }>('/auth/logout'),
+  /** v9 guilds: per type — members, active this week, legends logged this week */
+  guilds: () =>
+    get<{ week: string; types: { t: string; members: number; active: number; legends: number }[] }>(
+      '/api/guilds',
+    ),
 };
 
 export const ERRORS: Record<string, string> = {

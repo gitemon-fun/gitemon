@@ -3,7 +3,7 @@ import { TOWN_Y, gridHeight, type Island, type Spot } from '@gitemon/shared';
 import { Walk, Walkable } from './walker';
 import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
-import { buildTown, type Town } from './town';
+import { buildTown, plotHeight, type Town } from './town';
 import { airField } from './air';
 
 /**
@@ -78,6 +78,7 @@ export class CityScene {
   private sun: THREE.DirectionalLight;
   private detail: THREE.Object3D[] = [];
   private town: Town | null = null;
+  private cityRef: Island | null = null;
   private bob: { obj: THREE.Object3D; y: number }[] = [];
   private air: ReturnType<typeof airField> | null = null;
   private labels = new THREE.Group();
@@ -347,11 +348,55 @@ export class CityScene {
         return;
       }
     }
+    // v9: a town building opens its panel
+    const k = this.buildingAt(px, py);
+    if (k >= 0 && this.onBuilding) {
+      this.onBuilding(k);
+      return;
+    }
     // tapping the ground zooms toward it
     const g = this.groundAt(px, py);
     // v6: a signed-in player's tap on the ground walks their Gitemon there
     if (g && this.onGround?.(g.x, g.z)) return;
     if (g) this.flyTo(g.x, g.z, Math.min(4, this.zoom * 2.2));
+  }
+
+  /** v9: set by the app — a town building was tapped (index into island.town) */
+  onBuilding: ((k: number) => void) | null = null;
+  private plotH: number[] = [];
+  /** which town building is under the tap: the tap's ray, tested at several heights of each one */
+  private buildingAt(px: number, py: number): number {
+    const city = this.walkCity ?? this.cityRef;
+    if (!city) return -1;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(
+      new THREE.Vector2(((px - r.left) / r.width) * 2 - 1, -((py - r.top) / r.height) * 2 + 1),
+      this.camera,
+    );
+    const hit = new THREE.Vector3();
+    let best = -1;
+    let bestD = Infinity;
+    city.town.forEach((p, k) => {
+      const h = this.plotH[k] ?? 8;
+      for (const t of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(p.y + h * t));
+        if (!ray.ray.intersectPlane(plane, hit)) continue;
+        const dx = hit.x - p.x;
+        const dz = hit.z - p.z;
+        const across = dx * p.fx + dz * p.fz;
+        const along = -dx * p.fz + dz * p.fx;
+        if (Math.abs(along) < p.w / 2 + 0.4 && Math.abs(across) < p.d / 2 + 0.4) {
+          const d = hit.distanceTo(this.camera.position);
+          if (d < bestD) {
+            bestD = d;
+            best = k;
+          }
+          break;
+        }
+      }
+    });
+    return best;
   }
 
   /** stop a resident where it is (used for ?focus=login) and return where it stopped */
@@ -392,6 +437,8 @@ export class CityScene {
     this.scene.add(this.air.points);
     this.buildLabels(city);
     this.groundGrid = city.grid;
+    this.cityRef = city;
+    this.plotH = city.town.map((p, k) => plotHeight(p.kind, homes.get(k)?.band ?? 0));
     const cam = this.sun.shadow.camera;
     const r = city.radius + 40;
     cam.left = cam.bottom = -r;
@@ -635,15 +682,16 @@ export class CityScene {
   // ---- sculpted pieces (v8 build 05) ---------------------------------------------------------------
 
   /** load the 3D models; each one replaces its code-built piece or sprite as it arrives */
-  async addPieces(city: Island, placed: Placed[]) {
+  async addPieces(city: Island, placed: Placed[], homes: Map<number, Home> = new Map()) {
     const t0 = performance.now();
     // the model loader is its own chunk: it is not needed for the first view
     const { loadPieces } = await import('./models');
-    const pcs = await loadPieces(city, placed);
+    const pcs = await loadPieces(city, placed, homes);
     if (!pcs) return;
     this.scene.add(pcs.group);
     if (pcs.monument && this.town) this.town.monument.visible = false;
     if (pcs.landmarks && this.town) for (const l of this.town.landmarks) l.visible = false;
+    if (pcs.town && this.town) this.town.plots.visible = false;
     for (const i of pcs.replaced) this.crowd?.hide(i);
     this.bob = pcs.bob;
     this.stats.piecesMs = Math.round(performance.now() - t0);

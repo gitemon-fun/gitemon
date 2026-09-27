@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import {
+  SERVICES,
   STREET_OUT,
   TOWN_R,
   TOWN_Y,
@@ -11,6 +12,8 @@ import {
   type Island,
 } from '@gitemon/shared';
 import type { Placed } from './crowd';
+import type { Home } from './load';
+import { plotHeight } from './town';
 
 /**
  * The 3D pieces (GRANDPLAN v8 §0 V8-D1, D3, D8; build file 05). Sculpted models from the private
@@ -19,7 +22,8 @@ import type { Placed } from './crowd';
  *
  *   the top 10 legends (a sealed one is a stone statue, a woken one is alive) · the monument ·
  *   one landmark per mini plaza · a giant wonder per region + a floating shrine near the town ·
- *   a gate at every town gate · three set pieces per region, away from the groups and the roads
+ *   a gate at every town gate · two set pieces per region, away from the groups and the roads ·
+ *   v9: the guild halls, Merit Houses and Town Services
  */
 
 type Key = string;
@@ -55,6 +59,8 @@ export interface Pieces {
   bob: { obj: THREE.Object3D; y: number }[];
   landmarks: boolean;
   monument: boolean;
+  /** v9: the town's buildings arrived (the placeholder boxes can go) */
+  town: boolean;
 }
 
 const cache = new Map<Key, Promise<THREE.Group | null>>();
@@ -76,12 +82,23 @@ function load(loader: GLTFLoader, key: Key): Promise<THREE.Group | null> {
   return p;
 }
 
-/** a copy of a model, standing on its base, scaled to `h` metres, facing `yaw` (front = +Z) */
-function place(src: THREE.Group, h: number, x: number, y: number, z: number, yaw: number) {
+/**
+ * a copy of a model, standing on its base, scaled to `h` metres (and no wider than `maxW` across its
+ * footprint, so a wide manor cannot spill onto its neighbour), facing `yaw` (front = +Z)
+ */
+function place(
+  src: THREE.Group,
+  h: number,
+  x: number,
+  y: number,
+  z: number,
+  yaw: number,
+  maxW = Infinity,
+) {
   const o = src.clone(true);
   const box = new THREE.Box3().setFromObject(o);
   const size = box.getSize(new THREE.Vector3());
-  const s = h / Math.max(0.001, size.y);
+  const s = Math.min(h / Math.max(0.001, size.y), maxW / Math.max(0.001, size.x, size.z));
   o.scale.setScalar(s);
   o.position.set(x, y - box.min.y * s, z);
   o.rotation.y = yaw;
@@ -139,7 +156,11 @@ function openSpot(
   return best && best[2] > 4 ? best : null;
 }
 
-export async function loadPieces(isl: Island, placed: Placed[]): Promise<Pieces | null> {
+export async function loadPieces(
+  isl: Island,
+  placed: Placed[],
+  homes: Map<number, Home> = new Map(),
+): Promise<Pieces | null> {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   // no art set here (a fresh clone): keep the code-built world
@@ -147,7 +168,14 @@ export async function loadPieces(isl: Island, placed: Placed[]): Promise<Pieces 
   if (!probe?.ok) return null;
 
   const group = new THREE.Group();
-  const out: Pieces = { group, replaced: [], bob: [], landmarks: false, monument: false };
+  const out: Pieces = {
+    group,
+    replaced: [],
+    bob: [],
+    landmarks: false,
+    monument: false,
+    town: false,
+  };
   const jobs: Promise<void>[] = [];
   const put = (
     key: Key,
@@ -157,11 +185,12 @@ export async function loadPieces(isl: Island, placed: Placed[]): Promise<Pieces 
     z: number,
     yaw: number,
     then?: (o: THREE.Object3D) => void,
+    maxW = Infinity,
   ) =>
     jobs.push(
       load(loader, key).then((src) => {
         if (!src) return;
-        const o = place(src, h, x, y, z, yaw);
+        const o = place(src, h, x, y, z, yaw, maxW);
         group.add(o);
         then?.(o);
       }),
@@ -202,18 +231,43 @@ export async function loadPieces(isl: Island, placed: Placed[]): Promise<Pieces 
 
   // ---- the monument and the landmarks (replace the code-built ones once they arrive) ----
   put('monument', HEIGHT.monument!, 0, TOWN_Y, 0, Math.PI / 4, () => (out.monument = true));
+  // v9 (V9-D6): each mini plaza's centrepiece is its region's set piece; the landmarks moved into
+  // town as the guild halls
   for (const l of isl.landmarks) {
     const climate = isl.regions[l.region]!.climate;
     put(
-      `lm-${climate}`,
-      HEIGHT.landmark!,
+      `set-${climate}`,
+      9,
       l.x,
       l.y - 0.2,
       l.z,
       facing(-l.x, -l.z),
       () => (out.landmarks = true),
+      9,
     );
   }
+
+  // ---- v9 the town: guild halls, Merit Houses by their holder's band, the six services ----
+  isl.town.forEach((p, k) => {
+    const band = homes.get(k)?.band ?? 0;
+    const key =
+      p.kind === 'hall'
+        ? `lm-${isl.regions[p.region]!.climate}`
+        : p.kind === 'service'
+          ? `svc-${SERVICES[p.slot]!}`
+          : `house-${band + 1}`;
+    const h = plotHeight(p.kind, band);
+    put(
+      key,
+      h,
+      p.x,
+      p.y,
+      p.z,
+      Math.atan2(p.fx, p.fz),
+      () => (out.town = true),
+      p.w + (p.kind === 'hall' ? 1.5 : 0.6),
+    );
+  });
 
   // ---- gates: one at every region's gate in the town wall, facing out ----
   for (const g of isl.regions) {
@@ -268,9 +322,9 @@ export async function loadPieces(isl: Island, placed: Placed[]): Promise<Pieces 
     );
   }
 
-  // ---- set pieces: three per region, in open ground ----
+  // ---- set pieces: two per region in open ground (the third is the mini plaza centrepiece) ----
   isl.regions.forEach((g, i) => {
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < 2; k++) {
       const s = openSpot(isl, i, TOWN_R + 40, coastAt(isl, g.mid) - 18, taken, 22, `set${i}:${k}`);
       if (!s) continue;
       taken.push([s[0], s[1]]);

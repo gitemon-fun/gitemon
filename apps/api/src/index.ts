@@ -14,6 +14,7 @@ import {
   legendOfDayRank,
   nextStreak,
   walkBudget,
+  weekStart,
   SIGN_TEMPLATES,
   cleanProject,
   type Snapshot,
@@ -360,6 +361,31 @@ app.get('/api/city', (c) =>
       value: string;
     }>();
     return c.json({ g: rows, l: legends, layout: layout ? JSON.parse(layout.value) : null });
+  }),
+);
+
+/**
+ * v9 guilds (V9-D2, V9-D7): per type, how many joined players there are, how many were active this
+ * week (walked or logged a legend) and how many legends they logged this week. Counts only — the map
+ * already shows who is who, and sealed or hidden players are never in these rows.
+ */
+app.get('/api/guilds', (c) =>
+  edgeCached(c, 600, async () => {
+    const week = weekStart();
+    const rows = await c.env.DB.prepare(
+      `SELECT g.t1 AS t, COUNT(*) AS members,
+              SUM(CASE WHEN p.walk_day >= ?1
+                    OR EXISTS (SELECT 1 FROM legend_seen s WHERE s.player_id = p.id AND s.day >= ?1)
+                  THEN 1 ELSE 0 END) AS active,
+              (SELECT COUNT(*) FROM legend_seen s JOIN gitemon g2 ON g2.id = s.player_id
+                WHERE s.day >= ?1 AND g2.t1 = g.t1 AND g2.hidden = 0) AS legends
+       FROM players p JOIN gitemon g ON g.id = p.id
+       WHERE g.hidden = 0 AND g.status = 'claimed'
+       GROUP BY g.t1`,
+    )
+      .bind(week)
+      .all<{ t: string; members: number; active: number; legends: number }>();
+    return c.json({ week, types: rows.results });
   }),
 );
 
@@ -821,12 +847,19 @@ app.get('/internal/layout-day', async (c) => {
 
 /** v6 daily job: the day's frozen layout + every legend's spot (one JSON parameter per statement). */
 app.post('/internal/layout', async (c) => {
-  const { day, pops, specials, spots } = await c.req.json<{
+  const { day, pops, specials, spots, houses } = await c.req.json<{
     day: string;
     pops: Record<string, number>;
     specials: Record<string, { mini: number; rare: number }>;
     spots: { key: string; x: number; z: number }[];
+    /** v9 (V9-D3): today's Merit House holders, region → 3 ids (0 = empty) */
+    houses?: number[][];
   }>();
+  const cleanHouses = Array.isArray(houses)
+    ? houses
+        .slice(0, 9)
+        .map((r) => (Array.isArray(r) ? r.slice(0, 3).map((id) => Number(id) || 0) : [0, 0, 0]))
+    : null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return c.json({ error: 'bad-day' }, 400);
   const db = c.env.DB;
   // v7: climbing into the tiers is on only once calibrated (V7-D3, §5) — carried into every day
@@ -839,7 +872,13 @@ app.post('/internal/layout', async (c) => {
         "INSERT INTO meta (key, value) VALUES ('layout', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       )
       .bind(
-        JSON.stringify({ day, pops, specials, calibration: cal ? JSON.parse(cal.value) : null }),
+        JSON.stringify({
+          day,
+          pops,
+          specials,
+          calibration: cal ? JSON.parse(cal.value) : null,
+          houses: cleanHouses,
+        }),
       ),
     db
       .prepare(

@@ -90,17 +90,13 @@ describe('island layout', () => {
     }
   });
 
-  it('keeps the plaza inside the canal and doors next to their houses, nearest first', () => {
+  it('keeps the plaza inside the canal and every town door in front of its building (v9)', () => {
     for (const s of isl.plaza) expect(Math.hypot(s.x, s.z)).toBeLessThan(PLAZA_R);
-    isl.doors.forEach((door, k) => {
-      const lot = isl.lots[isl.doorLots[k]!]!;
-      expect(lot.house).toBe(true);
-      expect(Math.hypot(door.x - lot.x, door.z - lot.z)).toBeLessThan(lot.depth);
-      if (k)
-        expect(Math.round(Math.hypot(door.x, door.z))).toBeGreaterThanOrEqual(
-          Math.round(Math.hypot(isl.doors[k - 1]!.x, isl.doors[k - 1]!.z)),
-        );
-    });
+    for (const p of isl.town) {
+      expect(Math.hypot(p.door.x - p.x, p.door.z - p.z)).toBeLessThan(p.d);
+      // the door is on the front side
+      expect((p.door.x - p.x) * p.fx + (p.door.z - p.z) * p.fz).toBeGreaterThan(0);
+    }
   });
 
   it('gives every special a place: monument, plinths, legend ring, mini plazas (V5-D6)', () => {

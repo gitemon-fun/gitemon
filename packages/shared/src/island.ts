@@ -27,7 +27,8 @@ export const ROW = 5.6;
 export const WALK = 3.6;
 /** town streets (ring roads) and house rows */
 export const STREET_IN = 48;
-export const STREET_OUT = 64.6;
+/** v9: moved out 3 m so the belt holds two rows of detached buildings (V9-D5) */
+export const STREET_OUT = 67.5;
 
 export type ClimateId =
   'frost' | 'marsh' | 'bloom' | 'tide' | 'jungle' | 'volcano' | 'canyon' | 'crystal' | 'savanna';
@@ -78,6 +79,36 @@ export interface Lot {
   band: number;
 }
 
+/** v9 (V9-D1): the Town Services round the plaza, in their fixed order */
+export const SERVICES = [
+  'legend-hall',
+  'dex-library',
+  'notice-board',
+  'gate-office',
+  'market',
+  'inn',
+] as const;
+export type ServiceId = (typeof SERVICES)[number];
+
+/** v9: a detached town building — a guild hall, a Merit House or a Town Service */
+export interface TownPlot {
+  kind: 'hall' | 'house' | 'service';
+  /** hall / house: its region; service: -1 */
+  region: number;
+  /** house: 0..2 within its region; service: index in SERVICES; hall: 0 */
+  slot: number;
+  x: number;
+  z: number;
+  y: number;
+  /** width along the street, depth across it (m) */
+  w: number;
+  d: number;
+  /** unit vector the front faces (toward its street) */
+  fx: number;
+  fz: number;
+  door: Spot;
+}
+
 export interface Region {
   climate: ClimateId;
   name: string;
@@ -111,9 +142,8 @@ export interface Island {
   plaza: Spot[];
   /** per type (BIOME_ORDER index): wild habitats, or the industrial quarter for machine */
   spots: Spot[][];
-  /** town house doors, nearest the plaza first; doorLots[k] = its plot in `lots` */
-  doors: Spot[];
-  doorLots: number[];
+  /** v9: the detached town buildings (9 halls, 27 Merit Houses, 6 services) */
+  town: TownPlot[];
   habitats: Habitat[];
   landmarks: { t: TypeId; region: number; x: number; z: number; y: number }[];
   /** v5: The Origin's spot on the monument, the two Guardians' plinths, Legendary 4–10's ring */
@@ -506,7 +536,6 @@ export function island(
 
   // ---- the town: plaza, two rows of houses between two ring streets, gates, machine quarter --------
   const lots: Lot[] = [];
-  const doors: (Spot & { lot: number })[] = [];
   const gaps: { a: number; half: number }[] = [
     ...regions.map((g) => ({ a: g.mid, half: 5 })),
     ...regions.filter((g, i) => regions[(i + N - 1) % N]!.river).map((g) => ({ a: g.a0, half: 6 })),
@@ -540,6 +569,8 @@ export function island(
         const seed = hash32(`town${band}:${k}:${s}`);
         const corner = s === 0 || s === widths.length - 1;
         const inQuarter = band === 1 && wrap(a - quarter.a0) < wrap(quarter.a1 - quarter.a0);
+        // v9: the row houses are gone; only the machine quarter keeps its kit workshops
+        if (!inQuarter) return;
         const region = regionOf(TOWN_R + 1, a);
         const skinType = inQuarter ? 'machine' : regions[region]!.types[0]!;
         const storeys = Math.min(3, 1 + band + (rnd(`${seed}st`) < 0.5 ? 1 : 0) + (corner ? 1 : 0));
@@ -556,36 +587,78 @@ export function island(
               ? Math.max(lots[prev]!.storeys - 1, Math.min(lots[prev]!.storeys + 1, storeys))
               : storeys,
           d: BIOME_ORDER.indexOf(skinType),
-          house: !corner && !inQuarter,
+          house: false,
           corner,
           seed,
           prev,
           band,
         });
         prev = lots.length - 1;
-        if (!corner && !inQuarter) {
-          const [dx, dz] = polar(rC + face * (ROW / 2 + 0.9), a);
-          doors.push({
-            x: dx,
-            z: dz,
-            y: TOWN_Y,
-            d: -1,
-            kind: 'door',
-            tx: 0,
-            tz: 0,
-            lot: lots.length - 1,
-          });
-        }
       });
     });
   }
-  // doors nearest the plaza first (inner row), then round the ring from the top of the screen
+  // ---- v9: the detached town (V9-D1, V9-D5) — halls + services face the plaza street (inner row),
+  // Merit Houses face the outer street (outer row); each is packed as near its wish as it fits
+  const town: TownPlot[] = [];
+  const ROW_IN = STREET_IN + ROAD / 2 + SW + ROW / 2;
+  const ROW_OUT = STREET_OUT - ROAD / 2 - SW - ROW / 2;
+  const taken: Record<'in' | 'out', { a: number; half: number }[]> = { in: [], out: [] };
+  // the gate streets are 3.5 m wide: detached buildings may stand closer to them than the old rows
+  for (const g of gaps) {
+    taken.in.push({ a: g.a, half: (g.half - 0.7) / ROW_IN });
+    taken.out.push({ a: g.a, half: (g.half - 0.7) / ROW_OUT });
+  }
+  const qMid = quarter.a0 + wrap(quarter.a1 - quarter.a0) / 2;
+  taken.out.push({ a: qMid, half: wrap(quarter.a1 - quarter.a0) / 2 + 1 / ROW_OUT });
+  const fits = (row: 'in' | 'out', a: number, half: number) =>
+    taken[row].every((t) => Math.abs(wrap(a - t.a + Math.PI) - Math.PI) >= t.half + half);
+  const put = (
+    kind: TownPlot['kind'],
+    region: number,
+    slot: number,
+    row: 'in' | 'out',
+    want: number,
+    w: number,
+  ) => {
+    const r = row === 'in' ? ROW_IN : ROW_OUT;
+    const half = (w / 2 + 0.6) / r;
+    for (let off = 0; off < 200; off += 0.5)
+      for (const sgn of off ? [1, -1] : [1]) {
+        const a = want + (sgn * off) / r;
+        if (!fits(row, a, half)) continue;
+        taken[row].push({ a, half });
+        const face = row === 'in' ? -1 : 1;
+        const [x, z] = polar(r, a);
+        const [dx, dz] = polar(r + face * (ROW / 2 + 0.9), a);
+        town.push({
+          kind,
+          region,
+          slot,
+          x,
+          z,
+          y: TOWN_Y,
+          w,
+          d: ROW,
+          fx: Math.cos(a) * face,
+          fz: Math.sin(a) * face,
+          door: { x: dx, z: dz, y: TOWN_Y, d: -1, kind: 'door', tx: 0, tz: 0 },
+        });
+        return;
+      }
+  };
+  // a guild hall just clockwise of each region's gate (V9-D2)
+  regions.forEach((g, i) => put('hall', i, 0, 'in', g.mid + (4.3 + 4.5 + 0.6) / ROW_IN, 9));
+  // the six services spread round the plaza, between the halls (V9-D4)
   const topA = -Math.PI * 0.75;
-  doors.sort(
-    (p, q) =>
-      Math.round(Math.hypot(p.x, p.z)) - Math.round(Math.hypot(q.x, q.z)) ||
-      wrap(Math.atan2(p.z, p.x) - topA) - wrap(Math.atan2(q.z, q.x) - topA),
-  );
+  SERVICES.forEach((_, k) => put('service', -1, k, 'in', topA + ((k + 0.5) / 6) * TAU, 7.5));
+  // three Merit Houses per region on the outer row round its gate: clockwise, anticlockwise, clockwise
+  regions.forEach((g, i) => {
+    const step = 6.8;
+    [1, -1, 1].forEach((side, k) => {
+      const n = k === 2 ? 1 : 0;
+      put('house', i, k, 'out', g.mid + (side * (4.3 + 2.8 + 0.6 + n * step)) / ROW_OUT, 5.6);
+    });
+  });
   // bridges where a river border crosses the town streets
   const bridges: Island['bridges'] = [];
   regions.forEach((g, i) => {
@@ -827,8 +900,7 @@ export function island(
     lots,
     plaza,
     spots,
-    doors: doors.map((p) => ({ x: p.x, z: p.z, y: p.y, d: p.d, kind: p.kind, tx: p.tx, tz: p.tz })),
-    doorLots: doors.map((p) => p.lot),
+    town,
     habitats,
     landmarks,
     monument,

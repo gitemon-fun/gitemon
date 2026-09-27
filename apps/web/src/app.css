@@ -569,3 +569,31 @@ h2 {
     bottom: 290px;
   }
 }
+/* v9 building panels */
+.guild-top {
+  margin: 8px 0 0;
+  padding-left: 22px;
+}
+.guild-top li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.linkish {
+  border: 0;
+  background: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.board {
+  padding-left: 18px;
+  max-height: 40vh;
+  overflow: auto;
+}

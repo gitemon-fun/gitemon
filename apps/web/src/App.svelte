@@ -10,7 +10,17 @@
   import { api, ERRORS, type Detail, type Me, type Town } from './lib/api';
   import { CityScene } from './city/scene';
   import { loadCity, type LoadedCity } from './city/load';
-  import { CATCH_M, IDLE_MS, SIGHT_M, SIGN_TEMPLATES, signText } from '@gitemon/shared';
+  import {
+    CATCH_M,
+    IDLE_MS,
+    SIGHT_M,
+    SIGN_TEMPLATES,
+    SERVICES,
+    guildOf,
+    signText,
+    type TownPlot,
+  } from '@gitemon/shared';
+  import { plotName } from './city/town';
   import Sprite from './lib/Sprite.svelte';
   import Hud from './lib/Hud.svelte';
 
@@ -81,6 +91,7 @@
   }
 
   async function select(g: MapGitemon | null) {
+    if (g) building = null;
     picked = g;
     detail = null;
     if (!g) {
@@ -138,6 +149,72 @@
     } finally {
       searching = false;
     }
+  }
+
+  // ---- v9: the town's buildings (GRANDPLAN v9) ----------------------------------------------------
+
+  let building = $state<number | null>(null);
+  let guildWeek = $state<Record<
+    string,
+    { members: number; active: number; legends: number }
+  > | null>(null);
+  const plotAt = (k: number): TownPlot | null => town?.city.town[k] ?? null;
+  const plot = $derived<TownPlot | null>(building != null ? plotAt(building) : null);
+  async function openBuilding(k: number) {
+    picked = null;
+    detail = null;
+    scene?.select(null);
+    building = k;
+    const p = town?.city.town[k];
+    if (p?.kind === 'hall' && !guildWeek) {
+      try {
+        const r = await api.guilds();
+        guildWeek = Object.fromEntries(r.data.types.map((x) => [x.t, x]));
+      } catch {
+        /* the week's numbers are extra: the hall still shows its members */
+      }
+    }
+  }
+  /** a guild's joined players (its region's types), best merit first */
+  function guildMembers(region: number) {
+    if (!town) return [];
+    return town.placed
+      .map((p) => p.g)
+      .filter((g) => g.st === 'c' && !g.special?.sealed && guildOf(g.t1) === region)
+      .sort((a, b) => (b.m ?? 0) - (a.m ?? 0));
+  }
+  function guildTotals(region: number) {
+    const types = town?.city.regions[region]?.types ?? [];
+    const t = { members: 0, active: 0, legends: 0 };
+    for (const ty of types) {
+      const x = guildWeek?.[ty];
+      if (x) {
+        t.members += x.members;
+        t.active += x.active;
+        t.legends += x.legends;
+      }
+    }
+    return t;
+  }
+  /** the guild's place this week, by active members (V9-D7) */
+  function guildRank(region: number) {
+    if (!town || !guildWeek) return null;
+    const all = town.city.regions.map((_, i) => guildTotals(i).active);
+    return 1 + all.filter((a) => a > all[region]!).length;
+  }
+  /** every Merit House sign, for the Notice Board (V9-D4) */
+  function boardSigns() {
+    if (!town) return [];
+    const out: { login: string; text: string; region: string }[] = [];
+    town.city.town.forEach((p, k) => {
+      const h = town!.homes.get(k);
+      if (p.kind !== 'house' || !h?.sign) return;
+      const [tpl, project] = h.sign.split('|');
+      const text = signText(tpl ?? '', project || null);
+      const g = town!.byId.get(h.id)?.g;
+      if (text && g) out.push({ login: g.login, text, region: town!.city.regions[p.region]!.name });
+    });
+    return out;
   }
 
   // ---- v6: walking (V6-D1…D6) ------------------------------------------------------------------
@@ -328,6 +405,7 @@
 
   onMount(() => {
     scene = new CityScene(host, (p) => select(p ? p.g : null));
+    scene.onBuilding = (k) => void openBuilding(k);
     if (location.search.includes('debug')) (window as unknown as { city: CityScene }).city = scene;
     window.addEventListener('popstate', route);
     route();
@@ -345,7 +423,7 @@
       scene!.build(loadedCity.city, loadedCity.homes);
       // ?walkdemo: a stand-in walker at the first town door, to try walking before signing in
       if (demo && !me) {
-        const door = loadedCity.city.doors[0]!;
+        const door = loadedCity.city.town.find((p) => p.kind === 'house')!.door;
         loadedCity.placed.push({
           g: {
             id: -999,
@@ -369,7 +447,7 @@
       scene!.stage(loadedCity.city, loadedCity.placed, loadedCity.today ?? null);
       // v8: the sculpted pieces arrive after the first view (build file 05)
       const lc = loadedCity;
-      setTimeout(() => scene?.addPieces(lc.city, lc.placed), 400);
+      setTimeout(() => scene?.addPieces(lc.city, lc.placed, lc.homes), 400);
       startWalking(loadedCity);
       scene!.fitCity(loadedCity.city.radius);
       loaded = true;
@@ -478,7 +556,118 @@
   </div>
 {/if}
 
-{#if picked?.special?.sealed}
+{#if plot && town && building != null}
+  <section class="sheet" aria-label={plotName(town.city, plot)}>
+    <button class="close" onclick={() => (building = null)} aria-label="Close">×</button>
+    <h2>{plotName(town.city, plot)}</h2>
+    {#if plot.kind === 'hall'}
+      {@const members = guildMembers(plot.region)}
+      {@const tot = guildTotals(plot.region)}
+      {@const rank = guildRank(plot.region)}
+      <p class="dim">
+        {town.city.regions[plot.region]!.types.map((t) => TYPE_INFO[t].name).join(' + ')} · every
+        {town.city.regions[plot.region]!.types.map((t) => TYPE_INFO[t].name).join(' and ')} Gitemon belongs
+        here.
+      </p>
+      <p>
+        <b>{members.length}</b> members on the map{#if guildWeek}
+          · <b>{tot.active}</b> active this week{#if rank}
+            (#{rank} of 9){/if} · <b>{tot.legends}</b>
+          legends logged this week{/if}.
+      </p>
+      <p class="dim small">
+        Guilds compete on how many members walk or log a legend each week — not on raw volume.
+      </p>
+      {#if members.length}
+        <ol class="guild-top">
+          {#each members.slice(0, 10) as g (g.id)}
+            <li>
+              <button class="linkish" onclick={() => ((building = null), show(g, 3))}
+                ><Sprite {g} size={28} /> {g.login}</button
+              >
+              <span class="dim">merit {(g.m ?? 0).toFixed(0)}</span>
+            </li>
+          {/each}
+        </ol>
+      {:else}
+        <p class="dim">No members yet. Sign in with GitHub to be the first.</p>
+      {/if}
+    {:else if plot.kind === 'house'}
+      {@const h = town.homes.get(building)}
+      {@const g = h ? town.byId.get(h.id)?.g : undefined}
+      {#if g}
+        <p>
+          The home of <b>{g.login}</b>, one of the top 3 in {town.city.regions[plot.region]!.name} by
+          merit.
+        </p>
+        <button class="primary" onclick={() => ((building = null), show(g, 3))}
+          >See their Gitemon</button
+        >
+      {:else}
+        <p>
+          Empty for now. It goes to one of the top 3 players by merit in {town.city.regions[
+            plot.region
+          ]!.name} — consistent GitHub work: active days, merged pull requests, reviews. You keep it while
+          you stay in the top 5.
+        </p>
+      {/if}
+    {:else}
+      {@const svc = SERVICES[plot.slot]}
+      {#if svc === 'legend-hall'}
+        <p>
+          The island's 500 sealed legends. Walk near one to log it; stand near the legend of the day
+          to be blessed for 6 hours.
+        </p>
+        {#if me}<p><b>Your Legend Log:</b> {me.walk.seen.length} of 500 seen.</p>{:else}<p
+            class="dim"
+          >
+            Sign in to keep a Legend Log.
+          </p>{/if}
+      {:else if svc === 'dex-library'}
+        <p>Every Gitemon you catch goes into your Dex.</p>
+        {#if me}<button class="primary" onclick={() => ((building = null), go('/dex'))}
+            >Open your Dex</button
+          >{:else}<p class="dim">Sign in to start a Dex.</p>{/if}
+      {:else if svc === 'notice-board'}
+        {@const signs = boardSigns()}
+        <p>
+          Signs from the Merit Houses — what the island's best are working on, and who is hiring.
+        </p>
+        {#if signs.length}
+          <ul class="board">
+            {#each signs as sg}<li>
+                <b>{sg.login}</b> <span class="dim">({sg.region})</span> — {sg.text}
+              </li>{/each}
+          </ul>
+        {:else}<p class="dim">No signs yet.</p>{/if}
+      {:else if svc === 'gate-office'}
+        {#if me}
+          <p>
+            <b>Steps today:</b>
+            {Math.round(Math.max(0, me.walk.budget - walked))} of {me.walk.budget} m left{#if me.walk.streak}
+              · <b>Streak:</b> {me.walk.streak} {me.walk.streak === 1 ? 'day' : 'days'}{/if}
+          </p>
+        {/if}
+        <p class="dim">
+          Real GitHub work — merged pull requests, reviews, active weeks — earns more steps. Walking
+          home is free.
+        </p>
+      {:else if svc === 'market'}
+        <p>
+          Closed for now. Cosmetic skins for your Gitemon will be sold here later — looks only,
+          never power.
+        </p>
+      {:else}
+        <p>
+          Welcome to Gitemon Island. Sign in with GitHub and your Gitemon hatches. Tap the map to
+          walk, or steer with WASD, the arrow keys or the stick. Find the sealed legends; catch
+          other developers.
+        </p>
+        {#if !me}<a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a>{/if}
+      {/if}
+    {/if}
+  </section>
+{:else if picked?.special?.sealed}
   <section class="sheet sealed" aria-label="A sealed legend">
     <button
       class="close"

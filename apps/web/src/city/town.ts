@@ -13,8 +13,11 @@ import {
   TOWN_Y,
   hash32,
   signText,
+  SERVICES,
   type Island,
   type Lot,
+  type ServiceId,
+  type TownPlot,
 } from '@gitemon/shared';
 import { Batch, PARTS, PITCH, PROPS, ROOFS, ROUND, type RoofId } from './kit';
 import { SKINS, landmark, monument, type Skin } from './buildings';
@@ -48,6 +51,8 @@ export interface Town {
   /** v8 build 04: the water (its shader has a clock) and the height grid as a texture */
   water: THREE.Mesh;
   grid: THREE.DataTexture;
+  /** v9: plain boxes for the town buildings, hidden once their sculpted models arrive */
+  plots: THREE.InstancedMesh;
 }
 
 export function buildTown(isl: Island, homes: Map<number, Home>, onLater?: () => void): Town {
@@ -71,8 +76,13 @@ export function buildTown(isl: Island, homes: Map<number, Home>, onLater?: () =>
   const lights = new Batch();
   const props = new Batch();
   const signs: SignSpot[] = [];
-  buildings(isl, homes, main, facade, lights, signs);
+  // v9: kit buildings only for the machine quarter; the town's own buildings are detached plots
+  buildings(isl, new Map(), main, facade, lights, signs);
+  signs.push(...townSigns(isl, homes));
   for (const sg of signs) group.add(signMesh(sg));
+  const plots = plotBoxes(isl, homes);
+  group.add(plots);
+  add(townLabels(isl), true);
   townFurniture(isl, props, lights, main);
   add(main.meshes(lit, { cast: true, receive: true }));
   add(facade.meshes(lit, { receive: true }), true);
@@ -102,7 +112,108 @@ export function buildTown(isl: Island, homes: Map<number, Home>, onLater?: () =>
   mon.position.y = TOWN_Y;
   mon.castShadow = mon.receiveShadow = true;
   group.add(mon);
-  return { group, detail, monument: mon, landmarks: marks, water: wat, grid };
+  return { group, detail, monument: mon, landmarks: marks, water: wat, grid, plots };
+}
+
+// ---- v9 town (GRANDPLAN v9 §4) ------------------------------------------------------------------
+
+/** how tall each town building stands (m); a Merit House by its holder's band (V7-D6) */
+export const plotHeight = (kind: TownPlot['kind'], band = 0) =>
+  kind === 'hall' ? 15 : kind === 'service' ? 9 : [6, 8.5, 11][band]!;
+
+/** the owner's sign over each Merit House door; an empty one says who it is for (V9-Q3) */
+function townSigns(isl: Island, homes: Map<number, Home>): SignSpot[] {
+  const out: SignSpot[] = [];
+  isl.town.forEach((p, k) => {
+    if (p.kind !== 'house') return;
+    const home = homes.get(k);
+    let text: string | null;
+    if (home) {
+      const [tpl, project] = (home.sign ?? '').split('|');
+      text = home.sign ? signText(tpl ?? '', project || null) : null;
+    } else text = `For the top 3 of ${isl.regions[p.region]!.name}`;
+    if (!text) return;
+    const band = home?.band ?? 0;
+    out.push({
+      x: p.x + p.fx * (p.d / 2 + 0.2),
+      y: p.y + 2.4 + band * 0.5,
+      z: p.z + p.fz * (p.d / 2 + 0.2),
+      theta: Math.atan2(p.fx, p.fz),
+      text,
+      w: Math.min(p.w * 0.95, 3.4 + band * 0.7),
+    });
+  });
+  return out;
+}
+
+/** one instanced box per town building: the fallback until (or without) the sculpted models */
+function plotBoxes(isl: Island, homes: Map<number, Home>): THREE.InstancedMesh {
+  const mesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
+    new THREE.MeshLambertMaterial(),
+    isl.town.length,
+  );
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const up = new THREE.Vector3(0, 1, 0);
+  const c = new THREE.Color();
+  isl.town.forEach((p, k) => {
+    const h = plotHeight(p.kind, homes.get(k)?.band ?? 0);
+    q.setFromAxisAngle(up, Math.atan2(p.fx, p.fz));
+    m.compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(p.w, h * 0.7, p.d));
+    mesh.setMatrixAt(k, m);
+    mesh.setColorAt(
+      k,
+      c.set(p.kind === 'hall' ? '#c9b48e' : p.kind === 'service' ? '#d7c9a8' : '#e6dccb'),
+    );
+  });
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+}
+
+/** names over the halls and services, seen close up (they tell you what a building is for) */
+const SERVICE_NAME: Record<ServiceId, string> = {
+  'legend-hall': 'Legend Hall',
+  'dex-library': 'Dex Library',
+  'notice-board': 'Notice Board',
+  'gate-office': 'Town Gate',
+  market: 'Market',
+  inn: 'Inn',
+};
+export const plotName = (isl: Island, p: TownPlot) =>
+  p.kind === 'hall'
+    ? `${isl.regions[p.region]!.name} Guild`
+    : p.kind === 'service'
+      ? SERVICE_NAME[SERVICES[p.slot]!]
+      : `${isl.regions[p.region]!.name} Merit House`;
+
+function townLabels(isl: Island): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  for (const p of isl.town) {
+    if (p.kind === 'house') continue;
+    const text = plotName(isl, p);
+    const c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 80;
+    const ctx = c.getContext('2d')!;
+    ctx.font = '700 44px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 9;
+    ctx.strokeStyle = 'rgba(40,32,24,0.85)';
+    ctx.strokeText(text, 256, 42);
+    ctx.fillStyle = p.kind === 'hall' ? '#ffe7a6' : '#ffffff';
+    ctx.fillText(text, 256, 42);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }),
+    );
+    sp.scale.set(10, 1.56, 1);
+    sp.position.set(p.x, p.y + plotHeight(p.kind) + 1.8, p.z);
+    out.push(sp);
+  }
+  return out;
 }
 
 /** a house sign: white board, dark words, drawn once on a small canvas */

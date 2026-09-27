@@ -38,11 +38,15 @@ describe('steering collision (v8 G4)', () => {
     expect(w.walkable(...at(mid, g.mid))).toBe(true);
     expect(w.walkable(...at(mid, g.mid + 0.35))).toBe(false);
   });
-  it('passes the rows of houses only through the gates', () => {
-    const g = isl.regions[2]!;
-    const row = (STREET_IN + STREET_OUT) / 2;
-    expect(w.walkable(...at(row, g.mid))).toBe(true);
-    expect(w.walkable(...at(row, g.mid + (g.a1 - g.a0) * 0.3))).toBe(false);
+  it('walks the town belt between buildings, never through one (v9)', () => {
+    for (const p of isl.town) expect(w.walkable(p.x, p.z)).toBe(false);
+    // open garden ground in the belt: a point in the inner row with no building on it
+    let open = 0;
+    for (let k = 0; k < 360; k++) {
+      const [x, z] = at((STREET_IN + STREET_OUT) / 2 - 3, (k / 360) * Math.PI * 2);
+      if (w.walkable(x, z)) open++;
+    }
+    expect(open).toBeGreaterThan(40);
   });
   it('can walk out of the town onto the land', () => {
     const g = isl.regions[8]!;

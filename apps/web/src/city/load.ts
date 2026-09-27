@@ -5,6 +5,7 @@ import {
   dayShuffle,
   island,
   legendOfDayRank,
+  meritHouses,
   type Island,
   type MapGitemon,
   type Shape,
@@ -95,9 +96,11 @@ export interface DayLayout {
   specials: Partial<Record<TypeId, { mini: number; rare: number }>>;
   /** v7: merit lines for climbing into each tier; absent = climbing off (V7-D3, §5) */
   calibration?: Partial<Record<'legendary' | 'mythic' | 'epic' | 'rare', number>> | null;
+  /** v9 (V9-D3): today's Merit House holders, region → 3 ids (0 = empty), from the daily job */
+  houses?: number[][] | null;
 }
 
-/** a claimed player's house: their colour, how big it has grown, their sign (V7-D6) */
+/** a Merit House holder (V9-D3): their colour, how big the house has grown (V7-D6), their sign */
 export interface Home {
   colour: string;
   band: 0 | 1 | 2;
@@ -112,7 +115,8 @@ export const MINI_SEATS = 6;
 
 export function place(
   all: MapGitemon[],
-  claimedAt: Map<number, string>,
+  /** kept for the daily job's call; v9 houses no longer go by claim order */
+  _claimedAt: Map<number, string>,
   legends: MapGitemon[] = [],
   layout: DayLayout | null = null,
   day = dayOf(),
@@ -211,17 +215,21 @@ export function place(
     }
   }
 
-  // houses are PROPERTY (V7-D7): claim order, nearest the plaza first; they grow with merit and
-  // carry the sign — but where a Gitemon stands comes from its merit, like everyone else
+  // v9 Merit Houses (V9-D3, replaces V7-D7): the top 3 by merit in each region, kept while in the
+  // top 5 — frozen by the daily job; without a layout (local dev) worked out here the same way.
+  // Houses are status: where a Gitemon stands still comes from merit (seats, then the wild).
   const homes = new Map<number, Home>();
   const houseOf = new Map<number, number>();
-  const claimed = players
-    .filter((g) => g.st === 'c')
-    .sort((a, b) => (claimedAt.get(a.id) ?? '').localeCompare(claimedAt.get(b.id) ?? ''));
-  claimed.forEach((g, k) => {
-    if (!city.doors[k]) return;
+  const joined = players.filter((g) => g.st === 'c');
+  const holders =
+    layout?.houses ?? meritHouses(joined.map((g) => ({ id: g.id, t: g.t1, m: g.m ?? 0 })));
+  const byId = new Map(joined.map((g) => [g.id, g]));
+  city.town.forEach((p, k) => {
+    if (p.kind !== 'house') return;
+    const g = byId.get(holders[p.region]?.[p.slot] ?? 0);
+    if (!g) return;
     houseOf.set(g.id, k);
-    homes.set(city.doorLots[k]!, {
+    homes.set(k, {
       colour: TYPE_INFO[g.t1].colors[0],
       band: bandOf(g.m ?? 0),
       sign: g.sg ?? null,

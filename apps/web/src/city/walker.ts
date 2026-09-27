@@ -55,7 +55,8 @@ export class Walkable {
       if (r > CANAL_IN - 0.5 && r < CANAL_OUT + 0.5) return nearGate(2.2); // canal: bridges only
       const rowIn = STREET_IN + ROAD / 2 + SW;
       const rowOut = STREET_OUT - ROAD / 2 - SW;
-      if (r > rowIn && r < rowOut) return nearGate(4.5); // the house rows: through the gates
+      // v9 (V9-D5): the belt is gardens and paths; only the buildings themselves block
+      if (r > rowIn && r < rowOut) return !this.inBuilding(x, z);
       if (r > STREET_OUT + ROAD / 2 + SW + 1 && r < TOWN_R - 0.6) return true; // the lawn
       return true; // plaza, streets
     }
@@ -69,6 +70,19 @@ export class Walkable {
       ) /
       (2 * e);
     return sl < 1.25;
+  }
+
+  /** inside a town building's footprint (its rectangle, facing its street, plus a little room) */
+  private inBuilding(x: number, z: number) {
+    for (const p of this.isl.town) {
+      const dx = x - p.x;
+      const dz = z - p.z;
+      if (dx * dx + dz * dz > 100) continue;
+      const across = dx * p.fx + dz * p.fz;
+      const along = -dx * p.fz + dz * p.fx;
+      if (Math.abs(along) < p.w / 2 + 0.3 && Math.abs(across) < p.d / 2 + 0.3) return true;
+    }
+    return false;
   }
 
   private idx(x: number, z: number) {
