@@ -3,21 +3,68 @@ import { TOWN_Y, gridHeight, type Island, type Spot } from '@gitemon/shared';
 import { Walk, Walkable } from './walker';
 import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
-import { buildTown } from './town';
+import { buildTown, type Town } from './town';
+import { loadPieces } from './models';
 
 /**
- * Gitemon City renderer (GRANDPLAN v2 §3, v3 §3): a fixed isometric camera with 4 snap rotations
- * over the kit-built town (town.ts). One shadow map, rendered once when the city is built — the
+ * Gitemon Island renderer (GRANDPLAN v2 §3, v3 §3, v8 §0 V8-D4): a perspective camera with 4 snap
+ * rotations that tilts toward the ground as it zooms in, so close up the sky and the horizon show
+ * (v8 build 03). The kit-built town comes from town.ts. One shadow map, rendered once when the city is built — the
  * city never moves. The crowd is one instanced draw of pixel sprites (crowd.ts). Frames are capped
  * at 30 fps, and the loop idles when nothing moves on screen or the tab is hidden.
  */
 
 export type { Placed };
 
+/** the view widens as the camera comes down, so the horizon enters the frame (V8-D4) */
+const FOV_HIGH = 35;
+const FOV_LOW = 50;
+/** tilt-zoom: at zoom ≤ TILT_FROM the camera looks down at PITCH_HIGH; by TILT_TO it is at PITCH_LOW */
+const TILT_FROM = 0.5;
+const TILT_TO = 3.2;
+const PITCH_HIGH = (58 * Math.PI) / 180;
+const PITCH_LOW = (18 * Math.PI) / 180;
+/** golden hour (V8-D7, V8-D11): the horizon colour is the haze colour, so the sea melts into the sky */
+const HORIZON = '#f1e4cc';
+const ZENITH = '#78aee0';
+
+/** a gradient sky sphere that travels with the camera (no texture, never fogged) */
+function skyDome() {
+  const m = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+    uniforms: {
+      top: { value: new THREE.Color(ZENITH) },
+      bottom: { value: new THREE.Color(HORIZON) },
+    },
+    vertexShader: /* glsl */ `
+      varying float vY;
+      void main() {
+        vY = normalize(position).y;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 top;
+      uniform vec3 bottom;
+      varying float vY;
+      void main() {
+        float t = pow(clamp(vY, 0.0, 1.0), 0.55);
+        gl_FragColor = vec4(mix(bottom, top, t), 1.0);
+        #include <colorspace_fragment>
+      }`,
+  });
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), m);
+  sky.renderOrder = -10;
+  sky.frustumCulled = false;
+  return sky;
+}
+
 export class CityScene {
   readonly renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera: THREE.OrthographicCamera;
+  private camera: THREE.PerspectiveCamera;
+  private sky: THREE.Mesh;
   private target = new THREE.Vector3(0, 0, 0);
   private turn = 0; // 0..3 snap rotations
   private yaw = Math.PI / 4;
@@ -30,6 +77,8 @@ export class CityScene {
   private ring: THREE.Mesh;
   private sun: THREE.DirectionalLight;
   private detail: THREE.Object3D[] = [];
+  private town: Town | null = null;
+  private bob: { obj: THREE.Object3D; y: number }[] = [];
   private labels = new THREE.Group();
   private detailOn = true;
   private pointers = new Map<number, { x: number; y: number }>();
@@ -52,12 +101,14 @@ export class CityScene {
       powerPreference: 'high-performance',
     });
     this.renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
-    this.renderer.setClearColor('#bfdcf0');
+    this.renderer.setClearColor(HORIZON);
     host.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.touchAction = 'none';
-    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 3000);
-    // the camera sits 1200 units out: fog must start beyond it or the whole city goes pale
-    this.scene.fog = new THREE.Fog('#bfdcf0', 1500, 2800);
+    this.camera = new THREE.PerspectiveCamera(FOV_HIGH, 1, 1, 4000);
+    // haze by distance (V8-D7): its range follows the camera (placeCamera), its colour is the horizon
+    this.scene.fog = new THREE.Fog(HORIZON, 1500, 2800);
+    this.sky = skyDome();
+    this.scene.add(this.sky);
     this.scene.add(new THREE.HemisphereLight('#fff6e8', '#7f8aa0', 1.75));
     const sun = new THREE.DirectionalLight('#fff1d6', 1.9);
     sun.position.set(-160, 300, 110);
@@ -99,23 +150,55 @@ export class CityScene {
     this.dirty = true;
   }
 
-  /** world units visible vertically at zoom 1 */
+  /** world units visible vertically at the target at zoom 1 */
   private get span() {
     return 150 / this.zoom;
   }
 
+  /** 0 over the whole island … 1 down near the ground (V8-D4 tilt-zoom) */
+  private get tilt() {
+    const t = Math.min(
+      1,
+      Math.max(0, Math.log(this.zoom / TILT_FROM) / Math.log(TILT_TO / TILT_FROM)),
+    );
+    return t * t * (3 - 2 * t);
+  }
+  /** camera elevation (radians) */
+  private get pitch() {
+    return PITCH_HIGH + (PITCH_LOW - PITCH_HIGH) * this.tilt;
+  }
+
+  /** the island's height grid, so the camera never dips under a hill */
+  private groundGrid: Island['grid'] | null = null;
+
   private placeCamera() {
     const w = this.host.clientWidth;
     const h = this.host.clientHeight;
-    const s = this.span;
-    this.camera.left = (-s * w) / h / 2;
-    this.camera.right = (s * w) / h / 2;
-    this.camera.top = s / 2;
-    this.camera.bottom = -s / 2;
+    const fov = FOV_HIGH + (FOV_LOW - FOV_HIGH) * this.tilt;
+    const d = this.span / (2 * Math.tan(((fov / 2) * Math.PI) / 180));
+    const e = this.pitch;
+    this.camera.fov = fov;
+    this.camera.aspect = w / Math.max(1, h);
+    this.camera.near = Math.max(0.5, d * 0.02);
+    this.camera.far = d * 4 + 1500;
     this.camera.updateProjectionMatrix();
-    const dir = new THREE.Vector3(Math.cos(this.yaw), 1.55, Math.sin(this.yaw)).normalize();
-    this.camera.position.copy(this.target).addScaledVector(dir, 1200);
-    this.camera.lookAt(this.target);
+    const dir = new THREE.Vector3(
+      Math.cos(this.yaw) * Math.cos(e),
+      Math.sin(e),
+      Math.sin(this.yaw) * Math.cos(e),
+    );
+    this.camera.position.copy(this.target).addScaledVector(dir, d);
+    if (this.groundGrid) {
+      const floor = gridHeight(this.groundGrid, this.camera.position.x, this.camera.position.z) + 3;
+      if (this.camera.position.y < floor) this.camera.position.y = floor;
+    }
+    // low down, aim a little above the target so the land ahead fills the frame, not the ground at our feet
+    this.camera.lookAt(this.target.x, this.target.y + d * 0.14 * this.tilt, this.target.z);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.near = d * 0.9;
+    fog.far = d * 4.2 + 300;
+    this.sky.position.copy(this.camera.position);
+    this.sky.scale.setScalar(this.camera.far * 0.9);
   }
 
   rotate(step: number) {
@@ -290,8 +373,10 @@ export class CityScene {
     this.stats.buildMs = Math.round(performance.now() - t0);
     this.stats.homes = homes.size;
     this.scene.add(town.group);
+    this.town = town;
     this.detail = town.detail;
     this.buildLabels(city);
+    this.groundGrid = city.grid;
     const cam = this.sun.shadow.camera;
     const r = city.radius + 40;
     cam.left = cam.bottom = -r;
@@ -474,6 +559,23 @@ export class CityScene {
     this.dirty = true;
   }
 
+  // ---- sculpted pieces (v8 build 05) ---------------------------------------------------------------
+
+  /** load the 3D models; each one replaces its code-built piece or sprite as it arrives */
+  async addPieces(city: Island, placed: Placed[]) {
+    const t0 = performance.now();
+    const pcs = await loadPieces(city, placed);
+    if (!pcs) return;
+    this.scene.add(pcs.group);
+    if (pcs.monument && this.town) this.town.monument.visible = false;
+    if (pcs.landmarks && this.town) for (const l of this.town.landmarks) l.visible = false;
+    for (const i of pcs.replaced) this.crowd?.hide(i);
+    this.bob = pcs.bob;
+    this.stats.piecesMs = Math.round(performance.now() - t0);
+    this.renderer.shadowMap.needsUpdate = true;
+    this.dirty = true;
+  }
+
   // ---- creatures -------------------------------------------------------------------------------------
 
   setCreatures(placed: Placed[]) {
@@ -492,7 +594,7 @@ export class CityScene {
   }
   /** upright sprites are foreshortened by the camera pitch; stretch them back to true proportions */
   private get upScale() {
-    return Math.hypot(1, 1.55) / 1;
+    return 1 / Math.cos(this.pitch);
   }
 
   // ---- loop --------------------------------------------------------------------------------------------
@@ -507,6 +609,7 @@ export class CityScene {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     if (animate) this.clock += dt;
+    for (const b of this.bob) b.obj.position.y = b.y + Math.sin(this.clock * 0.9) * 0.6;
     this.stepWalker(dt);
     if (this.anim) {
       const k = Math.min(1, (performance.now() - this.anim.t0) / 700);
@@ -540,7 +643,7 @@ export class CityScene {
   };
 
   /** render counters for ?debug and the perf check (v3 build file 08) */
-  readonly stats = { frames: 0, ms: 0, buildMs: 0, townMs: 0, layoutMs: 0, homes: 0 };
+  readonly stats = { frames: 0, ms: 0, buildMs: 0, townMs: 0, layoutMs: 0, homes: 0, piecesMs: 0 };
   get info() {
     const r = this.renderer.info.render;
     return { calls: r.calls, triangles: r.triangles, ...this.stats };

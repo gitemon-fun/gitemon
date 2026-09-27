@@ -17,6 +17,7 @@ else
 fi
 
 pnpm tsx --tsconfig scripts/tsconfig.json scripts/icons.ts
+bash scripts/models.sh
 pnpm --filter @gitemon/web build
 
 sed -e "s|__D1_ID__|$GITEMON_D1_ID|" \

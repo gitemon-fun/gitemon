@@ -360,6 +360,9 @@
       }
       scene!.setCreatures(loadedCity.placed);
       scene!.stage(loadedCity.city, loadedCity.placed, loadedCity.today ?? null);
+      // v8: the sculpted pieces arrive after the first view (build file 05)
+      const lc = loadedCity;
+      setTimeout(() => scene?.addPieces(lc.city, lc.placed), 400);
       startWalking(loadedCity);
       scene!.fitCity(loadedCity.city.radius);
       loaded = true;

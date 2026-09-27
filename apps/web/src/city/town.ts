@@ -41,6 +41,9 @@ export interface Town {
   group: THREE.Group;
   /** windows, add-ons, small props: hidden at far zoom */
   detail: THREE.Object3D[];
+  /** v8: the code-built monument and landmarks, hidden when the sculpted ones arrive */
+  monument: THREE.Object3D;
+  landmarks: THREE.Object3D[];
 }
 
 export function buildTown(isl: Island, homes: Map<number, Home>, onLater?: () => void): Town {
@@ -81,17 +84,19 @@ export function buildTown(isl: Island, homes: Map<number, Home>, onLater?: () =>
     requestAnimationFrame(() => setTimeout(later, 0));
   else later();
 
+  const marks: THREE.Object3D[] = [];
   for (const l of isl.landmarks) {
     const m = new THREE.Mesh(landmark(l.t), lit);
     m.position.set(l.x, l.y - 0.3, l.z);
     m.castShadow = m.receiveShadow = true;
     group.add(m);
+    marks.push(m);
   }
   const mon = new THREE.Mesh(monument(), lit);
   mon.position.y = TOWN_Y;
   mon.castShadow = mon.receiveShadow = true;
   group.add(mon);
-  return { group, detail };
+  return { group, detail, monument: mon, landmarks: marks };
 }
 
 /** a house sign: white board, dark words, drawn once on a small canvas */

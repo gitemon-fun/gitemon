@@ -377,6 +377,13 @@ export class Crowd {
     this.walk.needsUpdate = true;
   }
 
+  /** v8: hide a resident's sprite and blob (a sculpted model stands there); it can still be tapped */
+  hide(i: number) {
+    const spec = this.sprites.geometry.getAttribute('iSpec') as THREE.InstancedBufferAttribute;
+    spec.setX(i, 0);
+    spec.needsUpdate = true;
+  }
+
   /** A tapped resident stops walking, so it stays where the ring is. */
   stop(i: number, time: number) {
     const v = this.positionOf(i, time, new THREE.Vector3());
