@@ -389,6 +389,13 @@ app.get('/api/guilds', (c) =>
   }),
 );
 
+/** client error reports (debugging a blank map on some GPUs): logged to the Worker log only */
+app.post('/api/clientlog', async (c) => {
+  const body = (await c.req.text()).slice(0, 4000);
+  console.log('CLIENTLOG', c.req.header('user-agent')?.slice(0, 160), body);
+  return c.json({ ok: true });
+});
+
 app.get('/api/find', async (c) => {
   const login = (c.req.query('login') ?? '').trim().replace(/^@/, '');
   if (!isValidLogin(login)) return c.json({ error: 'bad-login' }, 400);
