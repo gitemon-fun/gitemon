@@ -1,11 +1,13 @@
 # Gitemon
 
-Every GitHub developer, hatched into a pixel creature in one shared city — **[gitemon.fun](https://gitemon.fun)**.
+Every GitHub developer, hatched into a pixel creature on one shared island — **[gitemon.fun](https://gitemon.fun)**.
 
-- **Hatch.** Every developer already exists as a wild Gitemon, built from public GitHub data.
-- **Catch.** Sign in with GitHub and catch the developers you admire. Worked together for real? It's a _bonded_ catch.
-- **Claim.** When someone you caught signs in, you both get a friendship buff.
-- **Belong.** Every language has a district in Gitemon City; the most notable stand on the central plaza. Claim yours and get a house. Your GitHub location becomes a hometown flag ([/world](https://gitemon.fun/world)).
+- **Hatch.** Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you.
+- **Walk.** Tap the map, or steer with WASD, the arrow keys or a thumb stick. Real GitHub work earns more steps each day.
+- **Catch.** Walk up to another player's Gitemon and catch it. Worked together for real? It's a _bonded_ catch.
+- **Find the legends.** 500 sealed legends sleep on the island, nameless, until their own developer signs in and wakes or removes theirs. Every legend you pass goes into your Legend Log.
+- **Belong.** Nine climate lands round a centre town. Your language decides your land and your guild hall; guilds compete each week on active members.
+- **Earn a house.** The top 3 players by merit in each land live in its Merit Houses, with a sign for what they build or who they hire.
 
 ## The rules, in one paragraph
 
@@ -23,13 +25,13 @@ if you turned that setting on.
 
 | Path                    | What                                                                  |
 | ----------------------- | --------------------------------------------------------------------- |
-| `packages/shared`       | types, the world grid, deterministic hashing                          |
+| `packages/shared`       | types, the island layout, walking + town rules, deterministic hashing |
 | `packages/ingest`       | fetches a public GitHub snapshot (GraphQL)                            |
-| `packages/scorer`       | snapshot → stats, level, type, species, form (pure, tested)           |
+| `packages/scorer`       | snapshot → stats, level, type, species, form, merit (pure, tested)    |
 | `packages/creature-gen` | deterministic pixel sprites + a tiny PNG encoder; CC0 placeholder art |
 | `apps/api`              | Cloudflare Worker (Hono): pages, API, auth, images — D1 + R2          |
-| `apps/web`              | Gitemon City (Svelte + Three.js; pixel sprites in a low-poly city)    |
-| `scripts`               | trusted-fetcher jobs: seed, drain, hometown backfill, geo-build       |
+| `apps/web`              | Gitemon Island (Svelte + Three.js; pixel sprites in a 3D world)       |
+| `scripts`               | trusted-fetcher jobs: seed, drain, daily layout; deploy + art copy    |
 
 ## Run it
 
@@ -40,11 +42,10 @@ pnpm --filter @gitemon/web build
 cd apps/api && npx wrangler dev   # needs a D1 database; see wrangler.toml
 ```
 
-A fresh clone builds with the placeholder art. See [TRADEMARK.md](TRADEMARK.md) before you deploy
-a copy.
+A fresh clone builds with the placeholder art and without the 3D models (the map falls back to
+simple shapes). See [TRADEMARK.md](TRADEMARK.md) before you deploy a copy.
 
 ## Licence
 
-Code: [AGPL-3.0](LICENSE). Name, logo and creature art: not licensed — see [TRADEMARK.md](TRADEMARK.md).
-Place names for hometowns: [GeoNames](https://www.geonames.org) (CC BY 4.0). Build the lookup with
-`pnpm tsx scripts/geo-build.ts <dir>` from `cities15000.txt`, `countryInfo.txt` and `admin1CodesASCII.txt`.
+Code: [AGPL-3.0](LICENSE). Name, logo, creature art, 3D models and icons: not licensed — see
+[TRADEMARK.md](TRADEMARK.md).

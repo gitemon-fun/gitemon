@@ -15,7 +15,7 @@
 
 - **Slug:** `gitemon` · **Repo:** `gitemon-fun/gitemon` (public, AGPL-3.0) + `gitemon-fun/gitemon-art` (private)
 - **URL:** https://gitemon.fun
-- **Stack:** pnpm monorepo · Svelte 5 SPA + Three.js (Gitemon City) · one Hono Worker (pages, API, images, assets) · D1 + R2 · WorkOS (GitHub only)
+- **Stack:** pnpm monorepo · Svelte 5 SPA + Three.js (Gitemon Island) · one Hono Worker (pages, API, images, assets) · D1 + R2 · WorkOS (GitHub only)
 
 ## Hard rules
 
@@ -34,17 +34,19 @@
 
 ## How it works
 
-- Ingest fetches a public GitHub snapshot (GraphQL) → D1.
-- `packages/scorer` (pure) turns it into stats, type, species, form.
-- `packages/creature-gen` composes a deterministic 24×24 sprite — in the browser for the map, in the Worker for profile images and share cards.
-- `packages/shared` `layout()` derives the city (plaza, 18 districts, streets, lots, spots) from populations; `/api/city` serves every resident (edge-cached) and the client places them by rank: plaza, district squares, house doors, streets.
-- Hometown: the fetcher parses the public GitHub `location` with a generated GeoNames lookup (`scripts/geo-build.ts`) and sends it in the snapshot; `/world` ranks countries and cities.
-- A trusted fetcher (`scripts/drain.ts`, on a timer) hatches requested developers and refreshes stale ones through `/internal/*`.
-- Signed-in players catch, claim, keep a Dex, join towns.
+- Ingest fetches a public GitHub snapshot (GraphQL) → D1. Nobody is hatched without signing in (v5): search and profile pages never create a Gitemon.
+- `packages/scorer` (pure) turns it into stats, type, species, form and **merit** (consistency over volume, v7).
+- `packages/creature-gen` composes a deterministic sprite — in the browser for the map, in the Worker for profile images and share cards.
+- `packages/shared` `island()` derives Gitemon Island from populations: nine climate regions round a centre town, coast, relief, habitats, mini plazas, and the town's 42 detached buildings (9 guild halls, 27 Merit Houses, 6 services — v9). `town.ts` holds the guild and Merit House rules.
+- `/api/city` serves every resident, the 500 sealed legends (no identity until woken) and the day's frozen layout; the client places everyone by rank and merit.
+- A trusted fetcher (`scripts/drain.ts`, on a timer) hatches requested players, refreshes stale ones and runs the daily job (`scripts/daily.ts`: layout, legend spots, Merit House holders).
+- Signed-in players walk (tap or steer, daily step budget), log legends, get blessed, catch, keep a Dex, set a house sign.
+- 3D models and icons come from the private art repo (`scripts/models.sh`); a fresh clone falls back to simple shapes.
 
 ## Authoritative decisions (mirror — ledger is `…/DECISIONS.md`)
 
-- D1 creatures on one map · D3 free catch + claim buff · D4 login = belonging · D6 power ≠ size · D8 AGPL, art/name closed · D9 no private repos · D14 no notifications
+- D1 creatures on one map · D4 login = belonging · D6 power ≠ size · D8 AGPL, art/name closed · D9 no private repos · D14 no notifications
+- V5 consent: normal Gitemon only after sign-in; sealed legends carry no identity until woken · V7 merit = consistency over volume · V9 houses = top 3 merit per region (not claim order)
 
 ## Conventions
 
