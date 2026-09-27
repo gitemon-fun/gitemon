@@ -526,9 +526,16 @@ h2 {
   }
 }
 @media (max-width: 600px) {
+  /* on a phone the bottom belongs to the hint and the stick: the map sits under the top bar */
+  .hud-map {
+    top: 72px;
+    bottom: auto;
+    left: 12px;
+  }
   .hud-map-body {
-    width: 112px !important;
-    height: 112px !important;
+    width: 104px !important;
+    height: 104px !important;
+    order: 0;
   }
   .hud-compass {
     bottom: 236px;
