@@ -55,5 +55,8 @@ in `GET /api/admin/log`. A developer can always hide their own Gitemon with **Re
 
 ## Client errors
 
-The map reports errors, shader problems and the GPU name to `POST /api/clientlog`, which only writes
-them to the Worker log: `cd apps/api && npx wrangler tail gitemon --search CLIENTLOG`.
+The map reports errors, shader problems, the GPU name and one frame check per visit (did the island
+draw anything: pixels, draw calls, camera, fog) to `POST /api/clientlog`. Reports go to the Worker log
+(`cd apps/api && npx wrangler tail gitemon --search CLIENTLOG`) and to the D1 table `clientlog`, which
+keeps the newest 500: `npx wrangler d1 execute gitemon --remote -c wrangler.deploy.toml --command
+"SELECT * FROM clientlog ORDER BY id DESC LIMIT 20"`.
