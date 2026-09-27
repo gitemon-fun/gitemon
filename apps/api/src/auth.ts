@@ -6,7 +6,7 @@ import { limits } from './env.js';
 import { decrypt, encrypt, randomId, sign, verify } from './crypto.js';
 import { byId, ingest, now } from './world.js';
 import { claim, isReal } from './game.js';
-import { messagePage } from './pages.js';
+import { codePage, messagePage } from './pages.js';
 
 /**
  * Sign-in: WorkOS User Management with GitHub as the only provider (binding: WorkOS, never
@@ -17,6 +17,7 @@ import { messagePage } from './pages.js';
 
 const SESSION = 'gm_session';
 const STATE = 'gm_state';
+const VERIFY = 'gm_verify';
 const SESSION_DAYS = 30;
 
 const redirectUri = (env: Env) => `${env.PUBLIC_ORIGIN}/auth/callback`;
@@ -82,8 +83,87 @@ export async function callback(c: Context<AppEnv>): Promise<string> {
       code,
     }),
   });
-  if (!res.ok) throw new AuthError('GitHub sign-in did not complete. Please try again.');
-  const auth = (await res.json()) as WorkosAuth;
+  if (!res.ok) {
+    // WorkOS's reason, without anything personal (the error body can carry an email)
+    const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    // WorkOS verifies every new account's email once, even after GitHub (it cannot be turned off):
+    // it has just emailed a 6-digit code; the player types it on /auth/verify
+    if (
+      j.code === 'email_verification_required' &&
+      typeof j.pending_authentication_token === 'string'
+    ) {
+      const email =
+        typeof j.email === 'string' ? j.email.replace(/^(.).*(@.*)$/, '$1***$2') : 'your email';
+      setCookie(
+        c,
+        VERIFY,
+        await sign(`${j.pending_authentication_token}|${next}|${email}`, c.env.SESSION_SECRET),
+        {
+          httpOnly: true,
+          secure: true,
+          sameSite: 'Lax',
+          path: '/auth',
+          maxAge: 900,
+        },
+      );
+      return '/auth/verify';
+    }
+    console.log(
+      'WORKOS_AUTH_FAIL',
+      res.status,
+      j.code ?? j.error,
+      j.error_description ?? j.message,
+    );
+    throw new AuthError('GitHub sign-in did not complete. Please try again.');
+  }
+  return finish(c, (await res.json()) as WorkosAuth, next);
+}
+
+/** the code page (GET /auth/verify) */
+export async function verifyPage(c: Context<AppEnv>, error: string | null = null) {
+  const v = await verify(getCookie(c, VERIFY), c.env.SESSION_SECRET);
+  if (!v) throw new AuthError('The sign-in link expired. Please try again.');
+  return codePage(v.split('|')[2] ?? 'your email', error);
+}
+
+/** the typed code (POST /auth/verify): returns where to go next, or null when the code was wrong */
+export async function verifyCode(c: Context<AppEnv>): Promise<string | null> {
+  const v = await verify(getCookie(c, VERIFY), c.env.SESSION_SECRET);
+  if (!v) throw new AuthError('The sign-in link expired. Please try again.');
+  const [pending, next] = v.split('|');
+  const form = await c.req.parseBody();
+  const code = String(form.code ?? '').replace(/\D/g, '');
+  if (code.length !== 6) return null;
+  const res = await fetch('https://api.workos.com/user_management/authenticate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      client_id: c.env.WORKOS_CLIENT_ID,
+      client_secret: c.env.WORKOS_API_KEY,
+      grant_type: 'urn:workos:oauth:grant-type:email-verification:code',
+      code,
+      pending_authentication_token: pending,
+    }),
+  });
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    console.log(
+      'WORKOS_VERIFY_FAIL',
+      res.status,
+      j.code ?? j.error,
+      j.error_description ?? j.message,
+    );
+    // an expired pending sign-in cannot be saved by another code: start again
+    if (String(j.code ?? '').includes('expired') || res.status === 401)
+      throw new AuthError('The code expired. Please sign in again.');
+    return null;
+  }
+  deleteCookie(c, VERIFY, { path: '/auth' });
+  return finish(c, (await res.json()) as WorkosAuth, next);
+}
+
+/** a WorkOS sign-in that succeeded: check the GitHub token, hatch or refresh, start the session */
+async function finish(c: Context<AppEnv>, auth: WorkosAuth, next: string | undefined) {
   const token = auth.oauth_tokens?.access_token;
   if (!token)
     throw new AuthError(

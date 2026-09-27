@@ -22,7 +22,16 @@ import {
 } from '@gitemon/shared';
 import type { AppEnv } from './env.js';
 import { limits } from './env.js';
-import { AuthError, callback, currentPlayer, loginRedirect, logout, playerToken } from './auth.js';
+import {
+  AuthError,
+  callback,
+  currentPlayer,
+  loginRedirect,
+  logout,
+  playerToken,
+  verifyCode,
+  verifyPage,
+} from './auth.js';
 import { safeEqual } from './crypto.js';
 import { bonusLevels, checkBonded, doCatch, foundTown, joinTown, leaveTown } from './game.js';
 import { ogPng, spritePng } from './og.js';
@@ -165,8 +174,35 @@ app.get('/auth/callback', async (c) => {
   try {
     return c.redirect(await callback(c), 302);
   } catch (e) {
-    if (e instanceof AuthError)
+    if (e instanceof AuthError) {
+      console.log('AUTHFAIL', e.message);
       return html(c, messagePage(400, 'Sign-in did not work', e.message), 400, 0);
+    }
+    throw e;
+  }
+});
+// WorkOS's one-time email check for a new account (it cannot be turned off)
+const noStore = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' };
+app.get('/auth/verify', async (c) => {
+  try {
+    return c.body(await verifyPage(c), 200, noStore);
+  } catch (e) {
+    if (e instanceof AuthError)
+      return c.body(messagePage(400, 'Sign-in did not work', e.message), 400, noStore);
+    throw e;
+  }
+});
+app.post('/auth/verify', async (c) => {
+  try {
+    const to = await verifyCode(c);
+    if (to) return c.redirect(to, 302);
+    const page = await verifyPage(c, 'That code did not work. Use the newest email and try again.');
+    return c.body(page, 400, noStore);
+  } catch (e) {
+    if (e instanceof AuthError) {
+      console.log('AUTHFAIL', e.message);
+      return c.body(messagePage(400, 'Sign-in did not work', e.message), 400, noStore);
+    }
     throw e;
   }
 });

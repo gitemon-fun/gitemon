@@ -39,6 +39,8 @@ footer a{color:var(--dim);margin-right:14px}
 .rank{width:100%;border-collapse:collapse;font-size:16px}.rank th{text-align:left;color:var(--dim);font-weight:600;font-size:14px;padding:6px 8px}
 .rank td{padding:8px;border-top:1px solid var(--line)}.rank .num{text-align:right;font-variant-numeric:tabular-nums}.rank .rk{color:var(--dim);width:2.5em}
 .dim{color:var(--dim)}
+.code{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.code input{font:inherit;font-size:24px;letter-spacing:.3em;width:9.5em;padding:9px 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+.code button{border:0;cursor:pointer;font:inherit}.err{color:#ff453a;font-weight:600;margin:10px 0 0}
 `;
 
 export function layout(o: {
@@ -130,6 +132,18 @@ export function messagePage(status: number, title: string, text: string) {
     path: '/',
     body: `<section class="card"><h1>${esc(title)}</h1><p class="sub">${esc(text)}</p><div class="btns"><a class="btn primary" href="/map">Open the map</a><a class="btn" href="/">Home</a></div></section>`,
     status: String(status),
+    noindex: true,
+  });
+}
+
+/** v9 sign-in: WorkOS always verifies a new account's email once — the player types the code here */
+export function codePage(email: string, error: string | null) {
+  return layout({
+    title: 'Check your email · Gitemon',
+    description: 'Finish signing in with the code from your email.',
+    path: '/auth/verify',
+    body: `<section class="card"><h1>Check your email</h1><p class="sub">GitHub sign-in worked. To finish, type the 6-digit code that our sign-in provider (WorkOS) just sent to <b>${esc(email)}</b>. You only do this once.</p>${error ? `<p class="err">${esc(error)}</p>` : ''}<form class="code" method="post" action="/auth/verify"><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus placeholder="123456" aria-label="6-digit code"><button class="btn primary" type="submit">Finish signing in</button></form></section>`,
+    status: '200',
     noindex: true,
   });
 }
