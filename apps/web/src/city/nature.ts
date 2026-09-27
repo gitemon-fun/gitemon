@@ -92,6 +92,24 @@ export function terrain(isl: Island): THREE.Mesh {
     cg += (c[1] - cg) * t;
     cb += (c[2] - cb) * t;
   };
+  /** one region's ground colour at a face (into cr, cg, cb) */
+  const paint = (reg: number, y: number, cx: number, cz: number, steep: number) => {
+    const p = PAL[reg]!;
+    if (steep > 0.45) set(p.rock);
+    else if (y < 1.1 && Math.hypot(cx, cz) > COAST - 40) set(p.shore);
+    else {
+      set(p.low);
+      mix(p.high, Math.min(1, y / 18));
+      // climate details: heather in the marsh, frozen lakes, striped canyon walls, dry patches
+      if (p.climate === 'marsh' && u(cx / 9, cz / 9, 3) < 0.35) set(HEATHER);
+      else if (p.climate === 'frost' && y < 0.6) set(ICE);
+      else if (p.climate === 'canyon' && steep > 0.25)
+        set(Math.floor(y / 2.2) % 2 ? STRIPE_A : STRIPE_B);
+      else if (p.climate === 'savanna' && u(cx / 7, cz / 7, 5) < 0.3) set(DRY);
+      else if (p.climate === 'crystal' && u(cx / 6, cz / 6, 7) < 0.3) set(SALT);
+    }
+    if (steep > 0.2 && steep <= 0.45) mix(p.rock, (steep - 0.2) * 2);
+  };
   const tri = (
     k0: number,
     k1: number,
@@ -134,21 +152,30 @@ export function terrain(isl: Island): THREE.Mesh {
     else if (reg === -1) set(Math.hypot(cx, cz) > TOWN_R - 5 ? LAWN : TOWN);
     else if (reg === -2) set(SHORE);
     else {
-      const p = PAL[reg]!;
-      if (steep > 0.45) set(p.rock);
-      else if (y < 1.1 && Math.hypot(cx, cz) > COAST - 40) set(p.shore);
-      else {
-        set(p.low);
-        mix(p.high, Math.min(1, y / 18));
-        // climate details: heather in the marsh, frozen lakes, striped canyon walls, dry patches
-        if (p.climate === 'marsh' && u(cx / 9, cz / 9, 3) < 0.35) set(HEATHER);
-        else if (p.climate === 'frost' && y < 0.6) set(ICE);
-        else if (p.climate === 'canyon' && steep > 0.25)
-          set(Math.floor(y / 2.2) % 2 ? STRIPE_A : STRIPE_B);
-        else if (p.climate === 'savanna' && u(cx / 7, cz / 7, 5) < 0.3) set(DRY);
-        else if (p.climate === 'crystal' && u(cx / 6, cz / 6, 7) < 0.3) set(SALT);
+      paint(reg, y, cx, cz, steep);
+      // v8 (V8-D6): regions melt into each other over ~14 m instead of meeting at a hard seam —
+      // look round the face; where another region is near, take part of its colour
+      let other = -9;
+      let n = 0;
+      for (let q = 0; q < 6; q++) {
+        const a = q * 1.047 + u(cx, cz, 11) * 1.0;
+        const rr = 4 + 10 * u(cx + q, cz, 13);
+        const g2 = gridRegion(isl.grid, cx + Math.cos(a) * rr, cz + Math.sin(a) * rr);
+        if (g2 >= 0 && g2 !== reg) {
+          other = g2;
+          n++;
+        }
       }
-      if (steep > 0.2 && steep <= 0.45) mix(p.rock, (steep - 0.2) * 2);
+      if (n) {
+        const r0 = cr,
+          g0 = cg,
+          b0 = cb;
+        paint(other, y, cx, cz, steep);
+        const w = 0.5 * (n / 6);
+        cr = r0 + (cr - r0) * w;
+        cg = g0 + (cg - g0) * w;
+        cb = b0 + (cb - b0) * w;
+      }
     }
     // a little lightness jitter per face keeps large areas from looking flat-filled
     const j = 1 + (u(cx, cz, 9) - 0.5) * 0.05;
@@ -195,35 +222,52 @@ export function terrain(isl: Island): THREE.Mesh {
 }
 
 /** dirt roads draped on the land, one from each town gate */
-export function roads(isl: Island): THREE.Mesh {
-  const pos: number[] = [];
-  const W = 1.7;
-  for (const pts of isl.roads)
-    for (let i = 0; i < pts.length - 1; i++) {
-      const [x0, z0] = pts[i]!;
-      const [x1, z1] = pts[i + 1]!;
-      const dx = x1 - x0;
-      const dz = z1 - z0;
-      const l = Math.hypot(dx, dz);
-      const nx = (-dz / l) * W;
-      const nz = (dx / l) * W;
-      const y = (x: number, z: number) =>
-        Math.max(WATER_Y + 0.25, gridHeight(isl.grid, x, z)) + 0.12;
-      const a = [x0 + nx, y(x0 + nx, z0 + nz), z0 + nz];
-      const b = [x0 - nx, y(x0 - nx, z0 - nz), z0 - nz];
-      const c = [x1 + nx, y(x1 + nx, z1 + nz), z1 + nz];
-      const d = [x1 - nx, y(x1 - nx, z1 - nz), z1 - nz];
-      pos.push(...a, ...c, ...b, ...b, ...c, ...d);
-    }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.computeVertexNormals();
-  const m = new THREE.Mesh(
-    g,
+export function roads(isl: Island): THREE.Group {
+  /** one strip of `w` half-width draped on the land, `lift` above it */
+  const strip = (w: number, lift: number) => {
+    const pos: number[] = [];
+    for (const pts of isl.roads)
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [x0, z0] = pts[i]!;
+        const [x1, z1] = pts[i + 1]!;
+        const dx = x1 - x0;
+        const dz = z1 - z0;
+        const l = Math.hypot(dx, dz);
+        const nx = (-dz / l) * w;
+        const nz = (dx / l) * w;
+        const y = (x: number, z: number) =>
+          Math.max(WATER_Y + 0.25, gridHeight(isl.grid, x, z)) + lift;
+        const a = [x0 + nx, y(x0 + nx, z0 + nz), z0 + nz];
+        const b = [x0 - nx, y(x0 - nx, z0 - nz), z0 - nz];
+        const c = [x1 + nx, y(x1 + nx, z1 + nz), z1 + nz];
+        const d = [x1 - nx, y(x1 - nx, z1 - nz), z1 - nz];
+        pos.push(...a, ...c, ...b, ...b, ...c, ...d);
+      }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    return g;
+  };
+  const group = new THREE.Group();
+  // v8 (V8-D6): trodden ground either side, so the road is worn into the land, not laid on it
+  const worn = new THREE.Mesh(
+    strip(3.4, 0.08),
+    new THREE.MeshLambertMaterial({
+      color: '#bda57c',
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+    }),
+  );
+  worn.receiveShadow = true;
+  const core = new THREE.Mesh(
+    strip(1.5, 0.12),
     new THREE.MeshLambertMaterial({ color: '#cdb28a', side: THREE.DoubleSide }),
   );
-  m.receiveShadow = true;
-  return m;
+  core.receiveShadow = true;
+  group.add(worn, core);
+  return group;
 }
 
 // ---- props (v4 §6) ------------------------------------------------------------------------------

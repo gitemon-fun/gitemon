@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BIOME_ORDER, island, COAST, TOWN_R, PLAZA_R, WATER_Y } from '../src/index.js';
+import { BIOME_ORDER, island, gridHeight, COAST, TOWN_R, PLAZA_R, WATER_Y } from '../src/index.js';
 
 // the live world on 2026-09-26 (8,312 across 17 types; no machine yet) plus a few machines
 const pops: Record<string, number> = {
@@ -145,5 +145,31 @@ describe('island layout', () => {
       expect(m.y).toBeGreaterThan(WATER_Y + 0.5);
       for (const h of v5.habitats) expect(Math.hypot(h.x - m.x, h.z - m.z)).toBeGreaterThan(m.r);
     }
+  });
+  it('has a real coastline: bays, headlands and islets, not a disc (v8 G2)', () => {
+    // the coast radius round the island, read from the height grid
+    const coast: number[] = [];
+    for (let k = 0; k < 360; k++) {
+      const a = (k / 360) * Math.PI * 2;
+      let r = 100;
+      while (
+        r < isl.radius + 30 &&
+        gridHeight(isl.grid, Math.cos(a) * r, Math.sin(a) * r) >= WATER_Y
+      )
+        r += 1;
+      coast.push(r);
+    }
+    const mean = coast.reduce((s, r) => s + r, 0) / coast.length;
+    // bays and headlands: runs of the coast more than 8 m in or out of its mean
+    let runs = 0;
+    let side = 0;
+    for (const r of coast) {
+      const now = r > mean + 8 ? 1 : r < mean - 8 ? -1 : 0;
+      if (now && now !== side) runs++;
+      if (now) side = now;
+    }
+    expect(runs).toBeGreaterThanOrEqual(6);
+    expect(isl.islets.length).toBeGreaterThanOrEqual(5);
+    for (const s of isl.islets) expect(gridHeight(isl.grid, s.x, s.z)).toBeGreaterThan(WATER_Y);
   });
 });

@@ -129,6 +129,8 @@ export interface Island {
   /** the machine quarter's angular window in the outer town row */
   quarter: { a0: number; a1: number };
   volcano: { x: number; z: number };
+  /** v8: small islands off the coast (nobody lives there) */
+  islets: { x: number; z: number; r: number }[];
   /** the land sampled once on a grid (renderers and props read this, not `height`) */
   grid: HeightGrid;
   radius: number;
@@ -256,7 +258,30 @@ export function island(
     regions[b]!.a0 + 0.15 * vnoise(r / 38 + b * 7.3, b * 3.1, 11) * smooth(TOWN_R, TOWN_R + 50, r);
   const splitAngle = (i: number, r: number) =>
     regions[i]!.split + 0.06 * vnoise(r / 30 + i * 5.1, 2.7, 17) * smooth(TOWN_R, TOWN_R + 40, r);
-  const coastR = (a: number) => COAST + 11 * fbm(Math.cos(a) * 2.2 + 5, Math.sin(a) * 2.2 + 5, 23);
+  // v8 (V8-D6): bays and headlands — a slow wave round the island (6–7 lobes) on top of the ragged edge;
+  // bays cut in further than headlands stick out, so the island stays inside its grid
+  // Tide Coast keeps its beaches: bays there stay shallow (its coral needs the shore to live on)
+  const tide = regions.find((g) => g.climate === 'tide')!;
+  const tideW = (a: number) => {
+    const inside = wrap(a - tide.a0) < wrap(tide.a1 - tide.a0);
+    const d = Math.min(
+      Math.abs(wrap(a - tide.a0 + Math.PI) - Math.PI),
+      Math.abs(wrap(a - tide.a1 + Math.PI) - Math.PI),
+    );
+    return inside ? 1 : 1 - smooth(0, 0.15, d); // 1 over the Tide Coast, fading out past its borders
+  };
+  const coastR = (a: number) => {
+    const lobes = vnoise(Math.cos(a) * 1.1 + 9, Math.sin(a) * 1.1 + 9, 41);
+    const bay = (lobes < 0 ? 30 : 14) * lobes * (1 - 1 * tideW(a));
+    return COAST + 11 * fbm(Math.cos(a) * 2.2 + 5, Math.sin(a) * 2.2 + 5, 23) + bay;
+  };
+  // v8: islets off the coast — small hills in the sea, sand and rock, nobody lives there
+  const islets = Array.from({ length: 6 }, (_, k) => {
+    const a = TAU * (k / 6 + 0.1 * rnd(`islet-a${k}`));
+    const r = coastR(a) + 16 + 12 * rnd(`islet-r${k}`);
+    const [x, z] = polar(r, a);
+    return { x, z, r: 6 + 5 * rnd(`islet-s${k}`), h: 2.5 + 4 * rnd(`islet-h${k}`) };
+  });
 
   const regionOf = (r: number, a: number) => {
     const b0 = borderAngle(0, r);
@@ -294,25 +319,25 @@ export function island(
     switch (regions[i]!.climate) {
       case 'frost': {
         const n = 1 - Math.abs(fbm(x / 38, z / 38, s, 4));
-        return 3 + n * n * 30 * smooth(120, 200, r);
+        return 3 + n * n * 42 * smooth(115, 195, r);
       }
       case 'marsh':
         return fbm(x / 22, z / 22, s) < -0.22 ? -0.5 : 0.35 + 1.1 * fbm(x / 30, z / 30, s + 1);
       case 'bloom':
-        return 2.2 + 8 * (0.5 + fbm(x / 34, z / 34, s));
+        return 2.2 + 10 * (0.5 + fbm(x / 34, z / 34, s));
       case 'tide':
         return 0.9 + 2 * (0.5 + fbm(x / 40, z / 40, s));
       case 'jungle':
         return 3 + 12 * Math.abs(fbm(x / 30, z / 30, s, 4));
       case 'volcano': {
         const d = Math.hypot(x - vx, z - vz);
-        let cone = Math.max(0, 48 * (1 - d / 62));
-        if (d < 8) cone = 48 * (1 - 8 / 62) - (8 - d) * 2.4;
+        let cone = 58 * Math.max(0, 1 - d / 66) ** 1.15;
+        if (d < 9) cone = 58 * (1 - 9 / 66) ** 1.15 - (9 - d) * 2.6;
         return 1.8 + 2.5 * (0.5 + fbm(x / 20, z / 20, s)) + cone;
       }
       case 'canyon': {
         const n = fbm(x / 44, z / 44, s);
-        return 1.2 + 9 * smooth(0.02, 0.06, n) + 8 * smooth(0.3, 0.34, n);
+        return 1.2 + 12 * smooth(0.02, 0.06, n) + 10 * smooth(0.3, 0.34, n);
       }
       case 'crystal':
         return 0.95 + 0.6 * (0.5 + fbm(x / 50, z / 50, s));
@@ -400,6 +425,12 @@ export function island(
     lastRegion = edge < 0 ? -2 : i;
     const cliff = regions[i]!.climate === 'bloom';
     h = -2.5 + (h + 2.5) * (cliff ? smooth(-1, 3, edge) : smooth(-8, 20, edge));
+    if (edge < 0)
+      for (const s of islets) {
+        const d = Math.hypot(x - s.x, z - s.z);
+        if (d < s.r * 1.6)
+          h = Math.max(h, -2.5 + (s.h + 2.5) * (1 - smooth(s.r * 0.35, s.r * 1.6, d)));
+      }
     return h;
   };
   /** the land, with each mini plaza levelled to a flat terrace (blended over 6 m) */
@@ -796,6 +827,7 @@ export function island(
     plinths,
     legendRing,
     miniPlazas,
+    islets: islets.map(({ x, z, r }) => ({ x, z, r })),
     mini,
     dens,
     quarter,
