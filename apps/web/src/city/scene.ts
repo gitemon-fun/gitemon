@@ -5,6 +5,7 @@ import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
 import { buildTown, type Town } from './town';
 import { loadPieces } from './models';
+import { airField } from './air';
 
 /**
  * Gitemon Island renderer (GRANDPLAN v2 §3, v3 §3, v8 §0 V8-D4): a perspective camera with 4 snap
@@ -79,6 +80,7 @@ export class CityScene {
   private detail: THREE.Object3D[] = [];
   private town: Town | null = null;
   private bob: { obj: THREE.Object3D; y: number }[] = [];
+  private air: ReturnType<typeof airField> | null = null;
   private labels = new THREE.Group();
   private detailOn = true;
   private pointers = new Map<number, { x: number; y: number }>();
@@ -187,10 +189,22 @@ export class CityScene {
       Math.sin(e),
       Math.sin(this.yaw) * Math.cos(e),
     );
+    // aim at the real ground (the volcano is 50 m up), then lift the camera until no hill is in the way
+    if (this.groundGrid) {
+      const g = gridHeight(this.groundGrid, this.target.x, this.target.z);
+      this.target.y += (Math.max(TOWN_Y, g) - this.target.y) * (this.anim ? 1 : 0.25);
+    }
     this.camera.position.copy(this.target).addScaledVector(dir, d);
     if (this.groundGrid) {
-      const floor = gridHeight(this.groundGrid, this.camera.position.x, this.camera.position.z) + 3;
-      if (this.camera.position.y < floor) this.camera.position.y = floor;
+      const t = this.target;
+      const c = this.camera.position;
+      let y = c.y;
+      for (let k = 1; k <= 10; k++) {
+        const f = k / 10;
+        const h = gridHeight(this.groundGrid, t.x + (c.x - t.x) * f, t.z + (c.z - t.z) * f) + 2.5;
+        y = Math.max(y, t.y + (h - t.y) / f);
+      }
+      c.y = y;
     }
     // low down, aim a little above the target so the land ahead fills the frame, not the ground at our feet
     this.camera.lookAt(this.target.x, this.target.y + d * 0.14 * this.tilt, this.target.z);
@@ -375,6 +389,8 @@ export class CityScene {
     this.scene.add(town.group);
     this.town = town;
     this.detail = town.detail;
+    this.air = airField(city, town.grid);
+    this.scene.add(this.air.points);
     this.buildLabels(city);
     this.groundGrid = city.grid;
     const cam = this.sun.shadow.camera;
@@ -610,6 +626,14 @@ export class CityScene {
     this.last = now;
     if (animate) this.clock += dt;
     for (const b of this.bob) b.obj.position.y = b.y + Math.sin(this.clock * 0.9) * 0.6;
+    // water and air (v8 build 04): the air shows only close enough to be seen
+    if (this.town)
+      (this.town.water.material as THREE.ShaderMaterial).uniforms.uTime!.value = this.clock;
+    if (this.air) {
+      const px = this.host.clientHeight / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
+      const fade = Math.min(1, Math.max(0, (this.zoom - 0.7) / 0.6));
+      this.air.update(this.clock, this.target.x, this.target.z, px, fade);
+    }
     this.stepWalker(dt);
     if (this.anim) {
       const k = Math.min(1, (performance.now() - this.anim.t0) / 700);

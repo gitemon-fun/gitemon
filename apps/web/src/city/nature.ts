@@ -194,15 +194,6 @@ export function terrain(isl: Island): THREE.Mesh {
   return m;
 }
 
-export function water(isl: Island): THREE.Mesh {
-  const m = new THREE.Mesh(
-    new THREE.CircleGeometry(isl.radius + 900, 96).rotateX(-Math.PI / 2).translate(0, WATER_Y, 0),
-    new THREE.MeshLambertMaterial({ color: '#5cb6d8', transparent: true, opacity: 0.86 }),
-  );
-  m.receiveShadow = true;
-  return m;
-}
-
 /** dirt roads draped on the land, one from each town gate */
 export function roads(isl: Island): THREE.Mesh {
   const pos: number[] = [];

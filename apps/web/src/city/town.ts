@@ -18,7 +18,8 @@ import {
 } from '@gitemon/shared';
 import { Batch, PARTS, PITCH, PROPS, ROOFS, ROUND, type RoofId } from './kit';
 import { SKINS, landmark, monument, type Skin } from './buildings';
-import { dress, roads, terrain, water } from './nature';
+import { dress, roads, terrain } from './nature';
+import { gridTexture, waterMesh } from './air';
 import type { Home } from './load';
 
 /**
@@ -44,6 +45,9 @@ export interface Town {
   /** v8: the code-built monument and landmarks, hidden when the sculpted ones arrive */
   monument: THREE.Object3D;
   landmarks: THREE.Object3D[];
+  /** v8 build 04: the water (its shader has a clock) and the height grid as a texture */
+  water: THREE.Mesh;
+  grid: THREE.DataTexture;
 }
 
 export function buildTown(isl: Island, homes: Map<number, Home>, onLater?: () => void): Town {
@@ -57,7 +61,9 @@ export function buildTown(isl: Island, homes: Map<number, Home>, onLater?: () =>
     if (isDetail) detail.push(...meshes);
   };
 
-  add([terrain(isl), water(isl), roads(isl)]);
+  const grid = gridTexture(isl);
+  const wat = waterMesh(isl, grid);
+  add([terrain(isl), wat, roads(isl)]);
   add(townGround(isl));
 
   const main = new Batch();
@@ -96,7 +102,7 @@ export function buildTown(isl: Island, homes: Map<number, Home>, onLater?: () =>
   mon.position.y = TOWN_Y;
   mon.castShadow = mon.receiveShadow = true;
   group.add(mon);
-  return { group, detail, monument: mon, landmarks: marks };
+  return { group, detail, monument: mon, landmarks: marks, water: wat, grid };
 }
 
 /** a house sign: white board, dark words, drawn once on a small canvas */
