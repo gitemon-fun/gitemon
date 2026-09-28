@@ -42,3 +42,39 @@ export function followYaw(travel: number, current: number, offset = FOLLOW_OFFSE
 /** how far the view is from straight behind the Gitemon (radians, 0 = straight behind) */
 export const offBehind = (yaw: number, travel: number) =>
   Math.abs(wrapAngle(yaw - (travel + Math.PI)));
+
+/** a twist must pass this (radians, ≈ 11°) before two fingers turn the map, so a pinch stays level */
+export const TWIST_START = 0.2;
+
+type Finger = { x: number; y: number };
+/**
+ * Which two-finger gesture this is (v13.1). Both fingers moving up or down together, side by side,
+ * without spreading or twisting, is a tilt (like R / F). A clear spread, twist or slide is a zoom, which
+ * also turns and pans. Until one of them is clear the answer is null, so a pinch never tilts by accident.
+ */
+export function twoFingerMode(
+  a0: Finger,
+  b0: Finger,
+  a: Finger,
+  b: Finger,
+): 'tilt' | 'zoom' | null {
+  const d0 = Math.max(1, Math.hypot(a0.x - b0.x, a0.y - b0.y));
+  const spread = Math.abs(Math.log(Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) / d0));
+  const twist = Math.abs(
+    wrapAngle(Math.atan2(b.y - a.y, b.x - a.x) - Math.atan2(b0.y - a0.y, b0.x - a0.x)),
+  );
+  const dya = a.y - a0.y;
+  const dyb = b.y - b0.y;
+  const sideBySide = Math.abs(a0.y - b0.y) < Math.abs(a0.x - b0.x);
+  if (
+    sideBySide &&
+    dya * dyb > 0 &&
+    Math.min(Math.abs(dya), Math.abs(dyb)) > 14 &&
+    spread < 0.08 &&
+    twist < 0.12
+  )
+    return 'tilt';
+  const slide = Math.hypot((a.x + b.x - a0.x - b0.x) / 2, (a.y + b.y - a0.y - b0.y) / 2);
+  if (spread > 0.06 || twist > 0.15 || slide > 18) return 'zoom';
+  return null;
+}

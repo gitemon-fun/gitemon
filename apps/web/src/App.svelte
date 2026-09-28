@@ -221,6 +221,8 @@
 
   let walked = $state(0); // metres walked away from home today (walking home is free)
   let walking = $state(false);
+  /** v13.1: the welcome hint goes once you touch the map (on a phone it sat over the controls) */
+  let hintGone = $state(false);
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   const sightAsked = new Set<string>();
   let blessedToday = false;
@@ -480,7 +482,13 @@
     g.t2 ? `${TYPE_INFO[g.t1].name} / ${TYPE_INFO[g.t2].name}` : TYPE_INFO[g.t1].name;
 </script>
 
-<div bind:this={host} class="map" role="application" aria-label="Gitemon City"></div>
+<div
+  bind:this={host}
+  class="map"
+  role="application"
+  aria-label="Gitemon City"
+  onpointerdown={() => (hintGone = true)}
+></div>
 
 <header class="bar">
   <a class="brand" href="/" title="Gitemon home">Gitemon</a>
@@ -499,7 +507,7 @@
           src="/ui/find.png"
           alt=""
           onerror={(e) => (e.currentTarget as HTMLElement).remove()}
-        />{/if}{searching ? '…' : 'Find'}</button
+        />{/if}<span class="label">{searching ? '…' : 'Find'}</span></button
     >
   </form>
   <nav>
@@ -525,30 +533,22 @@
   </nav>
 </header>
 
-<div class="zoom" aria-label="Zoom">
-  <button onclick={() => scene?.zoomBy(1.6)} aria-label="Zoom in">+</button>
-  <button onclick={() => scene?.zoomBy(1 / 1.6)} aria-label="Zoom out">−</button>
-  <button onclick={() => scene?.rotate(1)} aria-label="Turn the city">⟳</button>
-  <button onclick={() => scene?.flyTo(0, 0, homeZoom())} aria-label="Back to the town" class="fit"
-    ><img
-      class="ico"
-      src="/ui/home.png"
-      alt=""
-      onerror={(e) => (e.currentTarget as HTMLElement).remove()}
-    /><span class="glyph">⌂</span></button
-  >
-</div>
-
 {#if loaded && scene && town}
-  <Hud {scene} isl={town.city} placed={town.placed} {walking} />
+  <Hud
+    {scene}
+    isl={town.city}
+    placed={town.placed}
+    {walking}
+    home={() => scene?.flyTo(0, 0, homeZoom())}
+  />
 {/if}
 
 {#if failed}
   <div class="hint">The city could not load. Try again in a minute.</div>
 {:else if !loaded}
   <div class="hint">Building the island…</div>
-{:else if !picked && !panel}
-  <div class="hint">
+{:else if !picked && !panel && !hintGone}
+  <div class="hint" class:raised={walking}>
     {players ? `${players.toLocaleString('en-US')} Gitemon and ` : ''}{sealed.toLocaleString(
       'en-US',
     )} sealed legends live on the island. The stronger a Gitemon, the nearer the town it lives. Sign in

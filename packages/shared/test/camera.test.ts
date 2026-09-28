@@ -9,6 +9,7 @@ import {
   decay,
   followYaw,
   offBehind,
+  twoFingerMode,
   wrapAngle,
 } from '../src/index.js';
 
@@ -45,5 +46,20 @@ describe('camera maths (v13)', () => {
     const travel = 0;
     const right = travel + Math.PI + 0.3;
     expect(wrapAngle(followYaw(travel, right) - (travel + Math.PI))).toBeGreaterThan(0);
+  });
+
+  it('two fingers: a pinch zooms, a level push up or down tilts, a small wobble waits (v13.1)', () => {
+    const a0 = { x: 100, y: 400 };
+    const b0 = { x: 260, y: 400 };
+    // spread apart: zoom
+    expect(twoFingerMode(a0, b0, { x: 80, y: 402 }, { x: 290, y: 398 })).toBe('zoom');
+    // both up together, still side by side: tilt
+    expect(twoFingerMode(a0, b0, { x: 101, y: 370 }, { x: 259, y: 372 })).toBe('tilt');
+    // a few pixels of wobble: not decided yet
+    expect(twoFingerMode(a0, b0, { x: 103, y: 404 }, { x: 258, y: 397 })).toBeNull();
+    // a twist: zoom (which turns)
+    expect(twoFingerMode(a0, b0, { x: 100, y: 430 }, { x: 260, y: 370 })).toBe('zoom');
+    // a sideways slide: zoom (which pans)
+    expect(twoFingerMode(a0, b0, { x: 140, y: 400 }, { x: 300, y: 400 })).toBe('zoom');
   });
 });

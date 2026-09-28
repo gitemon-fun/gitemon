@@ -9,13 +9,21 @@
   /**
    * The game HUD (GRANDPLAN v8 §0 V8-D5, V8-D9): a minimap you can tap to fly, a compass that turns
    * with the camera, and — for a player out walking — keys (WASD / arrows) and a thumb stick.
+   * v13.1: every round button sits in one rail, so none can cover another on a short screen.
    */
   let {
     scene,
     isl,
     placed,
     walking,
-  }: { scene: CityScene; isl: Island; placed: Placed[]; walking: boolean } = $props();
+    home,
+  }: {
+    scene: CityScene;
+    isl: Island;
+    placed: Placed[];
+    walking: boolean;
+    home: () => void;
+  } = $props();
 
   const SIZE = 150;
   let base: HTMLCanvasElement;
@@ -232,27 +240,52 @@
   onblur={() => (keys.clear(), scene.steer(0, 0), scene.spin(0), scene.pan(0, 0), scene.tiltKey(0))}
 />
 
-<div class="hud-compass" title="Compass: the needle points to Frost Peaks">
-  <img
-    src="/ui/compass.png"
-    alt=""
-    style="transform: rotate({needle}deg)"
-    onerror={(e) => ((e.currentTarget as HTMLElement).style.display = 'none')}
-  />
+<div class="rail">
+  <div class="rail-group">
+    {#if walking}
+      <button
+        class="hud-btn hud-follow"
+        class:on={following}
+        onclick={() => scene.setFollow(!following)}
+        aria-label={following ? 'Free camera' : 'Follow my Gitemon'}
+        title={following ? 'Free camera' : 'Follow my Gitemon'}>{following ? '⤢' : '◎'}</button
+      >
+    {/if}
+    <button
+      class="hud-btn hud-sound"
+      onclick={() => setSound(!soundOn)}
+      aria-label={soundOn ? 'Sound off' : 'Sound on'}
+      title={soundOn ? 'Sound off' : 'Sound on'}
+    >
+      <img
+        src={soundOn ? '/ui/sound-on.png' : '/ui/sound-off.png'}
+        alt=""
+        onerror={(e) => ((e.currentTarget as HTMLElement).style.display = 'none')}
+      /><span class="glyph">{soundOn ? '♪' : '×'}</span>
+    </button>
+    <div class="hud-btn hud-compass" title="Compass: the needle points to Frost Peaks">
+      <img
+        src="/ui/compass.png"
+        alt=""
+        style="transform: rotate({needle}deg)"
+        onerror={(e) => ((e.currentTarget as HTMLElement).style.display = 'none')}
+      />
+    </div>
+  </div>
+  <div class="rail-group" aria-label="Zoom">
+    <button class="hud-btn" onclick={() => scene.zoomBy(1.6)} aria-label="Zoom in">+</button>
+    <button class="hud-btn" onclick={() => scene.zoomBy(1 / 1.6)} aria-label="Zoom out">−</button>
+    <button class="hud-btn" onclick={() => scene.rotate(1)} aria-label="Turn the city">⟳</button>
+    <button class="hud-btn hud-home" onclick={home} aria-label="Back to the town"
+      ><img
+        class="ico"
+        src="/ui/home.png"
+        alt=""
+        onerror={(e) => (e.currentTarget as HTMLElement).remove()}
+      /><span class="glyph">⌂</span></button
+    >
+  </div>
 </div>
-
-<button
-  class="hud-sound"
-  onclick={() => setSound(!soundOn)}
-  aria-label={soundOn ? 'Sound off' : 'Sound on'}
-  title={soundOn ? 'Sound off' : 'Sound on'}
->
-  <img
-    src={soundOn ? '/ui/sound-on.png' : '/ui/sound-off.png'}
-    alt=""
-    onerror={(e) => ((e.currentTarget as HTMLElement).style.display = 'none')}
-  /><span class="glyph">{soundOn ? '♪' : '×'}</span>
-</button>
 
 <div class="hud-map" class:closed={!open}>
   <button
@@ -278,13 +311,6 @@
 </div>
 
 {#if walking}
-  <button
-    class="hud-follow"
-    class:on={following}
-    onclick={() => scene.setFollow(!following)}
-    aria-label={following ? 'Free camera' : 'Follow my Gitemon'}
-    title={following ? 'Free camera' : 'Follow my Gitemon'}>{following ? '⤢' : '◎'}</button
-  >
   <div
     class="hud-stick"
     bind:this={stickEl}

@@ -5,6 +5,7 @@ import {
   FOLLOW_PITCH,
   FOLLOW_PITCH_MIN,
   PLAZA_R,
+  TWIST_START,
   TOWN_Y,
   WATER_Y,
   approach,
@@ -12,6 +13,8 @@ import {
   clampPitch,
   decay,
   followYaw,
+  twoFingerMode,
+  wrapAngle,
   bridgeLift,
   bridgesOf,
   gridHeight,
@@ -111,11 +114,18 @@ export class CityScene {
     yaw: number;
     my: number;
     pitch: number;
-    mx: number;
     gx: number;
     gy: number;
     gz: number;
+    /** where the two fingers started, to tell a tilt from a zoom (v13.1) */
+    a0: { x: number; y: number };
+    b0: { x: number; y: number };
+    mode: 'tilt' | 'zoom' | null;
+    /** the twist at which turning began (null: not turning yet) */
+    rot: number | null;
   } | null = null;
+  /** v13.1: the height of the ground the finger grabbed, so a drag keeps it under the finger */
+  private grabY = 0;
   private moved = 0;
   private anim: {
     from: THREE.Vector3;
@@ -567,22 +577,25 @@ export class CityScene {
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this.moved = 0;
       this.lastMove = performance.now();
+      if (this.pointers.size === 1)
+        this.grabY = this.terrainAt(e.clientX, e.clientY)?.y ?? this.target.y;
       if (this.pointers.size === 2) {
         const [a, b] = [...this.pointers.values()];
-        const mx = (a.x + b.x) / 2;
-        const my = (a.y + b.y) / 2;
-        const g = this.terrainAt(mx, my);
+        const g = this.terrainAt((a.x + b.x) / 2, (a.y + b.y) / 2);
         this.pinch = {
           d: Math.hypot(a.x - b.x, a.y - b.y),
           z: this.zoom,
           a: Math.atan2(b.y - a.y, b.x - a.x),
           yaw: this.yaw,
-          my,
+          my: (a.y + b.y) / 2,
           pitch: this.pitch,
-          mx,
           gx: g?.x ?? this.target.x,
           gy: g?.y ?? this.target.y,
           gz: g?.z ?? this.target.z,
+          a0: { ...a },
+          b0: { ...b },
+          mode: null,
+          rot: null,
         };
         this.yawTo = null;
         this.zoomGoal = null;
@@ -613,22 +626,32 @@ export class CityScene {
         p.y = e.clientY;
         const [a, b] = [...this.pointers.values()];
         const pc = this.pinch;
-        this.zoom = Math.max(0.12, Math.min(6, (pc.z * Math.hypot(a.x - b.x, a.y - b.y)) / pc.d));
-        // v12: twisting two fingers turns the island with them
-        const twist = Math.atan2(b.y - a.y, b.x - a.x) - pc.a;
-        this.yaw = pc.yaw - Math.atan2(Math.sin(twist), Math.cos(twist));
-        // v13: both fingers moving up or down tilt the camera
-        this.pitchOverride = clampPitch(
-          pc.pitch + ((a.y + b.y) / 2 - pc.my) * 0.004,
-          this.follow ? FOLLOW_PITCH_MIN : undefined,
-        );
-        // the ground under the fingers stays under them (zoom to the pinch, V13-D2)
-        if (!this.follow) {
-          this.anchor = { px: pc.mx, py: pc.my, x: pc.gx, y: pc.gy, z: pc.gz };
-          this.keepAnchor();
-          this.anchor = null;
+        // v13.1: decide once whether this is a tilt or a zoom, so one never leaks into the other
+        pc.mode ??= twoFingerMode(pc.a0, pc.b0, a, b);
+        const floor = this.follow ? FOLLOW_PITCH_MIN : undefined;
+        if (pc.mode === 'tilt') {
+          // both fingers up or down: tilt only, like R / F
+          this.pitchOverride = clampPitch(pc.pitch + ((a.y + b.y) / 2 - pc.my) * 0.004, floor);
+        } else if (pc.mode === 'zoom') {
+          this.zoom = Math.max(0.12, Math.min(6, (pc.z * Math.hypot(a.x - b.x, a.y - b.y)) / pc.d));
+          // a clear twist turns the island with the fingers (v12); a small one while pinching does not
+          const twist = wrapAngle(Math.atan2(b.y - a.y, b.x - a.x) - pc.a);
+          if (pc.rot === null && Math.abs(twist) > TWIST_START) pc.rot = twist;
+          if (pc.rot !== null) this.yaw = pc.yaw - (twist - pc.rot);
+          // the ground under the fingers stays under them, and moves with them (V13-D2)
+          if (!this.follow) {
+            this.anchor = {
+              px: (a.x + b.x) / 2,
+              py: (a.y + b.y) / 2,
+              x: pc.gx,
+              y: pc.gy,
+              z: pc.gz,
+            };
+            this.keepAnchor();
+            this.anchor = null;
+          }
+          if (this.follow && this.zoom < FOLLOW_MIN_ZOOM) this.setFollow(false);
         }
-        if (this.follow && this.zoom < FOLLOW_MIN_ZOOM) this.setFollow(false);
         this.moved += 10;
         this.dirty = true;
         return;
@@ -643,8 +666,9 @@ export class CityScene {
         p.y = e.clientY;
         return;
       }
-      const g0 = this.groundAt(p.x, p.y);
-      const g1 = this.groundAt(e.clientX, e.clientY);
+      // v13.1: on the grabbed ground's own height, so on a hill the land follows the finger
+      const g0 = this.planeAt(p.x, p.y, this.grabY);
+      const g1 = this.planeAt(e.clientX, e.clientY, this.grabY);
       p.x = e.clientX;
       p.y = e.clientY;
       if (g0 && g1) {
@@ -673,6 +697,13 @@ export class CityScene {
       const was = this.pointers.size;
       this.pointers.delete(e.pointerId);
       if (this.pointers.size < 2) this.pinch = null;
+      // one finger left after a pinch: it drags from where it is now
+      if (was === 2 && this.pointers.size === 1) {
+        const rest = [...this.pointers.values()][0]!;
+        this.grabY = this.terrainAt(rest.x, rest.y)?.y ?? this.target.y;
+        this.lastMove = performance.now();
+        this.panVel = { x: 0, z: 0 };
+      }
       // a drag that stopped before letting go does not glide
       if (performance.now() - this.lastMove > 80) this.panVel = { x: 0, z: 0 };
       if (was === 1 && this.moved < 6 && e.type === 'pointerup') this.pick(e.clientX, e.clientY);

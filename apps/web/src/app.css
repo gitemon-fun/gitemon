@@ -138,26 +138,6 @@ nav .mine {
   }
 }
 
-.zoom {
-  position: fixed;
-  right: 12px;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.zoom button {
-  width: 44px;
-  height: 44px;
-  font-size: 22px;
-  background: var(--card);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-  padding: 0;
-}
-.zoom .fit {
-  font-size: 18px;
-}
-
 .hint {
   position: fixed;
   left: 50%;
@@ -184,6 +164,8 @@ nav .mine {
   bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
   max-height: 70vh;
   overflow: auto;
+  /* v13.1: a sheet covers the HUD, never the other way round */
+  z-index: 20;
 }
 @media (min-width: 760px) {
   .sheet,
@@ -373,6 +355,7 @@ h2 {
   border-radius: 12px;
   font-size: 15px;
   max-width: calc(100vw - 32px);
+  z-index: 30;
 }
 
 /* v5 sealed legends (GRANDPLAN v5 §4): the sprite as a glowing silhouette, glow by tier */
@@ -421,35 +404,10 @@ h2 {
 .ico + .glyph {
   display: none;
 }
-.zoom .ico {
-  margin: 0;
-  width: 26px;
-  height: 26px;
-}
 .findbtn .ico {
   width: 18px;
   height: 18px;
   vertical-align: -3px;
-}
-.hud-compass {
-  position: fixed;
-  right: 16px;
-  bottom: 252px;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
-  display: grid;
-  place-items: center;
-  pointer-events: none;
-  z-index: 5;
-}
-.hud-compass img {
-  width: 34px;
-  height: 34px;
-  image-rendering: pixelated;
-  transition: transform 0.3s ease;
 }
 .hud-map {
   position: fixed;
@@ -497,9 +455,9 @@ h2 {
 }
 .hud-stick {
   position: fixed;
-  left: 50%;
-  bottom: 96px;
-  margin-left: -56px;
+  /* v13.1: under the left thumb, clear of the map's middle and of the button rail */
+  left: calc(env(safe-area-inset-left, 0px) + 24px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
   width: 112px;
   height: 112px;
   border-radius: 50%;
@@ -525,76 +483,148 @@ h2 {
     display: block;
   }
 }
-@media (max-width: 600px) {
-  /* on a phone the bottom belongs to the hint and the stick: the map sits under the top bar */
+/* ---- v13.1: one rail for every round button (bottom right), laid out for phones both ways ---- */
+.rail {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 12px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  z-index: 5;
+}
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hud-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #1d1d1f;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.hud-btn img {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+}
+.hud-btn img + .glyph {
+  display: none;
+}
+.hud-home .ico {
+  margin: 0;
+  width: 26px;
+  height: 26px;
+}
+.hud-compass {
+  border-radius: 50%;
+  pointer-events: none;
+}
+.hud-compass img {
+  width: 34px;
+  height: 34px;
+  transition: transform 0.3s ease;
+}
+.hud-follow.on {
+  background: var(--tint);
+  color: #fff;
+}
+/* phones and tablets: the minimap goes under the top bar, the bottom is for thumbs */
+@media (pointer: coarse), (max-width: 600px), (max-height: 560px) {
   .hud-map {
-    top: 72px;
+    top: calc(env(safe-area-inset-top, 0px) + 72px);
     bottom: auto;
-    left: 12px;
+    left: calc(env(safe-area-inset-left, 0px) + 12px);
   }
   .hud-map-body {
     width: 104px !important;
     height: 104px !important;
     order: 0;
   }
-  .hud-compass {
-    bottom: 236px;
+  .hint {
+    z-index: 4;
   }
-}
-.hud-sound {
-  position: fixed;
-  right: 16px;
-  bottom: 306px;
-  width: 44px;
-  height: 44px;
-  border: 0;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  z-index: 5;
-}
-.hud-sound img {
-  width: 32px;
-  height: 32px;
-  image-rendering: pixelated;
-}
-.hud-sound img + .glyph {
-  display: none;
 }
 @media (max-width: 600px) {
-  .hud-sound {
-    bottom: 290px;
+  .hint {
+    left: 12px;
+    right: 68px;
+    transform: none;
+    max-width: none;
+  }
+  .findbtn .label {
+    display: none;
+  }
+  .findbtn .ico {
+    margin: 0;
   }
 }
-/* v13 (V13-D4): the walk camera's button, above the sound button */
-.hud-follow {
-  position: fixed;
-  right: 16px;
-  bottom: 360px;
-  width: 44px;
-  height: 44px;
-  border: 0;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
-  font-size: 22px;
-  line-height: 1;
-  color: #1d1d1f;
-  cursor: pointer;
-  z-index: 5;
-}
-.hud-follow.on {
-  background: var(--tint);
-  color: #fff;
-}
-@media (max-width: 600px) {
-  .hud-follow {
-    bottom: 344px;
+/* the hint sits above the thumb stick while you walk (on its side the phone has room beside it) */
+@media (pointer: coarse) and (max-width: 600px) {
+  .hint.raised {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 152px);
   }
 }
+/* phone on its side: a slimmer bar, the map beside its toggle, the rail in two columns */
+@media (max-height: 560px) {
+  .bar {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    left: calc(env(safe-area-inset-left, 0px) + 8px);
+    right: calc(env(safe-area-inset-right, 0px) + 8px);
+    padding: 4px 6px 4px 12px;
+  }
+  .bar button,
+  .bar .signin,
+  .search input {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  .hud-map {
+    top: calc(env(safe-area-inset-top, 0px) + 58px);
+    flex-direction: row;
+  }
+  .hud-map-body {
+    width: 96px !important;
+    height: 96px !important;
+  }
+  .rail {
+    flex-direction: row;
+    gap: 6px;
+  }
+  .rail-group {
+    gap: 6px;
+  }
+  .hud-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .toast {
+    top: calc(env(safe-area-inset-top, 0px) + 58px);
+  }
+}
+@media (max-height: 560px) and (min-width: 560px) {
+  .sheet,
+  .panel {
+    left: auto;
+    right: calc(env(safe-area-inset-right, 0px) + 106px);
+    width: min(400px, 52vw);
+    top: calc(env(safe-area-inset-top, 0px) + 58px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    max-height: none;
+  }
+}
+
 /* v9 building panels */
 .guild-top {
   margin: 8px 0 0;
