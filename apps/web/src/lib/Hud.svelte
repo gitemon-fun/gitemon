@@ -150,6 +150,11 @@
   }
   function down(e: KeyboardEvent) {
     const k = e.key.toLowerCase();
+    // v12: Q / E turn the camera (walking or not)
+    if ((k === 'q' || k === 'e') && !typing(e)) {
+      if (!e.repeat) scene.spin(k === 'q' ? -1 : 1);
+      return;
+    }
     if (!walking || typing(e) || !KEYMAP[k]) return;
     e.preventDefault();
     keys.add(k);
@@ -157,6 +162,7 @@
   }
   function up(e: KeyboardEvent) {
     const k = e.key.toLowerCase();
+    if (k === 'q' || k === 'e') return scene.spin(0);
     if (!keys.delete(k)) return;
     fromKeys();
   }
@@ -191,7 +197,11 @@
   }
 </script>
 
-<svelte:window onkeydown={down} onkeyup={up} onblur={() => (keys.clear(), scene.steer(0, 0))} />
+<svelte:window
+  onkeydown={down}
+  onkeyup={up}
+  onblur={() => (keys.clear(), scene.steer(0, 0), scene.spin(0))}
+/>
 
 <div class="hud-compass" title="Compass: the needle points to Frost Peaks">
   <img

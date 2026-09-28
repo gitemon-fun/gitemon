@@ -94,7 +94,7 @@ export class CityScene {
   private labels = new THREE.Group();
   private detailOn = true;
   private pointers = new Map<number, { x: number; y: number }>();
-  private pinch: { d: number; z: number } | null = null;
+  private pinch: { d: number; z: number; a: number; yaw: number } | null = null;
   private moved = 0;
   private anim: {
     from: THREE.Vector3;
@@ -228,11 +228,26 @@ export class CityScene {
     this.sky.scale.setScalar(this.camera.far * 0.9);
   }
 
+  /** the ⟳ button: a quarter turn, eased (it used to jump) */
   rotate(step: number) {
     this.turn = (this.turn + step + 4) % 4;
-    this.yaw = Math.PI / 4 + (this.turn * Math.PI) / 2;
+    this.yawTo = (this.yawTo ?? this.yaw) + (step * Math.PI) / 2;
     this.dirty = true;
   }
+  /** v12: free rotation — by an angle now (drag, twist), or steadily while Q / E are held */
+  rotateBy(rad: number) {
+    this.yawTo = null;
+    this.yaw += rad;
+    this.dirty = true;
+  }
+  spin(dir: -1 | 0 | 1) {
+    this.spinning = dir;
+    if (dir) this.yawTo = null;
+    this.dirty = true;
+  }
+  private yawTo: number | null = null;
+  private spinning: -1 | 0 | 1 = 0;
+  private turning: { id: number; x: number } | null = null;
 
   zoomBy(f: number) {
     this.zoom = Math.max(0.12, Math.min(6, this.zoom * f));
@@ -271,17 +286,35 @@ export class CityScene {
 
   private bind() {
     const el = this.renderer.domElement;
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('pointerdown', (e) => {
       el.setPointerCapture(e.pointerId);
+      this.anim = null;
+      // v12: right-drag (or Shift + drag) turns the camera round the island
+      if (e.pointerType === 'mouse' && (e.button === 2 || e.shiftKey)) {
+        this.turning = { id: e.pointerId, x: e.clientX };
+        this.yawTo = null;
+        return;
+      }
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this.moved = 0;
-      this.anim = null;
       if (this.pointers.size === 2) {
         const [a, b] = [...this.pointers.values()];
-        this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: this.zoom };
+        this.pinch = {
+          d: Math.hypot(a.x - b.x, a.y - b.y),
+          z: this.zoom,
+          a: Math.atan2(b.y - a.y, b.x - a.x),
+          yaw: this.yaw,
+        };
+        this.yawTo = null;
       }
     });
     el.addEventListener('pointermove', (e) => {
+      if (this.turning && e.pointerId === this.turning.id) {
+        this.rotateBy((e.clientX - this.turning.x) * 0.006);
+        this.turning.x = e.clientX;
+        return;
+      }
       const p = this.pointers.get(e.pointerId);
       if (!p) return;
       if (this.pointers.size === 2 && this.pinch) {
@@ -292,6 +325,9 @@ export class CityScene {
           0.12,
           Math.min(6, (this.pinch.z * Math.hypot(a.x - b.x, a.y - b.y)) / this.pinch.d),
         );
+        // v12: twisting two fingers turns the island with them
+        const twist = Math.atan2(b.y - a.y, b.x - a.x) - this.pinch.a;
+        this.yaw = this.pinch.yaw - Math.atan2(Math.sin(twist), Math.cos(twist));
         this.moved += 10;
         this.dirty = true;
         return;
@@ -308,6 +344,10 @@ export class CityScene {
       }
     });
     const up = (e: PointerEvent) => {
+      if (this.turning && e.pointerId === this.turning.id) {
+        this.turning = null;
+        return;
+      }
       const was = this.pointers.size;
       this.pointers.delete(e.pointerId);
       if (this.pointers.size < 2) this.pinch = null;
@@ -839,10 +879,21 @@ export class CityScene {
     if (document.hidden) return;
     // walkers only matter when they are big enough to see: animate at street and district zoom
     const animate = this.crowd && this.zoom > 0.45;
-    if (!animate && !this.dirty && !this.anim && !this.walker?.walk && !this.steering) return;
+    const turning = this.spinning !== 0 || this.yawTo !== null;
+    if (!animate && !this.dirty && !this.anim && !this.walker?.walk && !this.steering && !turning)
+      return;
     if (now - this.last < 32) return; // ~30 fps is plenty for a city and kind to phones
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
+    // v12: Q / E turn steadily; the ⟳ quarter turn eases in
+    if (this.spinning) this.yaw += this.spinning * 1.6 * dt;
+    if (this.yawTo !== null) {
+      const d = this.yawTo - this.yaw;
+      if (Math.abs(d) < 0.002) {
+        this.yaw = this.yawTo;
+        this.yawTo = null;
+      } else this.yaw += d * Math.min(1, dt * 9);
+    }
     if (animate) this.clock += dt;
     for (const b of this.bob) b.obj.position.y = b.y + Math.sin(this.clock * 0.9) * 0.6;
     // water and air (v8 build 04): the air shows only close enough to be seen
