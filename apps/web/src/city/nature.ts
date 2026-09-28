@@ -75,6 +75,8 @@ export function terrain(isl: Island): THREE.Mesh {
   const DRY = rgb('#c2b060');
   const SALT = rgb('#cfe6f4');
   const faces = N * N * 2;
+  /** v12: the grid vertex behind each face corner, so corners can be averaged afterwards */
+  const vk = new Int32Array(faces * 3);
   const pos = new Float32Array(faces * 9);
   const nor = new Float32Array(faces * 9);
   const col = new Float32Array(faces * 9);
@@ -95,9 +97,8 @@ export function terrain(isl: Island): THREE.Mesh {
   /** one region's ground colour at a face (into cr, cg, cb) */
   const paint = (reg: number, y: number, cx: number, cz: number, steep: number) => {
     const p = PAL[reg]!;
-    if (steep > 0.45) set(p.rock);
-    else if (y < 1.1 && Math.hypot(cx, cz) > COAST - 40) set(p.shore);
-    else {
+    // v12 (V12-D3): colours by smooth thresholds, not hard cuts — rock, shore and ground blend
+    {
       set(p.low);
       mix(p.high, Math.min(1, y / 18));
       // climate details: heather in the marsh, frozen lakes, striped canyon walls, dry patches
@@ -108,7 +109,12 @@ export function terrain(isl: Island): THREE.Mesh {
       else if (p.climate === 'savanna' && u(cx / 7, cz / 7, 5) < 0.3) set(DRY);
       else if (p.climate === 'crystal' && u(cx / 6, cz / 6, 7) < 0.3) set(SALT);
     }
-    if (steep > 0.2 && steep <= 0.45) mix(p.rock, (steep - 0.2) * 2);
+    const sm = (e0: number, e1: number, x: number) => {
+      const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+      return t * t * (3 - 2 * t);
+    };
+    if (Math.hypot(cx, cz) > COAST - 40) mix(p.shore, 1 - sm(0.7, 1.6, y));
+    mix(p.rock, sm(0.18, 0.5, steep));
   };
   const tri = (
     k0: number,
@@ -195,6 +201,9 @@ export function terrain(isl: Island): THREE.Mesh {
     pos[o + 6] = x2;
     pos[o + 7] = y2;
     pos[o + 8] = z2;
+    vk[f * 3] = k0;
+    vk[f * 3 + 1] = k1;
+    vk[f * 3 + 2] = k2;
     for (let q = 0; q < 9; q += 3) {
       nor[o + q] = nx;
       nor[o + q + 1] = ny;
@@ -217,11 +226,77 @@ export function terrain(isl: Island): THREE.Mesh {
       tri(k00, k01, k10, x0, z0, x0, z0 + cell, x0 + cell, z0);
       tri(k10, k01, k11, x0 + cell, z0, x0, z0 + cell, x0 + cell, z0 + cell);
     }
+  // v12 (V12-D2): soft ground, crisp rock — each corner takes the average normal and colour of the
+  // faces meeting there; steep faces keep most of their own normal, so mountains stay faceted rock
+  {
+    const V = (N + 1) * (N + 1);
+    const acc = new Float32Array(V * 6);
+    const cnt = new Uint16Array(V);
+    for (let c = 0; c < f * 3; c++) {
+      const k = vk[c]!;
+      const o = c * 3;
+      acc[k * 6] += nor[o]!;
+      acc[k * 6 + 1] += nor[o + 1]!;
+      acc[k * 6 + 2] += nor[o + 2]!;
+      acc[k * 6 + 3] += col[o]!;
+      acc[k * 6 + 4] += col[o + 1]!;
+      acc[k * 6 + 5] += col[o + 2]!;
+      cnt[k]!++;
+    }
+    for (let c = 0; c < f * 3; c++) {
+      const k = vk[c]!;
+      const o = c * 3;
+      const n = cnt[k]!;
+      const l = Math.hypot(acc[k * 6]!, acc[k * 6 + 1]!, acc[k * 6 + 2]!) || 1;
+      const fy = nor[o + 1]!;
+      const t = Math.min(1, Math.max(0, (0.86 - fy) / 0.14)); // 0 gentle … 1 steep
+      const sx = (acc[k * 6]! / l) * (1 - t) + nor[o]! * t;
+      const sy = (acc[k * 6 + 1]! / l) * (1 - t) + fy * t;
+      const sz = (acc[k * 6 + 2]! / l) * (1 - t) + nor[o + 2]! * t;
+      const ll = Math.hypot(sx, sy, sz) || 1;
+      nor[o] = sx / ll;
+      nor[o + 1] = sy / ll;
+      nor[o + 2] = sz / ll;
+      col[o] = acc[k * 6 + 3]! / n;
+      col[o + 1] = acc[k * 6 + 4]! / n;
+      col[o + 2] = acc[k * 6 + 5]! / n;
+    }
+  }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, f * 9), 3));
   g.setAttribute('normal', new THREE.BufferAttribute(nor.subarray(0, f * 9), 3));
   g.setAttribute('color', new THREE.BufferAttribute(col.subarray(0, f * 9), 3));
-  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  // v12 (V12-D4): a painted ground — world-space value noise at two scales, a fine one close up
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWp;')
+      .replace(
+        '#include <worldpos_vertex>',
+        '#include <worldpos_vertex>\nvWp = (modelMatrix * vec4(transformed, 1.0)).xyz;',
+      );
+    sh.fragmentShader = sh.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vWp;
+float gh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float gv(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(gh(i), gh(i + vec2(1.0, 0.0)), f.x), mix(gh(i + vec2(0.0, 1.0)), gh(i + vec2(1.0, 1.0)), f.x), f.y);
+}`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+float gn = gv(vWp.xz * 0.35) * 0.6 + gv(vWp.xz * 1.7) * 0.4;
+float near = 1.0 - smoothstep(40.0, 160.0, distance(cameraPosition, vWp));
+diffuseColor.rgb *= 0.88 + 0.18 * gn + near * 0.08 * (gv(vWp.xz * 4.0) - 0.5);`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'terrain-v12';
+  const m = new THREE.Mesh(g, mat);
   m.receiveShadow = true;
   m.castShadow = true;
   return m;
@@ -381,16 +456,32 @@ const P = {
     ),
     null,
   ],
+  // v12 (V12-D6): a tuft — green blades with flattened blossoms on top (read as flowers, not confetti)
   flowers: [
-    null,
+    mg(
+      [0, 1, 2, 3, 4, 5].map((k) =>
+        new THREE.ConeGeometry(0.06, 0.5 + (k % 3) * 0.12, 3)
+          .translate(0, 0.25 + (k % 3) * 0.06, 0)
+          .rotateZ(Math.cos(k * 1.9) * 0.35)
+          .rotateX(Math.sin(k * 1.9) * 0.35)
+          .translate(Math.cos(k * 2.4) * 0.26, 0, Math.sin(k * 2.4) * 0.26),
+      ),
+    ),
     flatGrey(
       mg(
-        [0, 1, 2, 3, 4, 5, 6].map((k) =>
-          blob(0.22, Math.cos(k * 2.4) * (0.3 + k * 0.1), 0.2, Math.sin(k * 2.4) * (0.3 + k * 0.1)),
+        [0, 1, 2, 3, 4].map((k) =>
+          new THREE.IcosahedronGeometry(0.26, 0)
+            .scale(1, 0.55, 1)
+            .translate(
+              Math.cos(k * 2.5) * (0.2 + k * 0.07),
+              0.55 + (k % 2) * 0.12,
+              Math.sin(k * 2.5) * (0.2 + k * 0.07),
+            ),
         ),
       ),
     ),
   ],
+
   grass: [
     null,
     flatGrey(
@@ -454,7 +545,12 @@ const DRESS: Record<ClimateId, Rule[]> = {
     { p: 'bush', q: 0.14, leaf: ['#7a6a9a', '#8a7aaa', '#6a7a58'] },
   ],
   bloom: [
-    { p: 'flowers', q: 0.55, leaf: ['#f4a0c0', '#fff0a0', '#ffffff', '#c8a8f0', '#ffb88a'] },
+    {
+      p: 'flowers',
+      q: 0.55,
+      stem: '#9cc86a',
+      leaf: ['#f4a0c0', '#fff0a0', '#ffffff', '#c8a8f0', '#ffb88a'],
+    },
     { p: 'round', q: 0.1, stem: '#6b4a3a', leaf: '#8ec060' },
     { p: 'rock', q: 0.03, leaf: '#c0b4a0', when: (c) => c.slope > 0.3 },
   ],

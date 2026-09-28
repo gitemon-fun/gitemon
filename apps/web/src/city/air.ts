@@ -39,7 +39,12 @@ export function waterMesh(isl: Island, grid: THREE.DataTexture): THREE.Mesh {
     depthWrite: false,
     uniforms: THREE.UniformsUtils.merge([
       THREE.UniformsLib.fog,
-      { uGrid: { value: null }, uE: { value: isl.grid.E }, uTime: { value: 0 } },
+      {
+        uGrid: { value: null },
+        uE: { value: isl.grid.E },
+        uN: { value: isl.grid.N },
+        uTime: { value: 0 },
+      },
     ]),
     vertexShader: /* glsl */ `
       varying vec3 vW;
@@ -54,13 +59,27 @@ export function waterMesh(isl: Island, grid: THREE.DataTexture): THREE.Mesh {
     fragmentShader: /* glsl */ `
       ${GRID_GLSL}
       uniform float uTime;
+      uniform float uN;
       varying vec3 vW;
       #include <fog_pars_fragment>
       float n2(vec2 p) { return sin(p.x) * sin(p.y); }
+      // v12 (V12-D5): the grid texture is read one cell at a time (nearest), which drew the shoreline
+      // as a zigzag of cells; blend the four nearest heights here so depth and foam follow a smooth line
+      float groundAt(vec2 uv) {
+        vec2 p = uv * uN;
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        float t = 1.0 / (uN + 1.0);
+        float a = texture2D(uGrid, (i + vec2(0.5, 0.5)) * t).r;
+        float b = texture2D(uGrid, (i + vec2(1.5, 0.5)) * t).r;
+        float c = texture2D(uGrid, (i + vec2(0.5, 1.5)) * t).r;
+        float d = texture2D(uGrid, (i + vec2(1.5, 1.5)) * t).r;
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
       void main() {
         vec2 uv = gridUv(vW.xz);
         bool inGrid = uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0;
-        float ground = inGrid ? texture2D(uGrid, uv).r : -3.0;
+        float ground = inGrid ? groundAt(uv) : -3.0;
         float depth = clamp(${WATER_Y.toFixed(2)} - ground, 0.0, 4.0);
         vec3 shallow = vec3(0.49, 0.84, 0.80);
         vec3 deep = vec3(0.16, 0.45, 0.66);
