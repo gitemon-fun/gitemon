@@ -6,3 +6,5 @@ export * from './walk.js';
 export * from './town.js';
 export * from './gait.js';
 export * from './bridge.js';
+export * from './skew.js';
+export * from './watch.js';

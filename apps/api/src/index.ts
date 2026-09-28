@@ -860,16 +860,15 @@ app.post('/internal/legends', async (c) => {
     stmts.push(
       db
         .prepare(
-          `INSERT INTO legend (id, key, login, rank, tier, title, species, t1, t2, shape, form, shiny, imported_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET login=excluded.login, rank=excluded.rank, tier=excluded.tier,
+          `INSERT INTO legend (id, key, rank, tier, title, species, t1, t2, shape, form, shiny, imported_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET rank=excluded.rank, tier=excluded.tier,
              title=excluded.title, species=excluded.species, t1=excluded.t1, t2=excluded.t2,
              shape=excluded.shape, form=excluded.form, shiny=excluded.shiny, imported_at=excluded.imported_at`,
         )
         .bind(
           l.id,
           crypto.randomUUID().replace(/-/g, '').slice(0, 16),
-          l.login,
           l.rank,
           l.tier,
           l.title,

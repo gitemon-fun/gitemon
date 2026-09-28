@@ -4,6 +4,10 @@
  */
 import { internal, pump } from './lib.ts';
 import { daily } from './daily.ts';
+import { watch } from './watch.ts';
+
+// v11 (V11-D10): watch the site first, so an outage is reported even when the pass below fails
+await watch().catch((e) => console.error('watch failed', e));
 
 const pending = await internal<{ logins: string[] }>('/internal/pending');
 if (pending.logins.length) await pump(pending.logins, () => undefined);

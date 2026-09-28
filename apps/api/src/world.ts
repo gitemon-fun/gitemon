@@ -262,9 +262,10 @@ async function movePop(db: D1Database, from: TypeId | null, to: TypeId) {
   await db.batch(stmts);
 }
 
+/** v11: how many developers have hatched — signed-in players only (never hidden or wild rows) */
 export async function worldCount(db: D1Database): Promise<number> {
   const r = await db
-    .prepare('SELECT COALESCE(SUM(n), 0) AS n FROM biome_pop')
+    .prepare("SELECT COUNT(*) AS n FROM gitemon WHERE status = 'claimed' AND hidden = 0")
     .first<{ n: number }>();
   return r?.n ?? 0;
 }

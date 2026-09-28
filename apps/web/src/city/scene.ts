@@ -13,7 +13,7 @@ import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
 import { buildTown, plotHeight, type Town } from './town';
 import { airField } from './air';
-import { report } from '../lib/clientlog';
+import { recoverFromSkew, report } from '../lib/clientlog';
 
 /**
  * Gitemon Island renderer (GRANDPLAN v2 §3, v3 §3, v8 §0 V8-D4): a perspective camera with 4 snap
@@ -457,10 +457,12 @@ export class CityScene {
     cam.updateProjectionMatrix();
     this.renderer.shadowMap.needsUpdate = true;
     this.dirty = true;
-    setTimeout(() => {
-      this.probeDue = true;
-      this.dirty = true;
-    }, 1500);
+    // the frame check (v10 debugging) now runs only on request: ?diag
+    if (location.search.includes('diag'))
+      setTimeout(() => {
+        this.probeDue = true;
+        this.dirty = true;
+      }, 1500);
   }
 
   // ---- frame check (debugging a blank map on some GPUs) ------------------------------------------------
@@ -764,7 +766,15 @@ export class CityScene {
   async addPieces(city: Island, placed: Placed[], homes: Map<number, Home> = new Map()) {
     const t0 = performance.now();
     // the model loader is its own chunk: it is not needed for the first view
-    const { loadPieces } = await import('./models');
+    // v11 (V11-D8): after a deploy this chunk can be gone for a page opened earlier → reload once
+    let mod: typeof import('./models');
+    try {
+      mod = await import('./models');
+    } catch (e) {
+      if (!recoverFromSkew(e)) report('error', `models chunk: ${String(e)}`);
+      return;
+    }
+    const { loadPieces } = mod;
     const pcs = await loadPieces(city, placed, homes);
     if (!pcs) return;
     this.scene.add(pcs.group);

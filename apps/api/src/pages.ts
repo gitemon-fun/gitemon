@@ -162,13 +162,15 @@ export const privacyPage = () =>
 <li>We never ask for access to private repositories, and we never read them.</li></ul>
 <h2>What we store when you sign in</h2><ul>
 <li>Your GitHub user id and the sign-in account id from our login provider (WorkOS), plus the email GitHub shares with it.</li>
+<li>A copy of the public GitHub data listed above, refreshed while you play, and the Gitemon made from it.</li>
 <li>Your GitHub sign-in token, encrypted. It can only read public profile data, and we use it only to refresh your own Gitemon and to check "bonded" catches.</li>
-<li>Your catches, your Dex and your town.</li></ul>
+<li>Your catches, your Dex, your steps and streaks, your Legend Log, and your house sign if you set one.</li></ul>
 <h2>What we never store</h2><ul>
 <li>Where you live. We do not read or keep your GitHub location.</li>
 <li>Anything about developers who have not signed in — with one exception below.</li></ul>
 <h2>Sealed legends</h2><p>The island's 500 sealed legends are ranked from public information (Wikipedia, Wikidata and public GitHub follower counts). For each one we keep only its GitHub user id, its rank and its creature — no profile, no name on the page, no link to a person. Nobody can tell whose legend is whose. If it is yours, sign in with GitHub: you can wake it (it then shows with your name) or remove it, and a removed legend is never added again.</p>
-<h2>Cookies</h2><p>One cookie keeps you signed in. There is no analytics, no advertising and no tracking, so there is nothing to consent to.</p>
+<h2>Cookies</h2><p>One cookie keeps you signed in. Two short-lived ones exist only while you sign in. There is no analytics, no advertising and no tracking, so there is nothing to consent to.</p>
+<h2>Error reports</h2><p>If the map breaks in your browser, it sends us the error message and your browser's name so we can fix it. No account, no address, no location. We keep only the newest 500 reports.</p>
 <h2>We never contact you</h2><p>If another player catches your Gitemon, we do not email you, mention you or open issues. You find out when you visit.</p>
 <h2>Remove your Gitemon</h2><p>Sign in with GitHub and choose <b>Release</b> on your Gitemon. It disappears from the map, search, profile pages and every Dex at once. You can bring it back the same way.</p>
 <h2>Questions</h2><p>Open an issue on <a href="https://github.com/gitemon-fun/gitemon/issues">github.com/gitemon-fun/gitemon</a>.</p></section>`,
@@ -196,7 +198,7 @@ export const homePage = (count: number) =>
     path: '/',
     body: `<section class="card"><h1>Every developer is a creature.</h1>
 <a href="/map"><img src="/og-default.png" width="1200" height="630" alt="Gitemon Island: a round town with a golden spire and stone legend statues, ringed by giant wonders — a frozen waterfall, a blossom tree, a world tree, a volcano forge — and the sea" style="width:100%;height:auto;border-radius:14px;margin:4px 0 14px"></a>
-<p class="sub">Sign in with GitHub and your public work hatches into a pixel Gitemon on Gitemon Island. Its type comes from your languages. Its power comes from work other people accepted — never from raw volume. ${count.toLocaleString('en-US')} developers have hatched so far, and 500 sealed legends are waiting for theirs.</p>
+<p class="sub">Sign in with GitHub and your public work hatches into a pixel Gitemon on Gitemon Island. Its type comes from your languages. Its power comes from work other people accepted — never from raw volume. ${count.toLocaleString('en-US')} ${count === 1 ? 'developer has' : 'developers have'} hatched so far, and 500 sealed legends are waiting for theirs.</p>
 <div class="btns"><a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn" href="/map">Open the island</a></div></section>
 <section class="card"><h2>How it works</h2><ul>
 <li><b>Hatch.</b> Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you. No two are the same: your main language picks the creature, your second language colours its markings, and it stands a little taller as your steady work grows.</li>
