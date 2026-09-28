@@ -33,7 +33,7 @@ tokens unreadable; players simply sign in again.
 
 `scripts/drain.ts` hatches requested developers and refreshes stale ones, and once a UTC day runs
 `scripts/daily.ts`: it freezes the island layout, every legend's spot and the day's Merit House
-holders (top 3 by merit per region, kept while top 5). Run it every 2 minutes
+holders (top 3 by merit per region, kept while top 5, only at merit ≥ 50). Run it every 2 minutes
 with `GITHUB_TOKEN` and `GITEMON_INTERNAL_KEY`. `/health` reports `pending` and `pendingOldestMin`;
 every fetcher pass also watches the site (`scripts/watch.ts`): when `/health` stops answering or the oldest request waits over 30 minutes it runs `GITEMON_ALERT_CMD` with the message (set in the fetcher's service unit), repeats at most every 6 hours, and says when it recovers. If the fetcher's machine itself goes down, an off-box watchdog on that machine's heartbeat raises the alarm.
 

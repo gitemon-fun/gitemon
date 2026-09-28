@@ -17,6 +17,12 @@ every stat is log-scaled with a ceiling. Commits to your own repos count for not
 so AI-generated volume changes nothing either. The whole scorer is a pure function in
 [`packages/scorer`](packages/scorer/src/index.ts); read it, and send a PR if you think it's unfair.
 
+**Status is earned, not handed out.** Standing comes from _merit_: steady work over time, not volume.
+The plaza round the monument holds only the top 1 % of players, and only at merit 75 or more. A Merit
+House needs merit 50, a mini-plaza seat 40, and a seat nobody has earned stays empty. Steady work also
+evolves your Gitemon (Form 2 at merit 40, Form 3 at 70), and it never evolves back. The numbers live in
+[`packages/shared/src/standing.ts`](packages/shared/src/standing.ts).
+
 **Privacy:** Gitemon never requests access to private repositories and never contacts anyone. Your
 private work counts only through the anonymous number GitHub itself shows on your profile, and only
 if you turned that setting on.

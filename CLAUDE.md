@@ -46,7 +46,7 @@
 ## Authoritative decisions (mirror — ledger is `…/DECISIONS.md`)
 
 - D1 creatures on one map · D4 login = belonging · D6 power ≠ size · D8 AGPL, art/name closed · D9 no private repos · D14 no notifications
-- V5 consent: normal Gitemon only after sign-in; sealed legends carry no identity until woken · V7 merit = consistency over volume · V9 houses = top 3 merit per region (not claim order)
+- V5 consent: normal Gitemon only after sign-in; sealed legends carry no identity until woken · V7 merit = consistency over volume · V9 houses = top 3 merit per region (not claim order) · V11 status is earned: plaza = top 1 % at merit ≥ 75, house ≥ 50, mini seat ≥ 40, evolution by merit (40/70, never back), climbing adds places and never displaces a legend (`standing.ts`)
 
 ## Conventions
 

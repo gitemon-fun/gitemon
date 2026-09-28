@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {
+  PLAZA_R,
   TOWN_Y,
   bridgeLift,
   bridgesOf,
@@ -743,7 +744,13 @@ export class CityScene {
       const sp = p.g.special;
       // v11 (V11-D6): a player holding a plaza seat — the top 1 % — gets a thin pale pillar, so the
       // island's best players can be found from the overview (thinner and paler than a legend's)
-      if ((!sp || sp.earned) && p.spot.kind === 'plaza' && !p.g.special?.sealed) {
+      // (mini plazas use the 'plaza' kind too — the main plaza is the one round the monument)
+      if (
+        (!sp || sp.earned) &&
+        p.spot.kind === 'plaza' &&
+        Math.hypot(p.spot.x, p.spot.z) < PLAZA_R &&
+        !p.g.special?.sealed
+      ) {
         beam(p.spot.x, p.spot.y, p.spot.z, '#fff3dc', 0.5, 34, 0.13);
         continue;
       }
