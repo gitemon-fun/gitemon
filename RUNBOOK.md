@@ -61,6 +61,15 @@ draw anything: pixels, draw calls, camera, fog) to `POST /api/clientlog`. Report
 keeps the newest 500: `npx wrangler d1 execute gitemon --remote -c wrangler.deploy.toml --command
 "SELECT * FROM clientlog ORDER BY id DESC LIMIT 20"`.
 
+## Camera (v13)
+
+The camera's pure maths (springs, tilt limits, the walk camera's three-quarter angle) lives in
+`packages/shared/src/camera.ts` with its tests; the input and the zoom-to-cursor solver are in
+`apps/web/src/city/scene.ts`. `/map?debug` exposes the scene as `window.city` for measuring: the
+ground point under the pointer (`city.terrainAt(x, y)`) should stay under the pointer through a wheel
+zoom. It does to under 1 px, except where a hill between the camera and the pointer lifts the camera
+(the pivot must stay in view); there the zoom stops at the nearest view the hill allows.
+
 ## Creature art (v10)
 
 The 54 creatures (18 evolution lines × 3 forms) are made with free Meta AI images, one conversation per

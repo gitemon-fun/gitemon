@@ -4,6 +4,7 @@ Every GitHub developer, hatched into a pixel creature on one shared island — *
 
 - **Hatch.** Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you. No two look the same: your main language picks the creature, your second language colours its markings, and each one moves in its own way (it hops, waddles, trots, slithers or floats).
 - **Walk.** Tap the map, or steer with WASD, the arrow keys or a thumb stick. Real GitHub work earns more steps each day.
+- **Look around.** The island camera works like a city builder: drag to pan (it glides when you let go), the wheel zooms toward the pointer, right-drag or Shift + drag turns and tilts, and two fingers pinch, twist and tilt. Keys: WASD or the arrows pan, Q / E turn, R / F tilt, + / − zoom. Double-click puts the tilt back. When you walk, the camera follows your Gitemon from a three-quarter view; drag to look round it, and press the Follow button (◎) or zoom far out to leave.
 - **Catch.** Walk up to another player's Gitemon and catch it. Worked together for real? It's a _bonded_ catch.
 - **Find the legends.** 500 sealed legends sleep on the island, nameless, until their own developer signs in and wakes or removes theirs. Every legend you pass goes into your Legend Log.
 - **Belong.** Nine climate lands round a centre town. Your language decides your land and your guild hall; guilds compete each week on active members.

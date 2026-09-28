@@ -1,7 +1,17 @@
 import * as THREE from 'three';
 import {
+  FOLLOW_MIN_ZOOM,
+  FOLLOW_OFFSET,
+  FOLLOW_PITCH,
+  FOLLOW_PITCH_MIN,
   PLAZA_R,
   TOWN_Y,
+  WATER_Y,
+  approach,
+  approachAngle,
+  clampPitch,
+  decay,
+  followYaw,
   bridgeLift,
   bridgesOf,
   gridHeight,
@@ -94,7 +104,18 @@ export class CityScene {
   private labels = new THREE.Group();
   private detailOn = true;
   private pointers = new Map<number, { x: number; y: number }>();
-  private pinch: { d: number; z: number; a: number; yaw: number } | null = null;
+  private pinch: {
+    d: number;
+    z: number;
+    a: number;
+    yaw: number;
+    my: number;
+    pitch: number;
+    mx: number;
+    gx: number;
+    gy: number;
+    gz: number;
+  } | null = null;
   private moved = 0;
   private anim: {
     from: THREE.Vector3;
@@ -178,10 +199,11 @@ export class CityScene {
     );
     return t * t * (3 - 2 * t);
   }
-  /** camera elevation (radians) */
+  /** camera elevation (radians): automatic with zoom unless the player tilted it (v13, V13-D2) */
   private get pitch() {
-    return PITCH_HIGH + (PITCH_LOW - PITCH_HIGH) * this.tilt;
+    return this.pitchOverride ?? PITCH_HIGH + (PITCH_LOW - PITCH_HIGH) * this.tilt;
   }
+  private pitchOverride: number | null = null;
 
   /** the island's height grid, so the camera never dips under a hill */
   private groundGrid: Island['grid'] | null = null;
@@ -205,7 +227,9 @@ export class CityScene {
     // aim at the real ground (the volcano is 50 m up), then lift the camera until no hill is in the way
     if (this.groundGrid) {
       const g = gridHeight(this.groundGrid, this.target.x, this.target.z);
-      this.target.y += (Math.max(TOWN_Y, g) - this.target.y) * (this.anim ? 1 : 0.25);
+      // (settles at once while flying or zooming to the cursor, so the anchored point holds still)
+      this.target.y +=
+        (Math.max(TOWN_Y, g) - this.target.y) * (this.anim || this.anchor ? 1 : 0.25);
     }
     this.camera.position.copy(this.target).addScaledVector(dir, d);
     if (this.groundGrid) {
@@ -220,7 +244,11 @@ export class CityScene {
       c.y = y;
     }
     // low down, aim a little above the target so the land ahead fills the frame, not the ground at our feet
-    this.camera.lookAt(this.target.x, this.target.y + d * 0.14 * this.tilt, this.target.z);
+    // (the walk camera keeps your Gitemon nearer the middle: it aims less far ahead)
+    const low =
+      Math.min(1, Math.max(0, (PITCH_HIGH - e) / (PITCH_HIGH - PITCH_LOW))) *
+      (this.follow ? 0.35 : 1);
+    this.camera.lookAt(this.target.x, this.target.y + d * 0.14 * low, this.target.z);
     const fog = this.scene.fog as THREE.Fog;
     fog.near = d * 0.9;
     fog.far = d * 4.2 + 300;
@@ -247,14 +275,250 @@ export class CityScene {
   }
   private yawTo: number | null = null;
   private spinning: -1 | 0 | 1 = 0;
-  private turning: { id: number; x: number } | null = null;
+  private turning: { id: number; x: number; y: number; t: number } | null = null;
+  private lastMove = 0;
 
+  /** the + / − buttons and keys: an eased zoom at the centre */
   zoomBy(f: number) {
-    this.zoom = Math.max(0.12, Math.min(6, this.zoom * f));
+    this.zoomGoal = Math.max(0.12, Math.min(6, (this.zoomGoal ?? this.zoom) * f));
+    this.anchor = null;
+    if (this.follow && this.zoomGoal < FOLLOW_MIN_ZOOM) this.setFollow(false);
     this.dirty = true;
   }
 
+  // ---- v13 camera: goals, inertia, keys, the walk camera ------------------------------------------
+  private zoomGoal: number | null = null;
+  /** zoom to the cursor (V13-D2): this ground point (on the real terrain) stays under this screen point */
+  private anchor: { px: number; py: number; x: number; y: number; z: number } | null = null;
+  private panVel = { x: 0, z: 0 };
+  private yawVel = 0;
+  private panKeys = { x: 0, y: 0 };
+  private tiltKeys = 0;
+  private follow = false;
+  private orbitAt = 0;
+  private pitchSaved: number | null = null;
+  private lastWalk: { x: number; z: number } | null = null;
+  /** set by the HUD: the walk camera turned on or off */
+  onFollow: ((on: boolean) => void) | null = null;
+  get following() {
+    return this.follow;
+  }
+  /** V13-D4: the walk camera — on when you start moving your Gitemon, off by button or zoom-out */
+  setFollow(on: boolean) {
+    if (on === this.follow || (on && !this.walker)) return;
+    this.follow = on;
+    if (on) {
+      this.pitchSaved = this.pitchOverride;
+      this.pitchOverride = FOLLOW_PITCH;
+      this.anim = null;
+      this.zoomGoal = Math.max(this.zoomGoal ?? this.zoom, 3.4);
+      this.anchor = null;
+      this.orbitAt = 0;
+    } else {
+      this.pitchOverride = this.pitchSaved;
+      this.pitchSaved = null;
+    }
+    this.onFollow?.(on);
+    this.dirty = true;
+  }
+  /** WASD / arrows when not walking (V13-D3): screen-relative pan, x right, y up */
+  pan(x: number, y: number) {
+    this.panKeys = { x, y };
+    if (x || y) this.anim = null;
+    this.dirty = true;
+  }
+  /** R / F: tilt down (1) or up (-1) while held */
+  tiltKey(dir: -1 | 0 | 1) {
+    this.tiltKeys = dir;
+    this.dirty = true;
+  }
+  /** double-click: back to the automatic tilt (or, walking, back behind your Gitemon) */
+  resetView() {
+    if (this.follow) {
+      this.orbitAt = 0;
+      this.pitchOverride = FOLLOW_PITCH;
+    } else this.pitchOverride = null;
+    this.dirty = true;
+  }
+  /** the steering frame: in the walk camera it sits ~34° off the camera, so you see your Gitemon from the side */
+  private get controlYaw() {
+    return this.follow ? this.yaw - FOLLOW_OFFSET : this.yaw;
+  }
+  private get moving() {
+    return (
+      this.zoomGoal !== null ||
+      Math.abs(this.panVel.x) + Math.abs(this.panVel.z) > 0.02 ||
+      Math.abs(this.yawVel) > 0.002 ||
+      this.panKeys.x !== 0 ||
+      this.panKeys.y !== 0 ||
+      this.tiltKeys !== 0
+    );
+  }
+  private stepCamera(dt: number) {
+    const held = this.pointers.size > 0 || this.turning !== null;
+    // keys: pan relative to the screen, tilt
+    if (this.panKeys.x || this.panKeys.y) {
+      const v = this.span * 0.9 * dt;
+      const fx = -Math.cos(this.yaw);
+      const fz = -Math.sin(this.yaw);
+      const rx = Math.sin(this.yaw);
+      const rz = -Math.cos(this.yaw);
+      this.target.x += (fx * this.panKeys.y + rx * this.panKeys.x) * v;
+      this.target.z += (fz * this.panKeys.y + rz * this.panKeys.x) * v;
+    }
+    if (this.tiltKeys)
+      this.pitchOverride = clampPitch(
+        this.pitch + this.tiltKeys * 0.9 * dt,
+        this.follow ? FOLLOW_PITCH_MIN : undefined,
+      );
+    // inertia: a released drag glides and settles (G2)
+    if (!held) {
+      this.target.x += this.panVel.x * dt;
+      this.target.z += this.panVel.z * dt;
+      this.panVel.x = decay(this.panVel.x, dt, 7);
+      this.panVel.z = decay(this.panVel.z, dt, 7);
+      this.yaw += this.yawVel * dt;
+      this.yawVel = decay(this.yawVel, dt, 7);
+    }
+    // eased zoom; to the cursor when there is an anchor (G1)
+    if (this.zoomGoal !== null) {
+      this.zoom = approach(this.zoom, this.zoomGoal, dt, 12);
+      if (Math.abs(this.zoom - this.zoomGoal) < 0.0005) {
+        this.zoom = this.zoomGoal;
+        this.zoomGoal = null;
+      }
+      if (this.anchor) this.keepAnchor();
+      if (this.zoomGoal === null) this.anchor = null;
+    }
+    // the walk camera: follow the Gitemon; on a tapped walk, turn lazily behind-and-beside it
+    const w = this.walker;
+    if (this.follow && w) {
+      this.target.x = approach(this.target.x, w.x, dt, 6);
+      this.target.z = approach(this.target.z, w.z, dt, 6);
+      const last = this.lastWalk;
+      if (w.walk && last && performance.now() - this.orbitAt > 2500) {
+        const dx = w.x - last.x;
+        const dz = w.z - last.z;
+        if (Math.hypot(dx, dz) > 0.02)
+          this.yaw = approachAngle(this.yaw, followYaw(Math.atan2(dz, dx), this.yaw), dt, 1 / 1.2);
+      }
+      this.lastWalk = { x: w.x, z: w.z };
+    }
+  }
+  /**
+   * Move the pivot so the anchored ground point sits under its screen point again (G1). The camera
+   * lifts itself over hills, so a pivot move does not shift the view evenly: solve it with Newton's
+   * method on the measured screen error (a numeric Jacobian, a few steps). A step is only kept when it
+   * lowers the error, else it is halved: near a hill the lift bends the error sharply, and full steps
+   * bounced between two wrong views.
+   */
+  private keepAnchor() {
+    const a = this.anchor!;
+    const P = new THREE.Vector3();
+    const err = (): [number, number] => {
+      this.placeCamera();
+      // the projection reads the camera's world matrix, which three.js only refreshes when it renders
+      this.camera.updateMatrixWorld();
+      const r = this.renderer.domElement.getBoundingClientRect();
+      P.set(a.x, a.y, a.z).project(this.camera);
+      return [((P.x + 1) / 2) * r.width + r.left - a.px, ((1 - P.y) / 2) * r.height + r.top - a.py];
+    };
+    const t = this.target;
+    const h = Math.max(0.05, this.span * 0.002);
+    for (let k = 0; k < 5; k++) {
+      const e0 = err();
+      if (Math.hypot(e0[0], e0[1]) < 0.25) return;
+      t.x += h;
+      const ex = err();
+      t.x -= h;
+      t.z += h;
+      const ez = err();
+      t.z -= h;
+      const j11 = (ex[0] - e0[0]) / h;
+      const j12 = (ez[0] - e0[0]) / h;
+      const j21 = (ex[1] - e0[1]) / h;
+      const j22 = (ez[1] - e0[1]) / h;
+      const det = j11 * j22 - j12 * j21;
+      if (Math.abs(det) < 1e-9) return;
+      let dx = (-e0[0] * j22 + e0[1] * j12) / det;
+      let dz = (-e0[1] * j11 + e0[0] * j21) / det;
+      const lim = this.span * 0.5;
+      const l = Math.hypot(dx, dz);
+      if (l > lim) {
+        dx *= lim / l;
+        dz *= lim / l;
+      }
+      const n0 = Math.hypot(e0[0], e0[1]);
+      let kept = false;
+      for (let s = 0; s < 8 && !kept; s++) {
+        t.x += dx;
+        t.z += dz;
+        const e1 = err();
+        if (Math.hypot(e1[0], e1[1]) < n0) kept = true;
+        else {
+          t.x -= dx;
+          t.z -= dz;
+          dx /= 2;
+          dz /= 2;
+        }
+      }
+      if (!kept) break;
+    }
+    this.placeCamera();
+  }
+  /** where the pointer's ray meets a level sheet at height y */
+  private planeAt(px: number, py: number, y: number): THREE.Vector3 | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(
+      new THREE.Vector2(((px - r.left) / r.width) * 2 - 1, -((py - r.top) / r.height) * 2 + 1),
+      this.camera,
+    );
+    const hit = new THREE.Vector3();
+    return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), hit)
+      ? hit
+      : null;
+  }
+  /** where the pointer's ray first meets the land (or the water surface) */
+  terrainAt(px: number, py: number): THREE.Vector3 | null {
+    const grid = this.groundGrid;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    this.camera.updateMatrixWorld();
+    ray.setFromCamera(
+      new THREE.Vector2(((px - r.left) / r.width) * 2 - 1, -((py - r.top) / r.height) * 2 + 1),
+      this.camera,
+    );
+    const o = ray.ray.origin;
+    const d = ray.ray.direction;
+    const floor = (x: number, z: number) =>
+      grid ? Math.max(WATER_Y, Math.hypot(x, z) < 72 ? TOWN_Y : gridHeight(grid, x, z)) : 0;
+    let prev = 0;
+    for (let t = 1; t < this.camera.far; t *= 1.04) {
+      const x = o.x + d.x * t;
+      const y = o.y + d.y * t;
+      const z = o.z + d.z * t;
+      if (y <= floor(x, z)) {
+        // bisect between the last step above and this one below
+        let lo = prev;
+        let hi = t;
+        for (let k = 0; k < 20; k++) {
+          const m = (lo + hi) / 2;
+          if (o.y + d.y * m <= floor(o.x + d.x * m, o.z + d.z * m)) hi = m;
+          else lo = m;
+        }
+        return new THREE.Vector3(o.x + d.x * hi, o.y + d.y * hi, o.z + d.z * hi);
+      }
+      prev = t;
+    }
+    return null;
+  }
+
   flyTo(x: number, z: number, zoom = 2.6) {
+    this.setFollow(false);
+    this.zoomGoal = null;
+    this.anchor = null;
+    this.panVel = { x: 0, z: 0 };
     this.anim = {
       from: this.target.clone(),
       to: new THREE.Vector3(x, 0, z),
@@ -287,32 +551,59 @@ export class CityScene {
   private bind() {
     const el = this.renderer.domElement;
     el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('dblclick', () => this.resetView());
     el.addEventListener('pointerdown', (e) => {
       el.setPointerCapture(e.pointerId);
       this.anim = null;
-      // v12: right-drag (or Shift + drag) turns the camera round the island
+      // a new touch catches the glide
+      this.panVel = { x: 0, z: 0 };
+      this.yawVel = 0;
+      // v12/v13: right-drag (or Shift + drag) turns and tilts the camera
       if (e.pointerType === 'mouse' && (e.button === 2 || e.shiftKey)) {
-        this.turning = { id: e.pointerId, x: e.clientX };
+        this.turning = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
         this.yawTo = null;
         return;
       }
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this.moved = 0;
+      this.lastMove = performance.now();
       if (this.pointers.size === 2) {
         const [a, b] = [...this.pointers.values()];
+        const mx = (a.x + b.x) / 2;
+        const my = (a.y + b.y) / 2;
+        const g = this.terrainAt(mx, my);
         this.pinch = {
           d: Math.hypot(a.x - b.x, a.y - b.y),
           z: this.zoom,
           a: Math.atan2(b.y - a.y, b.x - a.x),
           yaw: this.yaw,
+          my,
+          pitch: this.pitch,
+          mx,
+          gx: g?.x ?? this.target.x,
+          gy: g?.y ?? this.target.y,
+          gz: g?.z ?? this.target.z,
         };
         this.yawTo = null;
+        this.zoomGoal = null;
       }
     });
     el.addEventListener('pointermove', (e) => {
+      const now = performance.now();
       if (this.turning && e.pointerId === this.turning.id) {
-        this.rotateBy((e.clientX - this.turning.x) * 0.006);
-        this.turning.x = e.clientX;
+        const t = this.turning;
+        const dyaw = (e.clientX - t.x) * 0.006;
+        this.rotateBy(dyaw);
+        // v13 (V13-D2): up and down tilts
+        this.pitchOverride = clampPitch(
+          this.pitch + (e.clientY - t.y) * 0.004,
+          this.follow ? FOLLOW_PITCH_MIN : undefined,
+        );
+        this.yawVel = dyaw / Math.max(0.008, (now - t.t) / 1000);
+        t.x = e.clientX;
+        t.y = e.clientY;
+        t.t = now;
+        if (this.follow) this.orbitAt = now;
         return;
       }
       const p = this.pointers.get(e.pointerId);
@@ -321,15 +612,35 @@ export class CityScene {
         p.x = e.clientX;
         p.y = e.clientY;
         const [a, b] = [...this.pointers.values()];
-        this.zoom = Math.max(
-          0.12,
-          Math.min(6, (this.pinch.z * Math.hypot(a.x - b.x, a.y - b.y)) / this.pinch.d),
-        );
+        const pc = this.pinch;
+        this.zoom = Math.max(0.12, Math.min(6, (pc.z * Math.hypot(a.x - b.x, a.y - b.y)) / pc.d));
         // v12: twisting two fingers turns the island with them
-        const twist = Math.atan2(b.y - a.y, b.x - a.x) - this.pinch.a;
-        this.yaw = this.pinch.yaw - Math.atan2(Math.sin(twist), Math.cos(twist));
+        const twist = Math.atan2(b.y - a.y, b.x - a.x) - pc.a;
+        this.yaw = pc.yaw - Math.atan2(Math.sin(twist), Math.cos(twist));
+        // v13: both fingers moving up or down tilt the camera
+        this.pitchOverride = clampPitch(
+          pc.pitch + ((a.y + b.y) / 2 - pc.my) * 0.004,
+          this.follow ? FOLLOW_PITCH_MIN : undefined,
+        );
+        // the ground under the fingers stays under them (zoom to the pinch, V13-D2)
+        if (!this.follow) {
+          this.anchor = { px: pc.mx, py: pc.my, x: pc.gx, y: pc.gy, z: pc.gz };
+          this.keepAnchor();
+          this.anchor = null;
+        }
+        if (this.follow && this.zoom < FOLLOW_MIN_ZOOM) this.setFollow(false);
         this.moved += 10;
         this.dirty = true;
+        return;
+      }
+      // v13: in the walk camera a drag orbits round your Gitemon instead of moving the map
+      if (this.follow) {
+        this.rotateBy((e.clientX - p.x) * 0.006);
+        this.pitchOverride = clampPitch(this.pitch + (e.clientY - p.y) * 0.004, FOLLOW_PITCH_MIN);
+        this.moved += Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y);
+        this.orbitAt = now;
+        p.x = e.clientX;
+        p.y = e.clientY;
         return;
       }
       const g0 = this.groundAt(p.x, p.y);
@@ -337,20 +648,33 @@ export class CityScene {
       p.x = e.clientX;
       p.y = e.clientY;
       if (g0 && g1) {
-        this.target.x -= g1.x - g0.x;
-        this.target.z -= g1.z - g0.z;
+        const dx = g1.x - g0.x;
+        const dz = g1.z - g0.z;
+        this.target.x -= dx;
+        this.target.z -= dz;
+        // v13: remember how fast it moved, so a release glides (inertia, G2)
+        const dts = Math.max(0.008, (now - this.lastMove) / 1000);
+        this.panVel = {
+          x: this.panVel.x * 0.4 + (-dx / dts) * 0.6,
+          z: this.panVel.z * 0.4 + (-dz / dts) * 0.6,
+        };
+        this.lastMove = now;
         this.moved += Math.abs(e.movementX) + Math.abs(e.movementY) + 1;
         this.dirty = true;
       }
     });
     const up = (e: PointerEvent) => {
       if (this.turning && e.pointerId === this.turning.id) {
+        // a slow release does not keep turning
+        if (performance.now() - this.turning.t > 80) this.yawVel = 0;
         this.turning = null;
         return;
       }
       const was = this.pointers.size;
       this.pointers.delete(e.pointerId);
       if (this.pointers.size < 2) this.pinch = null;
+      // a drag that stopped before letting go does not glide
+      if (performance.now() - this.lastMove > 80) this.panVel = { x: 0, z: 0 };
       if (was === 1 && this.moved < 6 && e.type === 'pointerup') this.pick(e.clientX, e.clientY);
     };
     el.addEventListener('pointerup', up);
@@ -360,7 +684,16 @@ export class CityScene {
       (e) => {
         e.preventDefault();
         this.anim = null;
-        this.zoomBy(Math.exp(-e.deltaY * 0.0018));
+        const goal = Math.max(
+          0.12,
+          Math.min(6, (this.zoomGoal ?? this.zoom) * Math.exp(-e.deltaY * 0.0018)),
+        );
+        if (this.follow && goal < FOLLOW_MIN_ZOOM) this.setFollow(false);
+        // v13 (V13-D2): zoom toward the ground under the pointer (in the walk camera: your Gitemon)
+        const g = this.follow ? null : this.terrainAt(e.clientX, e.clientY);
+        this.anchor = g ? { px: e.clientX, py: e.clientY, x: g.x, y: g.y, z: g.z } : null;
+        this.zoomGoal = goal;
+        this.dirty = true;
       },
       { passive: false },
     );
@@ -623,7 +956,7 @@ export class CityScene {
     this.stick = l > 1 ? { x: x / l, y: y / l } : { x, y };
     if (l > 0 && this.walker) {
       this.walker.walk = null; // steering takes over from a tapped walk
-      if (this.zoom < 2.2) this.flyTo(this.walker.x, this.walker.z, 2.6);
+      this.setFollow(true); // v13 (V13-D4): moving your Gitemon turns the walk camera on
     }
     this.dirty = true;
   }
@@ -633,11 +966,12 @@ export class CityScene {
   private stepSteer(dt: number) {
     const w = this.walker;
     if (!w || !this.walkable || !this.crowd || !this.walkCity || !this.steering) return;
-    // up the screen = away from the camera along the ground
-    const fx = -Math.cos(this.yaw);
-    const fz = -Math.sin(this.yaw);
-    const rx = Math.sin(this.yaw);
-    const rz = -Math.cos(this.yaw);
+    // up the screen = away from the camera along the ground (the walk camera: its side frame)
+    const cy = this.controlYaw;
+    const fx = -Math.cos(cy);
+    const fz = -Math.sin(cy);
+    const rx = Math.sin(cy);
+    const rz = -Math.cos(cy);
     const dx = fx * this.stick.y + rx * this.stick.x;
     const dz = fz * this.stick.y + rz * this.stick.x;
     const step = 7 * dt * Math.hypot(this.stick.x, this.stick.y);
@@ -704,6 +1038,7 @@ export class CityScene {
     const path = this.walkable.path(this.walker.x, this.walker.z, x, z);
     if (!path) return null;
     this.walker.walk = new Walk(path);
+    this.setFollow(true); // v13 (V13-D4)
     this.dirty = true;
     return path.length;
   }
@@ -879,7 +1214,7 @@ export class CityScene {
     if (document.hidden) return;
     // walkers only matter when they are big enough to see: animate at street and district zoom
     const animate = this.crowd && this.zoom > 0.45;
-    const turning = this.spinning !== 0 || this.yawTo !== null;
+    const turning = this.spinning !== 0 || this.yawTo !== null || this.moving;
     if (!animate && !this.dirty && !this.anim && !this.walker?.walk && !this.steering && !turning)
       return;
     if (now - this.last < 32) return; // ~30 fps is plenty for a city and kind to phones
@@ -906,6 +1241,7 @@ export class CityScene {
     }
     this.stepWalker(dt);
     this.stepSteer(dt);
+    this.stepCamera(dt);
     if (this.anim) {
       const k = Math.min(1, (performance.now() - this.anim.t0) / 700);
       const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;

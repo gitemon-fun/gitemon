@@ -21,6 +21,9 @@
   let base: HTMLCanvasElement;
   let dots: HTMLCanvasElement;
   let needle = $state(0);
+  /** v13 (V13-D4): the walk camera is on; the minimap then turns heading-up */
+  let following = $state(false);
+  let mapTurn = $state(0);
   let open = $state(true);
   /** island north points at Frost Peaks (the top of the opening view) */
   const NORTH = (-3 * Math.PI) / 4;
@@ -62,6 +65,9 @@
       const n = [Math.cos(NORTH), Math.sin(NORTH)];
       needle =
         (Math.atan2(n[0]! * r[0]! + n[1]! * r[1]!, n[0]! * f[0]! + n[1]! * f[1]!) * 180) / Math.PI;
+      following = scene.following;
+      // heading-up while following: the way the camera looks points to the top of the minimap
+      mapTurn = following ? -90 - (Math.atan2(f[1]!, f[0]!) * 180) / Math.PI : 0;
       if (sound.on) {
         const v0 = scene.view;
         const reg = gridRegion(isl.grid, v0.x, v0.z);
@@ -108,7 +114,18 @@
 
   function flyFromMap(e: MouseEvent) {
     const b = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const [x, z] = fromMap(isl, b.width, e.clientX - b.left, e.clientY - b.top);
+    // undo the heading-up turn: the click is measured round the centre, turned back
+    const cx = b.left + b.width / 2;
+    const cy = b.top + b.height / 2;
+    const t = (-mapTurn * Math.PI) / 180;
+    const ux = e.clientX - cx;
+    const uy = e.clientY - cy;
+    const [x, z] = fromMap(
+      isl,
+      SIZE,
+      SIZE / 2 + ux * Math.cos(t) - uy * Math.sin(t),
+      SIZE / 2 + ux * Math.sin(t) + uy * Math.cos(t),
+    );
     scene.flyTo(x, z, Math.max(1.2, scene.zoom));
   }
   function toggle() {
@@ -142,7 +159,9 @@
         y += v[1];
       }
     }
-    scene.steer(x, y);
+    // v13 (V13-D3): walking, the keys steer your Gitemon; otherwise they move the map
+    if (walking) scene.steer(x, y);
+    else scene.pan(Math.sign(x), Math.sign(y));
   }
   function typing(e: KeyboardEvent) {
     const t = e.target as HTMLElement | null;
@@ -150,12 +169,21 @@
   }
   function down(e: KeyboardEvent) {
     const k = e.key.toLowerCase();
-    // v12: Q / E turn the camera (walking or not)
-    if ((k === 'q' || k === 'e') && !typing(e)) {
+    if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+    // v12: Q / E turn the camera; v13: R / F tilt it, + / − zoom
+    if (k === 'q' || k === 'e') {
       if (!e.repeat) scene.spin(k === 'q' ? -1 : 1);
       return;
     }
-    if (!walking || typing(e) || !KEYMAP[k]) return;
+    if (k === 'r' || k === 'f') {
+      if (!e.repeat) scene.tiltKey(k === 'r' ? -1 : 1);
+      return;
+    }
+    if (k === '+' || k === '=' || k === '-' || k === '_') {
+      scene.zoomBy(k === '-' || k === '_' ? 1 / 1.25 : 1.25);
+      return;
+    }
+    if (!KEYMAP[k]) return;
     e.preventDefault();
     keys.add(k);
     fromKeys();
@@ -163,6 +191,7 @@
   function up(e: KeyboardEvent) {
     const k = e.key.toLowerCase();
     if (k === 'q' || k === 'e') return scene.spin(0);
+    if (k === 'r' || k === 'f') return scene.tiltKey(0);
     if (!keys.delete(k)) return;
     fromKeys();
   }
@@ -200,7 +229,7 @@
 <svelte:window
   onkeydown={down}
   onkeyup={up}
-  onblur={() => (keys.clear(), scene.steer(0, 0), scene.spin(0))}
+  onblur={() => (keys.clear(), scene.steer(0, 0), scene.spin(0), scene.pan(0, 0), scene.tiltKey(0))}
 />
 
 <div class="hud-compass" title="Compass: the needle points to Frost Peaks">
@@ -238,13 +267,24 @@
     />
   </button>
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="hud-map-body" onclick={flyFromMap} style="width:{SIZE}px;height:{SIZE}px">
+  <div
+    class="hud-map-body"
+    onclick={flyFromMap}
+    style="width:{SIZE}px;height:{SIZE}px;transform:rotate({mapTurn}deg);transition:transform 0.3s"
+  >
     <canvas bind:this={base} width={SIZE * 2} height={SIZE * 2}></canvas>
     <canvas bind:this={dots} width={SIZE * 2} height={SIZE * 2}></canvas>
   </div>
 </div>
 
 {#if walking}
+  <button
+    class="hud-follow"
+    class:on={following}
+    onclick={() => scene.setFollow(!following)}
+    aria-label={following ? 'Free camera' : 'Follow my Gitemon'}
+    title={following ? 'Free camera' : 'Follow my Gitemon'}>{following ? '⤢' : '◎'}</button
+  >
   <div
     class="hud-stick"
     bind:this={stickEl}
