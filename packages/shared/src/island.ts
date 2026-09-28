@@ -17,6 +17,10 @@ export const PLAZA_R = 34;
 export const CANAL_IN = 38;
 export const CANAL_OUT = 45;
 export const TOWN_R = 72;
+/** half the width of a river's channel through the town (it leaves the canal straight, V10 fix) */
+export const RIVER_HALF = 2.6;
+/** the monument's stepped base (its lowest step reaches 10.6 m, measured): nobody walks up its stairs */
+export const MONUMENT_R = 11.4;
 export const COAST = 246;
 export const TOWN_Y = 0.6;
 /** the one water plane: sea, rivers, lakes and the canal are wherever the land is below it */
@@ -424,7 +428,7 @@ export function island(
         const a = Math.atan2(z, x);
         for (let i = 0; i < N; i++) {
           if (!regions[(i + N - 1) % N]!.river) continue;
-          if (Math.abs(wrap(a - regions[i]!.a0 + Math.PI) - Math.PI) * r < 2.6) return -0.8;
+          if (Math.abs(wrap(a - regions[i]!.a0 + Math.PI) - Math.PI) * r < RIVER_HALF) return -0.8;
         }
       }
       return TOWN_Y;

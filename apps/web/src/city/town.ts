@@ -9,8 +9,10 @@ import {
   STREET_IN,
   STREET_OUT,
   SW,
+  RIVER_HALF,
   archHeight,
   bridgesOf,
+  townRivers,
   TOWN_R,
   TOWN_Y,
   hash32,
@@ -272,6 +274,41 @@ function mesh(parts: THREE.BufferGeometry[], cast = false) {
 const ring = (r0: number, r1: number, y: number, colour: string, seg = 96) =>
   coloured(new THREE.RingGeometry(r0, r1, seg).rotateX(-Math.PI / 2).translate(0, y, 0), colour);
 
+/** v10 fix: world-angle spans of a ring at radius r that leave room for the town's rivers */
+function spans(rivers: number[], r: number): [number, number][] {
+  if (!rivers.length) return [[0, Math.PI * 2]];
+  const h = (RIVER_HALF + 0.05) / r;
+  const a = rivers
+    .map((x) => ((x % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2))
+    .sort((p, q) => p - q);
+  return a.map((x, k) => {
+    const next = k + 1 < a.length ? a[k + 1]! : a[0]! + Math.PI * 2;
+    return [x + h, next - h] as [number, number];
+  });
+}
+/** a flat ring with gaps where the rivers pass (thin bands keep the banks straight) */
+function gappedRing(rivers: number[], r0: number, r1: number, y: number, colour: string) {
+  const out: THREE.BufferGeometry[] = [];
+  const bands = Math.max(1, Math.ceil((r1 - r0) / 1.5));
+  for (let k = 0; k < bands; k++) {
+    const a0 = r0 + ((r1 - r0) * k) / bands;
+    const a1 = r0 + ((r1 - r0) * (k + 1)) / bands;
+    for (const [s0, s1] of spans(rivers, (a0 + a1) / 2)) {
+      const seg = Math.max(4, Math.ceil(((s1 - s0) * 96) / (Math.PI * 2)));
+      // RingGeometry's angle runs the other way once it is laid flat: world angle = −theta
+      out.push(
+        coloured(
+          new THREE.RingGeometry(a0, a1, seg, 1, -s1, s1 - s0)
+            .rotateX(-Math.PI / 2)
+            .translate(0, y, 0),
+          colour,
+        ),
+      );
+    }
+  }
+  return out;
+}
+
 function townGround(isl: Island): THREE.Object3D[] {
   const Y = TOWN_Y;
   const flat = [
@@ -282,9 +319,14 @@ function townGround(isl: Island): THREE.Object3D[] {
     ring(PLAZA_R + 2, CANAL_IN, Y + 0.03, STONE),
   ];
   for (let r = 8; r < PLAZA_R; r += 6) flat.push(ring(r, r + 1.2, Y + 0.05, '#d6ccb8', 64));
+  const rivers = townRivers(isl);
+  // v10 fix: the town's own ground up to straight river banks (the terrain grid is too coarse for a
+  // 5 m channel), and the ring streets stop at each river so the water shows under the arch
+  flat.push(...gappedRing(rivers, CANAL_OUT, TOWN_R - 5, Y + 0.02, '#e6dece'));
+  flat.push(...gappedRing(rivers, TOWN_R - 5, TOWN_R, Y + 0.02, '#a8c880'));
   for (const r of [STREET_IN, STREET_OUT]) {
-    flat.push(ring(r - ROAD / 2 - SW, r + ROAD / 2 + SW, Y + 0.04, PAVE));
-    flat.push(ring(r - ROAD / 2, r + ROAD / 2, Y + 0.07, ASPHALT));
+    flat.push(...gappedRing(rivers, r - ROAD / 2 - SW, r + ROAD / 2 + SW, Y + 0.04, PAVE));
+    flat.push(...gappedRing(rivers, r - ROAD / 2, r + ROAD / 2, Y + 0.07, ASPHALT));
   }
   // gate streets: from the outer ring street to the town edge, one per region
   for (const g of isl.regions) {
@@ -305,11 +347,40 @@ function townGround(isl: Island): THREE.Object3D[] {
       new THREE.CylinderGeometry(CANAL_IN, CANAL_IN, 1.2, 96, 1, true).translate(0, Y - 0.5, 0),
       '#c8bda8',
     ),
-    coloured(
-      new THREE.CylinderGeometry(CANAL_OUT, CANAL_OUT, 1.2, 96, 1, true).translate(0, Y - 0.5, 0),
-      '#c8bda8',
+    // v10 fix: open where a river leaves the canal (CylinderGeometry's angle: world = π/2 − theta)
+    ...spans(rivers, CANAL_OUT).map(([s0, s1]) =>
+      coloured(
+        new THREE.CylinderGeometry(
+          CANAL_OUT,
+          CANAL_OUT,
+          1.2,
+          Math.max(4, Math.ceil(((s1 - s0) * 96) / (Math.PI * 2))),
+          1,
+          true,
+          Math.PI / 2 - s1,
+          s1 - s0,
+        ).translate(0, Y - 0.5, 0),
+        '#c8bda8',
+      ),
     ),
   ];
+  // stone banks along each river from the canal to the town edge, like the canal's
+  for (const a0 of rivers) {
+    const len = TOWN_R + 1 - CANAL_OUT;
+    const rm = (TOWN_R + 1 + CANAL_OUT) / 2;
+    for (const side of [-1, 1]) {
+      const px = -Math.sin(a0) * RIVER_HALF * side;
+      const pz = Math.cos(a0) * RIVER_HALF * side;
+      stone.push(
+        coloured(
+          new THREE.BoxGeometry(len, 1.2, 0.3)
+            .rotateY(-a0)
+            .translate(Math.cos(a0) * rm + px, Y - 0.5, Math.sin(a0) * rm + pz),
+          '#c8bda8',
+        ),
+      );
+    }
+  }
   // arched bridges (v10, V10-D6): over the canal at every gate and over each river on both ring
   // streets — a curved deck from short segments with parapets that follow it; the walker's height
   // uses the same arch (shared bridgeLift), so feet stay on the deck

@@ -9,6 +9,12 @@ import {
   WATER_Y,
   gridHeight,
   type Island,
+  MONUMENT_R,
+  bridgeLift,
+  bridgesOf,
+  inTownRiver,
+  townRivers,
+  type Bridge,
 } from '@gitemon/shared';
 
 /**
@@ -32,8 +38,13 @@ export class Walkable {
   /** gates and bridges: the angles where a path may cross the canal, the rows and the rivers */
   private gateList: number[];
 
+  private rivers: number[];
+  private bridges: Bridge[];
+
   constructor(private isl: Island) {
     const g = isl.grid;
+    this.rivers = townRivers(isl);
+    this.bridges = bridgesOf(isl);
     this.gateList = [...isl.regions.map((r) => r.mid), ...isl.bridges.map((b) => b.a)];
     this.N = g.N;
     this.E = g.E;
@@ -52,7 +63,10 @@ export class Walkable {
     const a = Math.atan2(z, x);
     const nearGate = (half: number) => this.gateList.some((g) => wrapPi(a - g) * r < half);
     if (r < TOWN_R) {
+      if (r < MONUMENT_R) return false; // v10: the monument's stairs are not a path
       if (r > CANAL_IN - 0.5 && r < CANAL_OUT + 0.5) return nearGate(2.2); // canal: bridges only
+      // v10: a river through the town is crossed on its bridges only
+      if (inTownRiver(this.rivers, x, z)) return bridgeLift(this.bridges, x, z) > 0;
       const rowIn = STREET_IN + ROAD / 2 + SW;
       const rowOut = STREET_OUT - ROAD / 2 - SW;
       // v9 (V9-D5): the belt is gardens and paths; only the buildings themselves block

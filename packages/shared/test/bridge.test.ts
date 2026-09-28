@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { DECK_END, DECK_TOP, bridgeLift, bridgesOf, island } from '../src/index.js';
+import {
+  CANAL_OUT,
+  DECK_END,
+  DECK_TOP,
+  RIVER_HALF,
+  bridgeLift,
+  bridgesOf,
+  inTownRiver,
+  island,
+  townRivers,
+} from '../src/index.js';
 
 describe('bridges (V10-D6, G5)', () => {
   const isl = island({ spark: 40, serpent: 40, prism: 30, iron: 20 }, 60, {});
@@ -26,5 +36,25 @@ describe('bridges (V10-D6, G5)', () => {
   it('off the bridges nothing lifts', () => {
     expect(bridgeLift(bs, 0, 0)).toBe(0);
     expect(bridgeLift(bs, 200, 0)).toBe(0);
+  });
+
+  it('every river bridge stands on a town river, and the channel is only as wide as the river', () => {
+    const rivers = townRivers(isl);
+    for (const b of isl.bridges) expect(inTownRiver(rivers, b.x, b.z)).toBe(true);
+    const a0 = rivers[0];
+    if (a0 === undefined) return;
+    const r = CANAL_OUT + 10;
+    const at = (off: number) =>
+      inTownRiver(
+        rivers,
+        Math.cos(a0) * r - Math.sin(a0) * off,
+        Math.sin(a0) * r + Math.cos(a0) * off,
+      );
+    expect(at(0)).toBe(true);
+    expect(at(RIVER_HALF - 0.2)).toBe(true);
+    expect(at(RIVER_HALF + 0.3)).toBe(false);
+    expect(
+      inTownRiver(rivers, Math.cos(a0) * (CANAL_OUT - 3), Math.sin(a0) * (CANAL_OUT - 3)),
+    ).toBe(false);
   });
 });

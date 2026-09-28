@@ -1,4 +1,4 @@
-import { CANAL_IN, CANAL_OUT, ROAD, type Island } from './island.js';
+import { CANAL_IN, CANAL_OUT, RIVER_HALF, ROAD, type Island } from './island.js';
 
 /**
  * v10 bridges (V10-D6, walking polish #1): every bridge is an arch, and creatures walk ON it. One
@@ -58,4 +58,20 @@ export function bridgeLift(bridges: Bridge[], x: number, z: number): number {
     if (Math.abs(u) <= b.span / 2 && Math.abs(v) <= b.width / 2) return archHeight(u, b.span);
   }
   return 0;
+}
+
+/** the angles of the rivers that cross the town (one per river; each has two street bridges) */
+export const townRivers = (isl: Pick<Island, 'bridges'>) => [
+  ...new Set(isl.bridges.map((b) => b.a)),
+];
+
+/** is (x, z) in a town river's channel (beyond the canal)? Bridges are checked separately. */
+export function inTownRiver(rivers: number[], x: number, z: number): boolean {
+  const r = Math.hypot(x, z);
+  if (r <= CANAL_OUT) return false;
+  const a = Math.atan2(z, x);
+  return rivers.some((a0) => {
+    const d = Math.atan2(Math.sin(a - a0), Math.cos(a - a0));
+    return Math.abs(d) < Math.PI / 2 && Math.abs(Math.sin(d)) * r < RIVER_HALF;
+  });
 }
