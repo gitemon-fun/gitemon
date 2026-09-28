@@ -700,8 +700,8 @@ export class CityScene {
   /** pillar materials with their full opacity: they fade as the camera comes close */
   private beams: [THREE.MeshBasicMaterial, number][] = [];
   /**
-   * Light pillars over the top ten (visible from the whole island) and a beacon over every mini
-   * plaza. `today` = the legend of the day's key: its pillar burns brighter (V6-D5).
+   * Light pillars over the top ten (visible from the whole island), a thin one over each plaza-seat
+   * player (v11), and a beacon over every mini plaza. `today` = the legend of the day's key: its pillar burns brighter (V6-D5).
    */
   stage(city: Island, placed: Placed[], today: string | null = null) {
     this.staging.clear();
@@ -734,6 +734,12 @@ export class CityScene {
     };
     for (const p of placed) {
       const sp = p.g.special;
+      // v11 (V11-D6): a player holding a plaza seat — the top 1 % — gets a thin pale pillar, so the
+      // island's best players can be found from the overview (thinner and paler than a legend's)
+      if ((!sp || sp.earned) && p.spot.kind === 'plaza' && !p.g.special?.sealed) {
+        beam(p.spot.x, p.spot.y, p.spot.z, '#fff3dc', 0.5, 34, 0.13);
+        continue;
+      }
       if (!sp) continue;
       const isToday = today != null && sp.key === today;
       if (sp.rank <= 10 || isToday)

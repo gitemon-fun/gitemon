@@ -9,6 +9,7 @@ import {
   type Score,
   type Snapshot,
   type TypeId,
+  meritForm,
 } from '@gitemon/shared';
 
 export interface Row {
@@ -151,13 +152,18 @@ function scoreCols(sc: Score) {
  * Returns the row after the write.
  */
 export async function ingest(db: D1Database, snap: Snapshot): Promise<Row> {
+  const before = await byId(db, snap.userId);
   const row = await ingestScored(db, snap);
   // v7 (V7-D2): merit, recomputed on every fresh snapshot
+  const m = merit(snap);
+  // v11 (V11-D5): steady work evolves a Gitemon too, and it never de-evolves (the form held so far
+  // is kept): form = the highest of the scorer's form, the merit form and the form it already had
+  const form = Math.max(row.form, meritForm(m), before?.form ?? 1);
   await db
-    .prepare('UPDATE gitemon SET merit = ? WHERE id = ?')
-    .bind(merit(snap), snap.userId)
+    .prepare('UPDATE gitemon SET merit = ?, form = ? WHERE id = ?')
+    .bind(m, form, snap.userId)
     .run();
-  return { ...row, merit: merit(snap) } as Row;
+  return { ...row, merit: m, form } as Row;
 }
 
 async function ingestScored(db: D1Database, snap: Snapshot): Promise<Row> {

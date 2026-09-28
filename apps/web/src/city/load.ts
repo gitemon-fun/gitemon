@@ -6,11 +6,15 @@ import {
   island,
   legendOfDayRank,
   meritHouses,
+  PLAZA_FLOOR,
+  SEAT_FLOOR,
+  plazaSeatCount,
   type Island,
   type MapGitemon,
   type Shape,
   type SpecialTier,
   type TypeId,
+  type Spot,
 } from '@gitemon/shared';
 import type { Placed } from './crowd';
 
@@ -137,7 +141,27 @@ export function place(
     if (tier === 'mythic' || tier === 'epic') c.mini++;
     else if (tier === 'rare') c.rare++;
   }
-  // every mini plaza keeps room for its region's champion seats
+  // v7 (V7-D3) climbing, made safe in v11 (V11-D4): once calibrated (lines in the layout), a player
+  // whose merit reaches a tier's line EARNS that tier — the glow, the size, "earned on merit" — and a
+  // place of its own. No sealed legend is pushed off the island, and nobody moves outward by climbing.
+  const cal = layout?.calibration ?? null;
+  const earned = new Map<number, SpecialTier>();
+  if (cal)
+    for (const g of players) {
+      if (g.t1 === 'machine') continue;
+      const tier = (['legendary', 'mythic', 'epic', 'rare'] as const).find(
+        (t) => cal[t] != null && (g.m ?? 0) >= cal[t]!,
+      );
+      if (tier) earned.set(g.id, tier);
+    }
+  // every mini plaza keeps room for its region's champion seats — and, v11, one more place for each
+  // earned Epic or Rare of its type, so climbers never take a seat from anyone
+  for (const [id, tier] of earned) {
+    if (tier !== 'epic' && tier !== 'rare') continue;
+    const g = players.find((q) => q.id === id)!;
+    const c = (specials[g.t1] ??= { mini: 0, rare: 0 });
+    c.mini++;
+  }
   for (const t of Object.keys(pops) as TypeId[]) {
     const c = (specials[t] ??= { mini: 0, rare: 0 });
     c.mini += MINI_SEATS;
@@ -147,36 +171,24 @@ export function place(
   const placed: Placed[] = [];
   const taken = new Set<number>();
 
-  // v7 (V7-D3): climbing into the legend tiers — only once calibrated (thresholds in the layout).
-  // A climber takes the seat of the lowest sealed legend of their tier; that legend leaves for now.
-  const cal = layout?.calibration ?? null;
-  let seated = legends;
-  if (cal) {
-    const tiers = ['legendary', 'mythic', 'epic', 'rare'] as const;
-    const claimed = new Set<number>();
-    seated = [];
-    for (const tier of tiers) {
-      const own = legends
-        .filter((l) => l.special!.tier === tier)
-        .sort((a, b) => a.special!.rank - b.special!.rank);
-      const line = cal[tier];
-      const climbers =
-        line == null
-          ? []
-          : players.filter((g) => !claimed.has(g.id) && (g.m ?? 0) >= line && g.t1 !== 'machine');
-      // The Origin and The Guardians stay influence-only (ranks 1–3)
-      const open = own.filter((l) => l.special!.rank > 3 && l.special!.sealed);
-      const n = Math.min(climbers.length, open.length);
-      const out = new Set(open.slice(open.length - n).map((l) => l.id));
-      seated.push(...own.filter((l) => !out.has(l.id)));
-      for (let k = 0; k < n; k++) {
-        const g = climbers[k]!;
-        const seat = open[open.length - n + k]!;
-        claimed.add(g.id);
-        seated.push({ ...g, special: { ...seat.special!, sealed: false, earned: true } });
-      }
-    }
-  }
+  const seated = legends;
+  const wear = (g: MapGitemon): MapGitemon => {
+    const tier = earned.get(g.id);
+    return tier
+      ? {
+          ...g,
+          special: {
+            key: `earned-${g.id}`,
+            rank: 999,
+            tier,
+            title: null,
+            species: null,
+            sealed: false,
+            earned: true,
+          },
+        }
+      : g;
+  };
 
   // the specials, in rank order: the plaza keeps the top ten; Mythic then Epic stand on their
   // region's mini plaza; each Rare stands at the heart of one of its type's groups in the wild
@@ -240,32 +252,44 @@ export function place(
 
   // champion seats (V7-D4): the top players by merit on the main plaza, then each type's best on
   // its mini plaza; everyone else in the wild, the stronger nearer the town
+  // v11 (V11-D2, V11-D3): seats are earned — the plaza holds the top 1 % at merit ≥ 75, a mini plaza
+  // the type's top 6 at merit ≥ 40; an unearned seat stays empty
   let onPlaza = 0;
+  const plazaCount = plazaSeatCount(joined.filter((g) => g.t1 !== 'machine').length);
   const seatsUsed = new Map<TypeId, number>();
   const next = new Map<TypeId, number>();
-  for (const g of players) {
-    if (taken.has(g.id)) continue;
-    if (onPlaza < PLAZA_SEATS && g.t1 !== 'machine' && city.plaza[onPlaza]) {
+  for (const g0 of players) {
+    if (taken.has(g0.id)) continue;
+    const g = wear(g0);
+    const m = g.m ?? 0;
+    const tier = earned.get(g.id);
+    // an earned Legendary or Mythic always has a place on the plaza — beyond the 1 % seats if need be
+    const plazaOk = onPlaza < plazaCount || tier === 'legendary' || tier === 'mythic';
+    if (plazaOk && m >= PLAZA_FLOOR && g.t1 !== 'machine' && city.plaza[onPlaza]) {
       placed.push({ g, spot: city.plaza[onPlaza++]! });
       continue;
     }
     const used = seatsUsed.get(g.t1) ?? 0;
-    if (g.t1 !== 'machine' && used < MINI_SEATS) {
-      const k = miniNext.get(g.t1) ?? 0;
-      const spot = city.mini[BIOME_ORDER.indexOf(g.t1)]?.[k];
-      if (spot) {
-        miniNext.set(g.t1, k + 1);
-        seatsUsed.set(g.t1, used + 1);
+    const d = BIOME_ORDER.indexOf(g.t1);
+    const k = next.get(g.t1) ?? 0;
+    const wild = city.spots[d]?.[k];
+    const seat = g.t1 !== 'machine' && used < MINI_SEATS && m >= SEAT_FLOOR;
+    if (g.t1 !== 'machine' && (seat || tier)) {
+      const km = miniNext.get(g.t1) ?? 0;
+      const spot = city.mini[d]?.[km];
+      // an earned Epic or Rare without a seat takes its mini plaza only when that is no further
+      // from the centre than its place in the wild — climbing never moves anyone outward (V11-D4)
+      const r = (s: Spot) => Math.hypot(s.x, s.z);
+      if (spot && (seat || !wild || r(spot) <= r(wild))) {
+        miniNext.set(g.t1, km + 1);
+        if (seat) seatsUsed.set(g.t1, used + 1);
         placed.push({ g, spot });
         continue;
       }
     }
-    const d = BIOME_ORDER.indexOf(g.t1);
-    const k = next.get(g.t1) ?? 0;
-    const spot = city.spots[d]?.[k];
-    if (!spot) continue;
+    if (!wild) continue;
     next.set(g.t1, k + 1);
-    placed.push({ g, spot });
+    placed.push({ g, spot: wild });
   }
   const todayRank = legendOfDayRank(day);
   const today = seated.find((l) => l.special!.rank === todayRank)?.special!.key ?? null;

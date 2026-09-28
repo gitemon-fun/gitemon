@@ -14,10 +14,21 @@ export async function daily(force = false) {
   const data = (await (await fetch(`${ORIGIN}/api/city?daily=${Date.now()}`)).json()) as {
     g: Row[];
     l?: LegendRow[];
-    layout?: { houses?: number[][] | null } | null;
+    layout?: {
+      houses?: number[][] | null;
+      calibration?: Partial<Record<'legendary' | 'mythic' | 'epic' | 'rare', number>> | null;
+    } | null;
   };
   const claimedAt = new Map(data.g.filter((x) => x[10]).map((x) => [x[0], x[10]!]));
-  const r = place(data.g.map(fromRow), claimedAt, (data.l ?? []).map(fromLegend), null, day);
+  // v11 (V11-D4): plan with the calibration, so the island makes room for earned places
+  const cal = data.layout?.calibration ?? null;
+  const r = place(
+    data.g.map(fromRow),
+    claimedAt,
+    (data.l ?? []).map(fromLegend),
+    cal ? { day, calibration: cal } : null,
+    day,
+  );
   // v9 (V9-D3): today's Merit House holders — the top 3 by merit per region, kept while top 5
   const prev = data.layout?.houses ?? [];
   const joined = data.g.map(fromRow).filter((g) => g.st === 'c');
@@ -26,7 +37,7 @@ export async function daily(force = false) {
     prev,
   );
   const spots = r.placed
-    .filter((p) => p.g.special)
+    .filter((p) => p.g.special && !p.g.special.earned)
     .map((p) => ({ key: p.g.special!.key, x: +p.spot.x.toFixed(2), z: +p.spot.z.toFixed(2) }));
   await internal('/internal/layout', { day, pops: r.pops, specials: r.specials, spots, houses });
   console.log(

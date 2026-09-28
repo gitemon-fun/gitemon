@@ -8,3 +8,4 @@ export * from './gait.js';
 export * from './bridge.js';
 export * from './skew.js';
 export * from './watch.js';
+export * from './standing.js';

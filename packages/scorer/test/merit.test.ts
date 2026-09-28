@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Snapshot } from '@gitemon/shared';
+import { meritForm, type Snapshot } from '@gitemon/shared';
 import { merit } from '../src/index.js';
 
 const NOW = Date.parse('2026-09-27T00:00:00Z');
@@ -81,5 +81,16 @@ describe('merit (v7, V7-D2)', () => {
   it('flattens: the first 30 active days are worth more than the next 300', () => {
     const d = (n: number) => merit(snap({ activeDays: n }), NOW);
     expect(d(30) - d(0)).toBeGreaterThan(d(330) - d(30));
+  });
+});
+
+describe('evolution by merit (v11, V11-D5, G3)', () => {
+  it('steady work evolves a Gitemon; a burst of volume does not', () => {
+    expect(meritForm(merit(steady, NOW))).toBeGreaterThanOrEqual(2);
+    const burst = snap({ commits: 10_000, activeDays: 1, activeWeeks: 1 });
+    expect(meritForm(merit(burst, NOW))).toBe(1);
+  });
+  it('the merit forms sit at 40 and 70', () => {
+    expect([meritForm(39.9), meritForm(40), meritForm(69.9), meritForm(70)]).toEqual([1, 2, 2, 3]);
   });
 });

@@ -59,10 +59,15 @@ describe('Merit Houses (v9 G2)', () => {
     expect(meritHouses(ps([50, 90, 70, 80, 10]))[guildOf(t)]).toEqual([2, 4, 3]);
   });
   it('are kept while the holder stays in the top 5', () => {
-    // yesterday: 1, 2, 3 held; today 1 has dropped to 5th — kept
+    // yesterday: 1, 2, 3 held; today 1 has dropped to 5th (still above the v11 floor) — kept
     const prev = [[1, 2, 3]];
-    const now = ps([40, 90, 80, 95, 85, 10]);
+    const now = ps([60, 90, 80, 95, 85, 10]);
     expect(meritHouses(now, prev)[0]).toEqual([1, 2, 3]);
+  });
+  it('need merit ≥ 50 (v11, V11-D3): below it nobody holds one, even in a thin region', () => {
+    expect(meritHouses(ps([49, 12]))[0]).toEqual([0, 0, 0]);
+    const prev = [[1, 2, 3]];
+    expect(meritHouses(ps([40, 90, 80, 95, 85]), prev)[0]).toEqual([4, 2, 3]);
   });
   it('are lost at 6th or lower', () => {
     const prev = [[1, 2, 3]];
@@ -70,7 +75,7 @@ describe('Merit Houses (v9 G2)', () => {
     expect(meritHouses(now, prev)[0]).toEqual([4, 2, 3]);
   });
   it('stay empty (0) when a region has fewer than 3 players', () => {
-    expect(meritHouses(ps([50]))[0]).toEqual([1, 0, 0]);
+    expect(meritHouses(ps([55]))[0]).toEqual([1, 0, 0]);
   });
   it('leave machine players out (the quarter is their guild)', () => {
     expect(guildOf('machine')).toBe(-1);

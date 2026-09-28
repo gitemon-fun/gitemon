@@ -1,5 +1,6 @@
 import type { TypeId } from './types.js';
 import { REGIONS } from './island.js';
+import { HOUSE_FLOOR } from './standing.js';
 
 /**
  * v9 The Town (GRANDPLAN v9 §3): pure rules for guilds and Merit Houses. No I/O — the daily job,
@@ -19,7 +20,7 @@ export interface MeritPlayer {
 }
 
 /**
- * V9-D3: the top 3 players by merit in each region hold its Merit Houses. A holder keeps the house
+ * V9-D3: the top 3 players by merit in each region hold its Merit Houses (v11: only at merit ≥ 50). A holder keeps the house
  * while they stay in the region's top 5, so the edge does not flip every day. `prev` = yesterday's
  * holders per region (slot order kept, so nobody moves house). Returns region → 3 ids (0 = empty).
  */
@@ -27,7 +28,8 @@ export function meritHouses(players: MeritPlayer[], prev: number[][] = []): numb
   const byRegion: MeritPlayer[][] = REGIONS.map(() => []);
   for (const p of players) {
     const g = guildOf(p.t);
-    if (g >= 0) byRegion[g]!.push(p);
+    // v11 (V11-D3): a house is earned — below the floor nobody holds one, even in a thin region
+    if (g >= 0 && p.m >= HOUSE_FLOOR) byRegion[g]!.push(p);
   }
   return byRegion.map((list, g) => {
     // merit, then the lower id on a tie (stable, and older accounts first)
