@@ -339,8 +339,10 @@ function composeSpecies(src: PixelSprite, p: SpriteParams): Sprite {
       y1 = Math.max(y1, oy + y);
     }
   const acc = ACCESSORY[p.sh];
-  const aw = acc.rows[0]!.length;
-  const ah = acc.rows.length;
+  // v11 (V11-D11): drawn at twice the size — at 5×6 px it read as a stray dot, not an icon
+  const B = 2;
+  const aw = acc.rows[0]!.length * B;
+  const ah = acc.rows.length * B;
   const midY = Math.floor((y0 + y1) / 2);
   const [ax, ay] =
     acc.anchor === 'right'
@@ -352,15 +354,41 @@ function composeSpecies(src: PixelSprite, p: SpriteParams): Sprite {
           : acc.anchor === 'top'
             ? [Math.floor((x0 + x1 - aw) / 2), Math.max(0, y0 - ah + 1)]
             : [Math.floor((x0 + x1 - aw) / 2), Math.max(0, y0 - ah - 2)];
+  // v11 (V11-D11): slide the badge toward the creature until it touches the outline — it used to
+  // sit at a fixed offset from the bounding box and float free beside thin or round creatures
+  const cells: [number, number][] = [];
   acc.rows.forEach((row, ry) => {
-    for (let rx = 0; rx < row.length; rx++) {
-      const ch = row[rx]!;
-      if (ch === '.') continue;
-      const x = ax + rx;
-      const y = ay + ry;
-      if (x < 0 || y < 0 || x >= N || y >= N) continue;
-      px[y * N + x] = accBase + Number(ch) - 1;
-    }
+    for (let rx = 0; rx < row.length; rx++)
+      if (row[rx] !== '.')
+        for (let k = 0; k < B * B; k++) cells.push([rx * B + (k % B), ry * B + Math.floor(k / B)]);
+  });
+  const solid = (x: number, y: number) => x >= 0 && y >= 0 && x < N && y < N && px[y * N + x]! > 0;
+  const touches = (dx: number, dy: number) =>
+    cells.some(([rx, ry]) => {
+      const x = ax + dx + rx;
+      const y = ay + dy + ry;
+      return solid(x + 1, y) || solid(x - 1, y) || solid(x, y + 1) || solid(x, y - 1);
+    });
+  const overlaps = (dx: number, dy: number) =>
+    cells.some(([rx, ry]) => solid(ax + dx + rx, ay + dy + ry));
+  const [sx, sy] =
+    acc.anchor === 'right'
+      ? [-1, 0]
+      : acc.anchor === 'top' || acc.anchor === 'topWide'
+        ? [0, 1]
+        : [1, 0];
+  let dx = 0;
+  let dy = 0;
+  for (let k = 0; k < 24 && !touches(dx, dy); k++) {
+    if (overlaps(dx + sx, dy + sy)) break;
+    dx += sx;
+    dy += sy;
+  }
+  cells.forEach(([rx, ry]) => {
+    const x = ax + dx + rx;
+    const y = ay + dy + ry;
+    if (x < 0 || y < 0 || x >= N || y >= N) return;
+    px[y * N + x] = accBase + Number(acc.rows[Math.floor(ry / B)]![Math.floor(rx / B)]) - 1;
   });
   return { size: N, px, palette, accent };
 }

@@ -61,6 +61,8 @@ export interface Pieces {
   monument: boolean;
   /** v9: the town's buildings arrived (the placeholder boxes can go) */
   town: boolean;
+  /** v11 (V11-D7): ground footprints of the solid pieces (wonders, set pieces, legend statues) */
+  solids: { x: number; z: number; r: number }[];
 }
 
 const cache = new Map<Key, Promise<THREE.Group | null>>();
@@ -103,6 +105,37 @@ function place(
   o.position.set(x, y - box.min.y * s, z);
   o.rotation.y = yaw;
   return o;
+}
+
+/**
+ * v11 (V11-D9): many placements of one model as InstancedMeshes — one draw per part instead of one
+ * per copy. Each placement is [height, x, y, z, yaw, maxW], sized exactly as place() sizes a copy.
+ */
+function instanced(src: THREE.Group, list: [number, number, number, number, number, number][]) {
+  const out = new THREE.Group();
+  src.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(src);
+  const size = box.getSize(new THREE.Vector3());
+  const at = list.map(([h, x, y, z, yaw, maxW]) => {
+    const s = Math.min(h / Math.max(0.001, size.y), maxW / Math.max(0.001, size.x, size.z));
+    return new THREE.Matrix4().compose(
+      new THREE.Vector3(x, y - box.min.y * s, z),
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
+      new THREE.Vector3(s, s, s),
+    );
+  });
+  const rootInv = new THREE.Matrix4().copy(src.matrixWorld).invert();
+  src.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const local = new THREE.Matrix4().multiplyMatrices(rootInv, m.matrixWorld);
+    const inst = new THREE.InstancedMesh(m.geometry, m.material, at.length);
+    at.forEach((mat, i) => inst.setMatrixAt(i, new THREE.Matrix4().multiplyMatrices(mat, local)));
+    inst.castShadow = inst.receiveShadow = true;
+    inst.computeBoundingSphere();
+    out.add(inst);
+  });
+  return out;
 }
 
 const facing = (x: number, z: number) => Math.atan2(x, z); // outward from the centre
@@ -175,6 +208,7 @@ export async function loadPieces(
     landmarks: false,
     monument: false,
     town: false,
+    solids: [],
   };
   const jobs: Promise<void>[] = [];
   const put = (
@@ -186,6 +220,7 @@ export async function loadPieces(
     yaw: number,
     then?: (o: THREE.Object3D) => void,
     maxW = Infinity,
+    solid = false,
   ) =>
     jobs.push(
       load(loader, key).then((src) => {
@@ -193,6 +228,16 @@ export async function loadPieces(
         const o = place(src, h, x, y, z, yaw, maxW);
         group.add(o);
         then?.(o);
+        // v11 (V11-D7): a solid piece blocks walking over the inner part of its base
+        if (solid) {
+          const b = new THREE.Box3().setFromObject(o);
+          const r = 0.55 * Math.min(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5;
+          out.solids.push({
+            x: (b.min.x + b.max.x) / 2,
+            z: (b.min.z + b.max.z) / 2,
+            r: Math.max(0.9, r),
+          });
+        }
       }),
     );
 
@@ -211,22 +256,32 @@ export async function loadPieces(
     const h = sp.rank === 1 ? HEIGHT.origin! : sp.rank <= 3 ? HEIGHT.guardian! : HEIGHT.legend!;
     // the Origin faces the opening view; the others look out over the plaza
     const yaw = sp.rank === 1 ? Math.PI / 4 : facing(p.spot.x, p.spot.z);
-    put(key, h, p.spot.x, p.spot.y, p.spot.z, yaw, (o) => {
-      if (sp.sealed)
-        o.traverse((m) => {
-          if ((m as THREE.Mesh).isMesh) (m as THREE.Mesh).material = STONE;
-        });
-      else if (sp.rank === 1)
-        o.traverse((m) => {
-          const mat = (m as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
-          if (mat?.isMeshStandardMaterial) {
-            mat.emissive = new THREE.Color('#ffcf5a');
-            mat.emissiveIntensity = 0.28;
-          }
-        });
-      if (sp.rank === 1) out.bob.push({ obj: o, y: o.position.y });
-      out.replaced.push(i);
-    });
+    put(
+      key,
+      h,
+      p.spot.x,
+      p.spot.y,
+      p.spot.z,
+      yaw,
+      (o) => {
+        if (sp.sealed)
+          o.traverse((m) => {
+            if ((m as THREE.Mesh).isMesh) (m as THREE.Mesh).material = STONE;
+          });
+        else if (sp.rank === 1)
+          o.traverse((m) => {
+            const mat = (m as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+            if (mat?.isMeshStandardMaterial) {
+              mat.emissive = new THREE.Color('#ffcf5a');
+              mat.emissiveIntensity = 0.28;
+            }
+          });
+        if (sp.rank === 1) out.bob.push({ obj: o, y: o.position.y });
+        out.replaced.push(i);
+      },
+      Infinity,
+      sp.rank > 3,
+    );
   });
 
   // ---- the monument and the landmarks (replace the code-built ones once they arrive) ----
@@ -244,10 +299,13 @@ export async function loadPieces(
       facing(-l.x, -l.z),
       () => (out.landmarks = true),
       9,
+      true,
     );
   }
 
   // ---- v9 the town: guild halls, Merit Houses by their holder's band, the six services ----
+  // v11 (V11-D9): the 27 Merit Houses share 3 models, so each model is drawn once, instanced
+  const houses = new Map<Key, [number, number, number, number, number, number][]>();
   isl.town.forEach((p, k) => {
     const band = homes.get(k)?.band ?? 0;
     const key =
@@ -257,6 +315,12 @@ export async function loadPieces(
           ? `svc-${SERVICES[p.slot]!}`
           : `house-${band + 1}`;
     const h = plotHeight(p.kind, band);
+    if (p.kind === 'house') {
+      const list = houses.get(key as Key) ?? [];
+      list.push([h, p.x, p.y, p.z, Math.atan2(p.fx, p.fz), p.w + 0.6]);
+      houses.set(key as Key, list);
+      return;
+    }
     put(
       key,
       h,
@@ -268,6 +332,14 @@ export async function loadPieces(
       p.w + (p.kind === 'hall' ? 1.5 : 0.6),
     );
   });
+  for (const [key, list] of houses)
+    jobs.push(
+      load(loader, key).then((src) => {
+        if (!src) return;
+        group.add(instanced(src, list));
+        out.town = true;
+      }),
+    );
 
   // ---- gates: one at every region's gate in the town wall, facing out ----
   for (const g of isl.regions) {
@@ -305,7 +377,7 @@ export async function loadPieces(
     const y = Math.max(WATER_Y - 0.6, gridHeight(isl.grid, x, z)) - 0.4;
     taken.push([x, z]);
     // wonders face the town, so the side that reads (the geode's opening, the arch) is seen from it
-    put(key, HEIGHT[key]!, x, y, z, facing(-x, -z));
+    put(key, HEIGHT[key]!, x, y, z, facing(-x, -z), undefined, Infinity, true);
   });
   // the floating shrine: over the back of the town, off the plaza axis, so it never hides the Origin
   {
@@ -335,6 +407,9 @@ export async function loadPieces(
         gridHeight(isl.grid, s[0], s[1]) - 0.2,
         s[1],
         rnd(`setyaw${i}${k}`) * Math.PI * 2,
+        undefined,
+        Infinity,
+        true,
       );
     }
   });

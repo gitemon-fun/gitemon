@@ -126,7 +126,10 @@ export class CityScene {
     this.scene.add(sun, sun.target);
     this.sun = sun;
     // static city: the shadow map is drawn once after build (v3 §3, G5), never per frame
-    const big = this.renderer.capabilities.maxTextureSize >= 4096;
+    // v11 (V11-D9): a phone gets the 2048 map — the one frame that redraws it stays cheap
+    const phone =
+      Math.min(screen.width, screen.height) < 700 && matchMedia('(pointer: coarse)').matches;
+    const big = this.renderer.capabilities.maxTextureSize >= 4096 && !phone;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
@@ -559,6 +562,7 @@ export class CityScene {
   /** set by the app: return true when a ground tap was used for walking */
   onGround: ((x: number, z: number) => boolean) | null = null;
   private walkable: Walkable | null = null;
+  private solids: { x: number; z: number; r: number }[] = [];
   private walker: { i: number; home: Spot; walk: Walk | null; x: number; z: number } | null = null;
   private walkCity: Island | null = null;
   /** called about twice a second while walking, with where the walker is */
@@ -636,7 +640,10 @@ export class CityScene {
     if (!c) return;
     this.walkCity = city;
     this.bridges = bridgesOf(city);
-    this.walkable ??= new Walkable(city);
+    if (!this.walkable) {
+      this.walkable = new Walkable(city);
+      this.walkable.setSolids(this.solids);
+    }
     const p = c.at(i);
     this.walker = { i, home: { ...p.spot }, walk: null, x: p.spot.x, z: p.spot.z };
   }
@@ -789,6 +796,9 @@ export class CityScene {
     if (pcs.town && this.town) this.town.plots.visible = false;
     for (const i of pcs.replaced) this.crowd?.hide(i);
     this.bob = pcs.bob;
+    // v11 (V11-D7): the solid pieces block walking once they stand there
+    this.solids = pcs.solids;
+    this.walkable?.setSolids(pcs.solids);
     this.stats.piecesMs = Math.round(performance.now() - t0);
     this.renderer.shadowMap.needsUpdate = true;
     this.dirty = true;

@@ -58,7 +58,26 @@ export class Walkable {
       }
   }
 
+  /** v11 (V11-D7): solid pieces arrive with the 3D models, after the first view */
+  private solids: { x: number; z: number; r: number }[] = [];
+  setSolids(list: { x: number; z: number; r: number }[]) {
+    this.solids = list;
+    const g = this.isl.grid;
+    for (const s of list) {
+      const i0 = Math.max(0, Math.floor((s.x - s.r + g.E) / g.cell));
+      const i1 = Math.min(g.N, Math.ceil((s.x + s.r + g.E) / g.cell));
+      const j0 = Math.max(0, Math.floor((s.z - s.r + g.E) / g.cell));
+      const j1 = Math.min(g.N, Math.ceil((s.z + s.r + g.E) / g.cell));
+      for (let j = j0; j <= j1; j++)
+        for (let i = i0; i <= i1; i++)
+          this.open[j * (g.N + 1) + i] = this.walkable(-g.E + i * g.cell, -g.E + j * g.cell)
+            ? 1
+            : 0;
+    }
+  }
+
   walkable(x: number, z: number): boolean {
+    for (const s of this.solids) if ((x - s.x) ** 2 + (z - s.z) ** 2 < s.r * s.r) return false;
     const r = Math.hypot(x, z);
     const a = Math.atan2(z, x);
     const nearGate = (half: number) => this.gateList.some((g) => wrapPi(a - g) * r < half);
