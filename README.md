@@ -1,6 +1,7 @@
 # Gitemon
 
 Every GitHub developer, hatched into a pixel creature on one shared island — **[gitemon.fun](https://gitemon.fun)**.
+The site opens on the island itself: look around first, or sign in with GitHub to hatch yours.
 
 - **Hatch.** Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you. No two look the same: your main language picks the creature, your second language colours its markings, and each one moves in its own way (it hops, waddles, trots, slithers or floats).
 - **Walk.** Tap the map, or steer with WASD, the arrow keys or a thumb stick. Real GitHub work earns more steps each day.

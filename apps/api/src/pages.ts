@@ -190,23 +190,80 @@ export const termsPage = () =>
 <li>Gitemon is not affiliated with GitHub, or with any other game or company.</li></ul></section>`,
   });
 
-export const homePage = (count: number) =>
+/** v14 (V14-D2): the landing's own words; the card is served with the page, so it shows at first paint */
+export const LANDING = {
+  title: 'Gitemon — every developer is a creature',
+  description:
+    'Sign in with GitHub and your public work hatches into a pixel creature on one shared island. Walk nine lands, find the 500 sealed legends, catch other developers.',
+};
+
+const landingCard = () => `<section class="welcome" id="welcome" aria-label="Welcome to Gitemon">
+<h1>Every developer is a creature.</h1>
+<p class="welcome-sub">Sign in with GitHub and your public work hatches into a pixel Gitemon on one shared island.</p>
+<div class="welcome-creatures" aria-hidden="true">${'<span></span>'.repeat(9)}</div>
+<div class="welcome-btns"><a class="welcome-go" href="/auth/login?next=/map">Sign in with GitHub</a><a class="welcome-look" id="welcome-look" href="/map">Look around first</a></div>
+<ul class="welcome-beats">
+<li><img src="/ui/blessing.png" alt=""><span><b>Hatch.</b> Your languages pick your creature and its colours. No two look the same.</span></li>
+<li><img src="/ui/steps.png" alt=""><span><b>Walk.</b> Explore nine lands round one town. Real GitHub work earns more steps each day.</span></li>
+<li><img src="/ui/log.png" alt=""><span><b>Find the legends.</b> 500 sealed legends sleep on the island until their own developer wakes them.</span></li>
+</ul>
+<p class="welcome-fair"><b>Power is not size.</b> Only work other people accepted counts, and steady work beats volume, so AI-generated volume changes nothing.</p>
+<p class="welcome-small">Public profile only. Never private repositories. Gitemon never contacts anyone.</p>
+<nav class="welcome-links"><a href="/how">How it works</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/gitemon-fun/gitemon">Source</a><span>Made by AIgnited</span></nav>
+</section>`;
+
+/**
+ * `/` for a signed-out visitor: the island app with the landing's title and share tags, a still picture
+ * of the island that shows before the 3D world is ready (V14-D5), and the welcome card.
+ */
+export function landingShell(app: string, lqip: { wide?: string; tall?: string } = {}): string {
+  const d = esc(LANDING.description);
+  // the tiny blurred pictures (made with the still pictures) paint with the page itself
+  const ok = (u?: string) => (u && /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(u) ? u : null);
+  const wide = ok(lqip.wide);
+  const tall = ok(lqip.tall);
+  const blur =
+    (wide ? `.poster{background:#0b0d10 url(${wide}) center/auto 100% no-repeat}` : '') +
+    (tall ? `@media (orientation:portrait){.poster{background-image:url(${tall})}}` : '');
+  const t = esc(LANDING.title);
+  return app
+    .replace(/<title>[^<]*<\/title>/, `<title>${t}</title>`)
+    .replace(/(<meta\s+name="description"\s+content=")[^"]*(")/, `$1${d}$2`)
+    .replace(/(<link\s+rel="canonical"\s+href=")[^"]*(")/, '$1https://gitemon.fun/$2')
+    .replace(/(<meta\s+property="og:title"\s+content=")[^"]*(")/, `$1${t}$2`)
+    .replace(/(<meta\s+property="og:description"\s+content=")[^"]*(")/, `$1${d}$2`)
+    .replace(
+      '</head>',
+      '<meta property="og:url" content="https://gitemon.fun/"><meta property="og:type" content="website">' +
+        '<link rel="preload" as="image" href="/poster-tall.webp" media="(orientation: portrait)">' +
+        '<link rel="preload" as="image" href="/poster-wide.webp" media="(orientation: landscape)">' +
+        (blur ? `<style>${blur}</style>` : '') +
+        '</head>',
+    )
+    .replace(/<body>/, '<body class="welcoming">')
+    .replace(
+      '<div id="app"></div>',
+      '<div id="app"></div><div class="poster" id="poster"><picture><source media="(orientation: portrait)" srcset="/poster-tall.webp"><img src="/poster-wide.webp" alt="" fetchpriority="high"></picture></div>' +
+        landingCard(),
+    );
+}
+
+/** v14 (V14-D8): the rules, one tap from the welcome card */
+export const howPage = () =>
   layout({
-    title: 'Gitemon — every developer is a creature',
+    title: 'How Gitemon works',
     description:
-      'Your GitHub work, hatched into a pixel creature on one shared island. Walk it across nine lands, find the sealed legends, catch other developers.',
-    path: '/',
-    body: `<section class="card"><h1>Every developer is a creature.</h1>
-<a href="/map"><img src="/og-default.png" width="1200" height="630" alt="Gitemon Island: a round town with a golden spire and stone legend statues, ringed by giant wonders — a frozen waterfall, a blossom tree, a world tree, a volcano forge — and the sea" style="width:100%;height:auto;border-radius:14px;margin:4px 0 14px"></a>
-<p class="sub">Sign in with GitHub and your public work hatches into a pixel Gitemon on Gitemon Island. Its type comes from your languages. Its power comes from work other people accepted — never from raw volume. ${count.toLocaleString('en-US')} ${count === 1 ? 'developer has' : 'developers have'} hatched so far, and 500 sealed legends are waiting for theirs.</p>
-<div class="btns"><a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn" href="/map">Open the island</a></div></section>
-<section class="card"><h2>How it works</h2><ul>
-<li><b>Hatch.</b> Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you. No two are the same: your main language picks the creature, your second language colours its markings, and it stands a little taller as your steady work grows.</li>
-<li><b>Walk.</b> Tap the map to walk your Gitemon anywhere — it walks home when you stop. Real GitHub work (merged pull requests, reviews, active weeks) earns more steps each day.</li>
-<li><b>Catch.</b> Walk up to another player's Gitemon and catch it. Worked together for real? It's a bonded catch.</li>
-<li><b>Find the legends.</b> Every legend you walk past goes into your Legend Log. One is the legend of the day: stand near it and your Gitemon glows for six hours. The Rare move every day.</li>
-<li><b>Sealed legends.</b> 500 creatures belong to developers who shaped the tech world. They sleep on the island, nameless, until their own developer signs in — who can wake theirs or remove it.</li>
-<li><b>Belong.</b> Every language has a home in one of nine climates, and a guild hall in town. Guilds compete each week on how many members walk and find legends. The stronger a Gitemon, the nearer the town it lives.</li>
-<li><b>Earn a house.</b> The top 3 players by merit in each region — consistent real work, not raw volume — live in its Merit Houses, with a sign for what they are building or who they are hiring.</li></ul>
-<p class="sub">We never read private repositories, never store where you live, and never contact anyone.</p></section>`,
+      'Hatch from your public GitHub work, walk nine lands, find the sealed legends, earn a house. Power is not size.',
+    path: '/how',
+    body: `<section class="card prose"><h1>How Gitemon works</h1>
+<h2>Hatch</h2><p>Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you. Your main language picks the creature, your second language colours its markings, and each one moves in its own way: it hops, waddles, trots, slithers or floats.</p>
+<h2>Walk</h2><p>Tap the map to walk, or steer with WASD, the arrow keys or the thumb stick on a phone. Your Gitemon walks home when you stop. Real GitHub work (merged pull requests, reviews, active weeks) earns more steps each day.</p>
+<h2>Catch</h2><p>Walk up to another player's Gitemon and catch it. Worked together for real? It's a bonded catch.</p>
+<h2>Find the legends</h2><p>500 sealed legends belong to developers who shaped the tech world. They sleep on the island, nameless, until their own developer signs in and wakes or removes theirs. Every legend you walk past goes into your Legend Log. One is the legend of the day: stand near it and your Gitemon glows for six hours.</p>
+<h2>Status is earned</h2><p>Standing comes from <b>merit</b>: steady work over time, not volume. The plaza round the monument holds only the top 1&nbsp;% of players, and only at merit 75 or more. A Merit House needs merit 50, a mini-plaza seat 40, and a seat nobody has earned stays empty. Steady work also evolves your Gitemon (Form 2 at merit 40, Form 3 at 70), and it never evolves back.</p>
+<h2>Belong</h2><p>Nine climate lands surround one town. Your language decides your land and your guild hall, and guilds compete each week on how many members walk and find legends. The top 3 players by merit in each land live in its Merit Houses, with a sign for what they build or who they hire.</p>
+<h2>Power is not size</h2><p>A Gitemon never grows because of raw volume. Only work other people confirmed counts: pull requests merged into <i>their</i> repos, reviews you gave, stars others gave you. Every stat is log-scaled with a ceiling. Commits to your own repos count for nothing on their own, so AI-generated volume changes nothing either. The scorer is open source: read it, and send a pull request if you think it's unfair.</p>
+<h2>Look around</h2><p>Drag to move the map, scroll or pinch to zoom, right-drag (or two fingers) to turn and tilt. Keys: WASD or the arrows move, Q&nbsp;/&nbsp;E turn, R&nbsp;/&nbsp;F tilt. When you walk, the camera follows your Gitemon.</p>
+<h2>Privacy</h2><p>Gitemon never requests access to private repositories, never stores where you live, and never contacts anyone. Your private work counts only through the anonymous number GitHub itself shows on your profile, and only if you turned that setting on.</p>
+<div class="btns"><a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn" href="/">Back to the island</a></div></section>`,
   });

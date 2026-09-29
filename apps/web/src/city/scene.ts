@@ -126,6 +126,10 @@ export class CityScene {
   } | null = null;
   /** v13.1: the height of the ground the finger grabbed, so a drag keeps it under the finger */
   private grabY = 0;
+  /** v14 (V14-D9): the landing's slow drift round the island, until the first input */
+  private intro = false;
+  /** callers waiting for the next drawn frame (the landing's still picture waits for one) */
+  private frameWaiters: (() => void)[] = [];
   private moved = 0;
   private anim: {
     from: THREE.Vector3;
@@ -354,8 +358,19 @@ export class CityScene {
   private get controlYaw() {
     return this.follow ? this.yaw - FOLLOW_OFFSET : this.yaw;
   }
+  /** v14: drift slowly round the island (the landing); any input stops it */
+  startIntro() {
+    this.intro = true;
+    this.dirty = true;
+  }
+  /** resolves after the next frame is drawn */
+  nextFrame(): Promise<void> {
+    this.dirty = true;
+    return new Promise((done) => this.frameWaiters.push(done));
+  }
   private get moving() {
     return (
+      this.intro ||
       this.zoomGoal !== null ||
       Math.abs(this.panVel.x) + Math.abs(this.panVel.z) > 0.02 ||
       Math.abs(this.yawVel) > 0.002 ||
@@ -366,6 +381,8 @@ export class CityScene {
   }
   private stepCamera(dt: number) {
     const held = this.pointers.size > 0 || this.turning !== null;
+    // v14: about 2° a second, a full turn in three minutes
+    if (this.intro) this.yaw += 0.035 * dt;
     // keys: pan relative to the screen, tilt
     if (this.panKeys.x || this.panKeys.y) {
       const v = this.span * 0.9 * dt;
@@ -525,6 +542,7 @@ export class CityScene {
   }
 
   flyTo(x: number, z: number, zoom = 2.6) {
+    this.intro = false;
     this.setFollow(false);
     this.zoomGoal = null;
     this.anchor = null;
@@ -562,9 +580,12 @@ export class CityScene {
     const el = this.renderer.domElement;
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('dblclick', () => this.resetView());
+    // v14: any input ends the landing's drift
+    window.addEventListener('keydown', () => (this.intro = false));
     el.addEventListener('pointerdown', (e) => {
       el.setPointerCapture(e.pointerId);
       this.anim = null;
+      this.intro = false;
       // a new touch catches the glide
       this.panVel = { x: 0, z: 0 };
       this.yawVel = 0;
@@ -715,6 +736,7 @@ export class CityScene {
       (e) => {
         e.preventDefault();
         this.anim = null;
+        this.intro = false;
         const goal = Math.max(
           0.12,
           Math.min(6, (this.zoomGoal ?? this.zoom) * Math.exp(-e.deltaY * 0.0018)),
@@ -1300,6 +1322,7 @@ export class CityScene {
     }
     const t = performance.now();
     this.renderer.render(this.scene, this.camera);
+    if (this.frameWaiters.length) for (const done of this.frameWaiters.splice(0)) done();
     if (this.probeDue) this.probe();
     this.stats.frames++;
     this.stats.ms += performance.now() - t;

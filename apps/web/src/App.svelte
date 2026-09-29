@@ -23,6 +23,7 @@
   import { plotName } from './city/town';
   import Sprite from './lib/Sprite.svelte';
   import Hud from './lib/Hud.svelte';
+  import { sprite } from './lib/sprites';
 
   // Gitemon Island is the map (GRANDPLAN v4): a centre town and nine climate regions.
   let host: HTMLDivElement;
@@ -37,9 +38,7 @@
   let query = $state('');
   let searching = $state(false);
   let toast = $state<string | null>(null);
-  let total = $state(0);
   let sealed = $state(0);
-  let players = $derived(total - sealed);
   let dex = $state<(MapGitemon & { bonded: boolean })[]>([]);
   let towns = $state<Town[]>([]);
   let townName = $state('');
@@ -52,9 +51,83 @@
     setTimeout(() => (toast === msg ? (toast = null) : null), 3200);
   }
 
+  // ---- v14: the landing (V14-D2). The welcome card and the still picture come with the page; the app
+  // brings them to life: the creature row, the buttons, and the hand-over to the live island.
+  const welcomeEl = () => document.getElementById('welcome');
+  let welcomeOpen = $state(location.pathname === '/' && !!welcomeEl());
+  /** the player touched the map before the island was shown: no drift then */
+  let touched = false;
+  $effect(() => {
+    document.body.classList.toggle('welcoming', welcomeOpen);
+    const w = welcomeEl();
+    if (w) w.hidden = !welcomeOpen;
+  });
+  /** nine creatures, one per land: what you could hatch into (made up, not players) */
+  const SHOWCASE: Pick<MapGitemon, 'id' | 't1' | 't2' | 'sh' | 'f' | 's'>[] = [
+    { id: 11, t1: 'frost', t2: 'tide', sh: 'steady', f: 2, s: 0 },
+    { id: 12, t1: 'bloom', t2: 'wing', sh: 'builder', f: 1, s: 0 },
+    { id: 13, t1: 'forge', t2: 'iron', sh: 'maintainer', f: 3, s: 0 },
+    { id: 14, t1: 'tide', t2: 'coral', sh: 'reviewer', f: 2, s: 0 },
+    { id: 15, t1: 'prism', t2: 'spark', sh: 'polyglot', f: 3, s: 0 },
+    { id: 16, t1: 'serpent', t2: 'moss', sh: 'steady', f: 1, s: 0 },
+    { id: 17, t1: 'garnet', t2: 'quill', sh: 'builder', f: 2, s: 0 },
+    { id: 18, t1: 'shade', t2: 'rune', sh: 'reviewer', f: 3, s: 0 },
+    { id: 19, t1: 'wild', t2: null, sh: 'maintainer', f: 2, s: 0 },
+  ];
+  function wakeWelcome() {
+    const w = welcomeEl();
+    if (!w) return;
+    w.querySelectorAll('.welcome-creatures span').forEach((el, i) => {
+      const g = SHOWCASE[i];
+      if (!g || el.firstChild) return;
+      const src = sprite(g);
+      const c = document.createElement('canvas');
+      c.width = src.width;
+      c.height = src.height;
+      c.getContext('2d')!.drawImage(src, 0, 0);
+      el.appendChild(c);
+      (el as HTMLElement).style.animationDelay = `${i * 0.2}s`;
+    });
+    document.getElementById('welcome-look')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      welcomeOpen = false;
+    });
+  }
+  /** the "Gitemon" name reopens the card on the landing (V14-Q3); elsewhere it is a link home */
+  function brandClick(e: MouseEvent) {
+    if (!welcomeEl() || me) return;
+    e.preventDefault();
+    select(null);
+    if (panel) go('/');
+    welcomeOpen = true;
+  }
+  /** V14-D5: the still picture gives way to the live island once its pieces are in (at most 8 s) */
+  async function reveal(pieces: Promise<unknown>) {
+    const poster = document.getElementById('poster');
+    if (!poster || !scene) return;
+    await Promise.race([pieces, new Promise((r) => setTimeout(r, 8000))]);
+    await scene.nextFrame();
+    await scene.nextFrame();
+    hidePoster();
+    if (welcomeOpen && !touched) scene.startIntro();
+  }
+  function hidePoster() {
+    const poster = document.getElementById('poster');
+    if (!poster || poster.classList.contains('gone')) return;
+    poster.classList.add('gone');
+    setTimeout(() => poster.remove(), 700);
+  }
+  /** the first touch on the map shows the live island at once (the picture cannot be moved) */
+  function firstTouch() {
+    hintGone = true;
+    touched = true;
+    hidePoster();
+  }
+
   function route() {
     const p = location.pathname;
     panel = p === '/dex' ? 'dex' : p === '/towns' ? 'towns' : p === '/me' ? 'me' : null;
+    if (panel) welcomeOpen = false;
     if (panel === 'dex') loadDex();
     if (panel === 'towns') loadTowns();
   }
@@ -91,7 +164,10 @@
   }
 
   async function select(g: MapGitemon | null) {
-    if (g) building = null;
+    if (g) {
+      building = null;
+      welcomeOpen = false;
+    }
     picked = g;
     detail = null;
     if (!g) {
@@ -406,6 +482,7 @@
   }
 
   onMount(() => {
+    wakeWelcome();
     scene = new CityScene(host, (p) => select(p ? p.g : null));
     scene.onBuilding = (k) => void openBuilding(k);
     if (location.search.includes('debug')) (window as unknown as { city: CityScene }).city = scene;
@@ -420,7 +497,6 @@
         return;
       }
       town = loadedCity;
-      total = loadedCity.placed.length;
       sealed = loadedCity.placed.filter((p) => p.g.special?.sealed).length;
       scene!.build(loadedCity.city, loadedCity.homes);
       // ?walkdemo: a stand-in walker at the first town door, to try walking before signing in
@@ -449,7 +525,12 @@
       scene!.stage(loadedCity.city, loadedCity.placed, loadedCity.today ?? null);
       // v8: the sculpted pieces arrive after the first view (build file 05)
       const lc = loadedCity;
-      setTimeout(() => scene?.addPieces(lc.city, lc.placed, lc.homes), 400);
+      const pieces = new Promise<void>((done) =>
+        setTimeout(
+          () => void scene?.addPieces(lc.city, lc.placed, lc.homes).finally(() => done()),
+          400,
+        ),
+      );
       startWalking(loadedCity);
       scene!.fitCity(loadedCity.city.radius);
       loaded = true;
@@ -474,6 +555,7 @@
         await search(undefined, house ? 4 : 3.2);
       } else if (me && !me.hidden && town.byId.has(me.id)) show(me, 2.6);
       else scene!.flyTo(0, 0, homeZoom());
+      void reveal(pieces);
     })();
     return () => scene?.destroy();
   });
@@ -487,11 +569,14 @@
   class="map"
   role="application"
   aria-label="Gitemon City"
-  onpointerdown={() => (hintGone = true)}
+  onpointerdown={firstTouch}
+  onwheel={firstTouch}
 ></div>
 
 <header class="bar">
-  <a class="brand" href="/" title="Gitemon home">Gitemon</a>
+  <a class="brand" href="/" title="Gitemon home" onclick={brandClick}
+    ><img class="brand-mark" src="/favicon.png" alt="" /><span class="brand-name">Gitemon</span></a
+  >
   <form class="search" onsubmit={search} role="search">
     <input
       bind:value={query}
@@ -549,10 +634,8 @@
   <div class="hint">Building the island…</div>
 {:else if !picked && !panel && !hintGone}
   <div class="hint" class:raised={walking}>
-    {players ? `${players.toLocaleString('en-US')} Gitemon and ` : ''}{sealed.toLocaleString(
-      'en-US',
-    )} sealed legends live on the island. The stronger a Gitemon, the nearer the town it lives. Sign in
-    with GitHub to hatch yours. Tap anyone.
+    {sealed.toLocaleString('en-US')} sealed legends sleep on the island. The stronger a Gitemon, the nearer
+    the town it lives.{me ? '' : ' Sign in with GitHub to hatch yours.'} Tap anyone.
   </div>
 {/if}
 

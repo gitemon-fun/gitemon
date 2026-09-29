@@ -83,12 +83,22 @@ a {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
   max-width: 880px;
   margin: 0 auto;
+  z-index: 10;
 }
 .brand {
   font-weight: 800;
   font-size: 18px;
   color: var(--text);
   letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  image-rendering: pixelated;
 }
 .search {
   flex: 1;
@@ -130,7 +140,7 @@ nav .mine {
   white-space: nowrap;
 }
 @media (max-width: 560px) {
-  .brand {
+  .brand-name {
     display: none;
   }
   nav button:not(.mine) {
@@ -652,4 +662,214 @@ h2 {
   padding-left: 18px;
   max-height: 40vh;
   overflow: auto;
+}
+
+/* ---- v14 landing (V14-D2 D5): a still picture first, then the welcome card over the live island ---- */
+.poster {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  background: #0b0d10;
+  pointer-events: none;
+  transition:
+    opacity 0.6s ease,
+    transform 0.6s ease;
+}
+/* the island keeps its height on any screen shape, so the picture keeps its height too and crops the sides */
+.poster img {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: 100%;
+  width: auto;
+  min-width: 100%;
+  transform: translateX(-50%);
+  object-fit: cover;
+}
+.poster.gone {
+  opacity: 0;
+}
+body.welcoming .rail,
+body.welcoming .hud-map,
+body.welcoming .hud-stick,
+body.welcoming .hint {
+  display: none;
+}
+.welcome {
+  position: fixed;
+  z-index: 12;
+  left: calc(env(safe-area-inset-left, 0px) + 24px);
+  top: calc(env(safe-area-inset-top, 0px) + 88px);
+  width: 420px;
+  max-height: calc(100dvh - 112px);
+  overflow: auto;
+  background: var(--card);
+  color: var(--text);
+  border-radius: 20px;
+  padding: 26px 26px 18px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}
+.welcome[hidden] {
+  display: none;
+}
+.welcome h1 {
+  font-size: 34px;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.welcome-sub {
+  color: var(--dim);
+  margin: 0 0 14px;
+  font-size: 16px;
+  line-height: 1.45;
+}
+.welcome-creatures {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 16px;
+  height: 44px;
+}
+.welcome-creatures span {
+  width: 44px;
+  height: 44px;
+  animation: welcome-bob 2.4s ease-in-out infinite;
+}
+.welcome-creatures canvas {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+@keyframes welcome-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .welcome-creatures span {
+    animation: none;
+  }
+  .poster {
+    transition: none;
+  }
+}
+.welcome-btns {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.welcome-go,
+.welcome-look {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0 18px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 16px;
+}
+.welcome-go {
+  background: var(--tint);
+  color: #fff;
+  flex: 1 1 auto;
+}
+.welcome-look {
+  background: var(--fill);
+  color: var(--text);
+}
+.welcome-beats {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 14px;
+  display: grid;
+  gap: 10px;
+}
+.welcome-beats li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.welcome-beats img {
+  width: 30px;
+  height: 30px;
+  image-rendering: pixelated;
+  flex: none;
+}
+.welcome-fair {
+  background: var(--fill);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  margin: 0 0 10px;
+}
+.welcome-small {
+  color: var(--dim);
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+.welcome-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 13px;
+  color: var(--dim);
+}
+.welcome-links a {
+  color: var(--dim);
+}
+/* phone upright: a bottom sheet, the island above it — lifted so the town shows above the sheet
+   (the picture and the live island move together, and slide back when the card closes) */
+.map {
+  transition: transform 0.6s ease;
+}
+@media (max-width: 600px) {
+  body.welcoming .map,
+  body.welcoming .poster {
+    transform: translateY(-20dvh);
+  }
+  .welcome {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: auto;
+    max-height: 64dvh;
+    border-radius: 20px 20px 0 0;
+    padding: 20px 18px calc(env(safe-area-inset-bottom, 0px) + 14px);
+  }
+  .welcome h1 {
+    font-size: 27px;
+  }
+  .welcome-creatures {
+    height: 34px;
+  }
+  .welcome-creatures span {
+    width: 34px;
+    height: 34px;
+  }
+}
+/* phone on its side: the card on the left, scrolling inside itself */
+@media (max-height: 560px) and (min-width: 601px) {
+  .welcome {
+    top: calc(env(safe-area-inset-top, 0px) + 58px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    left: calc(env(safe-area-inset-left, 0px) + 8px);
+    width: min(420px, 52vw);
+    max-height: none;
+    padding: 16px 18px 12px;
+  }
+  .welcome h1 {
+    font-size: 24px;
+  }
 }

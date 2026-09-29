@@ -16,6 +16,10 @@ apps/web/public/favicon.svg
 apps/web/public/favicon.png
 apps/web/public/apple-touch-icon.png
 apps/web/public/og-default.png
+# v14 landing pictures (real art, from the private art repo at deploy)
+apps/web/public/poster-wide.webp
+apps/web/public/poster-tall.webp
+apps/web/public/poster-lqip.json
 
 packages/ingest/src/geo-data.ts
 # 3D models are copied in from the private art repo (scripts/models.sh), never committed

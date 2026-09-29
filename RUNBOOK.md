@@ -61,6 +61,17 @@ draw anything: pixels, draw calls, camera, fog) to `POST /api/clientlog`. Report
 keeps the newest 500: `npx wrangler d1 execute gitemon --remote -c wrangler.deploy.toml --command
 "SELECT * FROM clientlog ORDER BY id DESC LIMIT 20"`.
 
+## Landing (v14)
+
+`/` is the island itself with a welcome card, served by the Worker from `app.html` (`landingShell` in
+`apps/api/src/pages.ts`); a visitor with a session cookie gets the plain app and lands at their Gitemon.
+Before the 3D island is ready, the page shows still pictures of the opening view: a tiny blurred copy
+inside the page, then `poster-wide.webp` / `poster-tall.webp`, which fade into the live island. The
+pictures and the share picture (`og-default.png`) are captures of the live island kept in the private
+art repo; `scripts/icons.ts` copies them in at deploy. **When the island's look or opening view
+changes, capture them again** (the capture script lives in the gitignored `.claude/tools/`), commit
+them to the art repo and deploy — otherwise the fade shows the old island for a moment.
+
 ## Camera (v13)
 
 The camera's pure maths (springs, tilt limits, the walk camera's three-quarter angle) lives in

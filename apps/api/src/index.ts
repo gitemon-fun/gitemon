@@ -36,7 +36,15 @@ import {
 import { safeEqual } from './crypto.js';
 import { bonusLevels, checkBonded, doCatch, foundTown, joinTown, leaveTown } from './game.js';
 import { ogPng, spritePng } from './og.js';
-import { homePage, messagePage, privacyPage, profilePage, termsPage } from './pages.js';
+import {
+  howPage,
+  landingShell,
+  messagePage,
+  privacyPage,
+  profilePage,
+  termsPage,
+} from './pages.js';
+import { getCookie } from 'hono/cookie';
 import {
   byId,
   byLogin,
@@ -1078,13 +1086,20 @@ async function spa(c: Context<AppEnv>) {
   });
 }
 
-app.get('/', async (c) =>
-  edgeCached(c, 300, async () => {
-    return new Response(homePage(await worldCount(c.env.DB)), {
-      headers: { 'content-type': 'text/html; charset=utf-8' },
-    });
-  }),
-);
+// v14 (V14-D2 D6): the island is the landing page; a signed-in player skips the welcome card.
+// Never edge-cached: the page names this deploy's scripts, which the next deploy removes.
+app.get('/', async (c) => {
+  if (getCookie(c, 'gm_session')) return spa(c);
+  const [res, lqip] = await Promise.all([
+    c.env.STATIC.fetch(new Request(new URL('/app.html', c.req.url))),
+    c.env.STATIC.fetch(new Request(new URL('/poster-lqip.json', c.req.url))),
+  ]);
+  const blur = lqip.ok ? await lqip.json<{ wide?: string; tall?: string }>().catch(() => ({})) : {};
+  return new Response(landingShell(await res.text(), blur), {
+    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
+  });
+});
+app.get('/how', (c) => html(c, howPage(), 200, 3600));
 app.get('/privacy', (c) => html(c, privacyPage(), 200, 3600));
 app.get('/terms', (c) => html(c, termsPage(), 200, 3600));
 

@@ -5,3 +5,4 @@ dist/
 apps/api/migrations/
 LICENSE
 apps/web/public/sim/
+apps/web/public/poster-lqip.json
