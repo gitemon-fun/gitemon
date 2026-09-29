@@ -62,7 +62,8 @@ export interface Pieces {
   /** v9: the town's buildings arrived (the placeholder boxes can go) */
   town: boolean;
   /** v11 (V11-D7): ground footprints of the solid pieces (wonders, set pieces, legend statues) */
-  solids: { x: number; z: number; r: number }[];
+  /** r = the inner base that blocks walking; top = its height (v13.2: the walk view's camera stops at it) */
+  solids: { x: number; z: number; r: number; top: number }[];
 }
 
 const cache = new Map<Key, Promise<THREE.Group | null>>();
@@ -236,6 +237,7 @@ export async function loadPieces(
             x: (b.min.x + b.max.x) / 2,
             z: (b.min.z + b.max.z) / 2,
             r: Math.max(0.9, r),
+            top: b.max.y,
           });
         }
       }),

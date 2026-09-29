@@ -447,7 +447,8 @@ h2 {
 }
 .hud-map-body {
   position: relative;
-  border-radius: 14px;
+  /* v13.2: round, so it still looks tidy when it turns heading-up in the walk view */
+  border-radius: 50%;
   overflow: hidden;
   border: 3px solid #f4ead2;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
@@ -549,6 +550,25 @@ h2 {
 .hud-follow.on {
   background: var(--tint);
   color: #fff;
+}
+body.walkview .hint {
+  display: none;
+}
+/* v13.2: the walk view's one-time tip */
+.hud-tip {
+  position: fixed;
+  left: 50%;
+  top: calc(env(safe-area-inset-top, 0px) + 76px);
+  transform: translateX(-50%);
+  z-index: 6;
+  max-width: calc(100vw - 32px);
+  background: rgba(20, 22, 26, 0.88);
+  color: #f5f5f7;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 14px;
+  text-align: center;
+  pointer-events: none;
 }
 /* phones and tablets: the minimap goes under the top bar, the bottom is for thumbs */
 @media (pointer: coarse), (max-width: 600px), (max-height: 560px) {

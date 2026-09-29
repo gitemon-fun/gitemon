@@ -12,6 +12,8 @@ import {
   type Gait,
   type MapGitemon,
   type Spot,
+  PAPER_MAX,
+  paperTurn,
 } from '@gitemon/shared';
 
 /**
@@ -170,6 +172,7 @@ const VERT_COMMON = /* glsl */ `
   uniform float uTime;
   uniform float uGrow;
   uniform vec3 uRight;
+  uniform vec3 uWalkerRight; // v13.2: the player's own cut-out, turned toward the way it walks
   const float PI = 3.14159265;
   // total variation of clamp(K sin t): how far a patrol has gone (packages/shared/src/gait.ts)
   float patrolDist(float t) {
@@ -254,6 +257,7 @@ export class Crowd {
     uTime: { value: 0 },
     uGrow: { value: 1 },
     uRight: { value: new THREE.Vector3(1, 0, 0) },
+    uWalkerRight: { value: new THREE.Vector3(1, 0, 0) },
     uUpScale: { value: 1.8 },
     uAtlas: { value: null as THREE.Texture | null },
   };
@@ -367,7 +371,8 @@ export class Crowd {
           x += (lean * dirSign + sway * sin(uTime * 6.0 + position.y * 4.0)) * y;
           float xr = x * cos(roll) - y * sin(roll);
           float yr = x * sin(roll) + y * cos(roll);
-          vec3 p = base + uRight * xr + vec3(0.0, yr + lift, 0.0);
+          vec3 across = iGait.y >= 0.0 ? uWalkerRight : uRight;
+          vec3 p = base + across * xr + vec3(0.0, yr + lift, 0.0);
           // face the way it walks, and keep facing it while it pauses (sprites are drawn facing left)
           float walker = iGait.y >= 0.0 || iWalk.z > 0.0 ? 1.0 : 0.0;
           float flip = walker > 0.5 ? -dirSign : 1.0;
@@ -478,9 +483,13 @@ export class Crowd {
     this.shadows.frustumCulled = false;
   }
 
-  /** Called every frame with the camera's ground-plane right vector. */
-  update(time: number, right: THREE.Vector3, grow: number, upScale: number) {
+  /**
+   * Called every frame with the camera's ground-plane right vector. `turn` (0…1): how far the player's
+   * own cut-out turns toward the way it walks (v13.2: the walk view turns it, the map view keeps it flat).
+   */
+  update(time: number, right: THREE.Vector3, grow: number, upScale: number, turn = 0) {
     const now = performance.now();
+    let across: [number, number] = [right.x, right.z];
     for (const [i, d] of this.driven) {
       const along = d.dx * right.x + d.dz * right.z;
       if (Math.abs(along) > 1e-4) d.dir = Math.sign(along);
@@ -491,11 +500,13 @@ export class Crowd {
         if (d.steps >= target) d.moving = 0;
       }
       this.gait.setXYZW(i, this.gait.getX(i), d.steps, d.moving, d.dir);
+      across = paperTurn(right.x, right.z, d.dx, d.dz, d.dir, PAPER_MAX, turn);
       this.gait.addUpdateRange(i * 4, 4);
       this.gait.needsUpdate = true;
     }
     this.uniforms.uTime.value = time;
     this.uniforms.uRight.value.copy(right);
+    this.uniforms.uWalkerRight.value.set(across[0], 0, across[1]);
     this.uniforms.uGrow.value = grow;
     this.uniforms.uUpScale.value = upScale;
   }

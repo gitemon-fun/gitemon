@@ -1,10 +1,13 @@
 import * as THREE from 'three';
 import {
-  FOLLOW_MIN_ZOOM,
-  FOLLOW_OFFSET,
-  FOLLOW_PITCH,
-  FOLLOW_PITCH_MIN,
   PLAZA_R,
+  TP_DIST,
+  TP_FOV,
+  TP_PITCH,
+  TP_SIDE,
+  clampTpDist,
+  clampTpPitch,
+  springArm,
   TWIST_START,
   TOWN_Y,
   WATER_Y,
@@ -110,6 +113,9 @@ export class CityScene {
   private pinch: {
     d: number;
     z: number;
+    /** the walk view's distance and height when the fingers landed */
+    td: number;
+    tp: number;
     a: number;
     yaw: number;
     my: number;
@@ -225,14 +231,10 @@ export class CityScene {
   private placeCamera() {
     const w = this.host.clientWidth;
     const h = this.host.clientHeight;
-    const fov = FOV_HIGH + (FOV_LOW - FOV_HIGH) * this.tilt;
-    const d = this.span / (2 * Math.tan(((fov / 2) * Math.PI) / 180));
+    // ---- the map view (the city-builder camera) ----
+    const fovM = FOV_HIGH + (FOV_LOW - FOV_HIGH) * this.tilt;
+    const d = this.span / (2 * Math.tan(((fovM / 2) * Math.PI) / 180));
     const e = this.pitch;
-    this.camera.fov = fov;
-    this.camera.aspect = w / Math.max(1, h);
-    this.camera.near = Math.max(0.5, d * 0.02);
-    this.camera.far = d * 4 + 1500;
-    this.camera.updateProjectionMatrix();
     const dir = new THREE.Vector3(
       Math.cos(this.yaw) * Math.cos(e),
       Math.sin(e),
@@ -245,29 +247,117 @@ export class CityScene {
       this.target.y +=
         (Math.max(TOWN_Y, g) - this.target.y) * (this.anim || this.anchor ? 1 : 0.25);
     }
-    this.camera.position.copy(this.target).addScaledVector(dir, d);
+    const pos = this.target.clone().addScaledVector(dir, d);
     if (this.groundGrid) {
       const t = this.target;
-      const c = this.camera.position;
-      let y = c.y;
+      let y = pos.y;
       for (let k = 1; k <= 10; k++) {
         const f = k / 10;
-        const h = gridHeight(this.groundGrid, t.x + (c.x - t.x) * f, t.z + (c.z - t.z) * f) + 2.5;
-        y = Math.max(y, t.y + (h - t.y) / f);
+        const gh =
+          gridHeight(this.groundGrid, t.x + (pos.x - t.x) * f, t.z + (pos.z - t.z) * f) + 2.5;
+        y = Math.max(y, t.y + (gh - t.y) / f);
       }
-      c.y = y;
+      pos.y = y;
     }
     // low down, aim a little above the target so the land ahead fills the frame, not the ground at our feet
-    // (the walk camera keeps your Gitemon nearer the middle: it aims less far ahead)
-    const low =
-      Math.min(1, Math.max(0, (PITCH_HIGH - e) / (PITCH_HIGH - PITCH_LOW))) *
-      (this.follow ? 0.35 : 1);
-    this.camera.lookAt(this.target.x, this.target.y + d * 0.14 * low, this.target.z);
+    const low = Math.min(1, Math.max(0, (PITCH_HIGH - e) / (PITCH_HIGH - PITCH_LOW)));
+    const look = new THREE.Vector3(this.target.x, this.target.y + d * 0.14 * low, this.target.z);
+    let fov = fovM;
+    let near = Math.max(0.5, d * 0.02);
+    let far = d * 4 + 1500;
+    let fogNear = d * 0.9;
+    let fogFar = d * 4.2 + 300;
+    // ---- the walk view (v13.2, V13-D10): the camera glides between the two ----
+    const k = this.modeT;
+    if (k > 0 && this.walker && this.walkCity) {
+      const b = k * k * (3 - 2 * k);
+      const tp = this.thirdPerson();
+      pos.lerp(tp.pos, b);
+      look.lerp(tp.look, b);
+      fov += (TP_FOV - fov) * b;
+      near += (0.25 - near) * b;
+      far = Math.max(far, 900);
+      fogNear += (70 - fogNear) * b;
+      fogFar += (440 - fogFar) * b;
+    }
+    this.camera.fov = fov;
+    this.camera.aspect = w / Math.max(1, h);
+    this.camera.near = near;
+    this.camera.far = far;
+    this.camera.updateProjectionMatrix();
+    this.camera.position.copy(pos);
+    this.camera.lookAt(look);
     const fog = this.scene.fog as THREE.Fog;
-    fog.near = d * 0.9;
-    fog.far = d * 4.2 + 300;
+    fog.near = fogNear;
+    fog.far = fogFar;
     this.sky.position.copy(this.camera.position);
     this.sky.scale.setScalar(this.camera.far * 0.9);
+  }
+
+  /** the walk view's camera keeps out of the ground, the town's buildings and the big 3D pieces */
+  private camGround(x: number, z: number): number {
+    let h = this.groundY(x, z);
+    const city = this.walkCity;
+    if (city && Math.hypot(x, z) < 80)
+      city.town.forEach((p, k) => {
+        const dx = x - p.x;
+        const dz = z - p.z;
+        const across = dx * p.fx + dz * p.fz;
+        const along = -dx * p.fz + dz * p.fx;
+        if (Math.abs(along) < p.w / 2 + 0.6 && Math.abs(across) < p.d / 2 + 0.6)
+          h = Math.max(h, p.y + (this.plotH[k] ?? 8));
+      });
+    // a solid's walking radius is its inner base (0.55 of the half-width): the camera keeps to all of it
+    for (const s of this.solids)
+      if ((x - s.x) ** 2 + (z - s.z) ** 2 < (s.r / 0.55 + 0.4) ** 2) h = Math.max(h, s.top);
+    return h;
+  }
+  /** entering the walk view: the camera's way nearest the map's own that is not blocked close by */
+  private clearYaw(yaw: number): number {
+    const f = this.tpFocus;
+    const p = this.tpPitch;
+    let best = yaw;
+    let bestD = -1;
+    for (const k of [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6]) {
+      const y = yaw + (k * Math.PI) / 6;
+      const d = springArm(
+        f.x,
+        f.y,
+        f.z,
+        Math.cos(y) * Math.cos(p),
+        Math.sin(p),
+        Math.sin(y) * Math.cos(p),
+        this.tpDist,
+        (x, z) => this.camGround(x, z),
+        0.6,
+        0,
+      );
+      if (d >= this.tpDist * 0.8) return y;
+      if (d > bestD) {
+        bestD = d;
+        best = y;
+      }
+    }
+    return best;
+  }
+  /**
+   * The walk view's camera: behind your Gitemon at its own distance and height, looking a little above
+   * its head so the horizon shows. The spring arm brings it closer rather than into a hill.
+   */
+  private thirdPerson(): { pos: THREE.Vector3; look: THREE.Vector3 } {
+    const f = this.tpFocus;
+    const p = this.tpPitch;
+    const dx = Math.cos(this.yaw) * Math.cos(p);
+    const dy = Math.sin(p);
+    const dz = Math.sin(this.yaw) * Math.cos(p);
+    const ground = (x: number, z: number) => this.camGround(x, z);
+    const dist = springArm(f.x, f.y, f.z, dx, dy, dz, this.tpDist, ground, 0.6, 1.2);
+    const pos = new THREE.Vector3(f.x + dx * dist, f.y + dy * dist, f.z + dz * dist);
+    // right against a wall: over the roof rather than inside the house
+    pos.y = Math.max(pos.y, ground(pos.x, pos.z) + 0.6);
+    const look = f.clone();
+    look.y += this.walkerHeight * 0.45;
+    return { pos, look };
   }
 
   /** the ⟳ button: a quarter turn, eased (it used to jump) */
@@ -294,10 +384,14 @@ export class CityScene {
 
   /** the + / − buttons and keys: an eased zoom at the centre */
   zoomBy(f: number) {
+    this.dirty = true;
+    // the walk view: + / − bring the camera closer or further
+    if (this.follow) {
+      this.tpDist = clampTpDist(this.tpDist / f);
+      return;
+    }
     this.zoomGoal = Math.max(0.12, Math.min(6, (this.zoomGoal ?? this.zoom) * f));
     this.anchor = null;
-    if (this.follow && this.zoomGoal < FOLLOW_MIN_ZOOM) this.setFollow(false);
-    this.dirty = true;
   }
 
   // ---- v13 camera: goals, inertia, keys, the walk camera ------------------------------------------
@@ -308,29 +402,63 @@ export class CityScene {
   private yawVel = 0;
   private panKeys = { x: 0, y: 0 };
   private tiltKeys = 0;
+  /** v13.2 (V13-D10): the walk view is on — a third-person camera behind your Gitemon */
   private follow = false;
   private orbitAt = 0;
-  private pitchSaved: number | null = null;
   private lastWalk: { x: number; z: number } | null = null;
-  /** set by the HUD: the walk camera turned on or off */
+  /** the walk view's own distance and height; the map view keeps its zoom and tilt meanwhile */
+  private tpDist = TP_DIST;
+  private tpPitch = TP_PITCH;
+  /** where the walk view looks (your Gitemon, smoothed) */
+  private tpFocus = new THREE.Vector3();
+  /** 0 = map view … 1 = walk view: the camera glides between the two */
+  private modeT = 0;
+  private mapSaved: { zoom: number; pitch: number | null } | null = null;
+  /** set by the HUD: the walk view turned on or off */
   onFollow: ((on: boolean) => void) | null = null;
   get following() {
     return this.follow;
   }
-  /** V13-D4: the walk camera — on when you start moving your Gitemon, off by button or zoom-out */
+  /** the walk view's starting distance: a tall phone screen is narrow, so it starts further back */
+  private get tpHome() {
+    return this.host.clientWidth / Math.max(1, this.host.clientHeight) < 0.8
+      ? TP_DIST * 1.35
+      : TP_DIST;
+  }
+  private get walkerHeight() {
+    return this.walker && this.crowd ? this.crowd.heightOf(this.walker.i, 1) : 2;
+  }
+  /**
+   * v13.2 (V13-D10): two separate views. The map view is the city-builder camera and never moves on its
+   * own; the walk view is a third-person camera behind your Gitemon. Only the button or V switches.
+   */
   setFollow(on: boolean) {
     if (on === this.follow || (on && !this.walker)) return;
+    const w = this.walker;
     this.follow = on;
-    if (on) {
-      this.pitchSaved = this.pitchOverride;
-      this.pitchOverride = FOLLOW_PITCH;
-      this.anim = null;
-      this.zoomGoal = Math.max(this.zoomGoal ?? this.zoom, 3.4);
-      this.anchor = null;
+    this.anim = null;
+    this.zoomGoal = null;
+    this.anchor = null;
+    this.intro = false;
+    this.panVel = { x: 0, z: 0 };
+    this.yawVel = 0;
+    if (on && w) {
+      this.mapSaved = { zoom: this.zoom, pitch: this.pitchOverride };
+      this.tpDist = this.tpHome;
+      this.tpPitch = TP_PITCH;
       this.orbitAt = 0;
-    } else {
-      this.pitchOverride = this.pitchSaved;
-      this.pitchSaved = null;
+      this.tpFocus.set(w.x, this.groundY(w.x, w.z) + this.walkerHeight * 0.7, w.z);
+      // turn (eased) to the nearest way the camera is not blocked by a house
+      this.yawTo = this.clearYaw(this.yaw);
+    } else if (this.mapSaved) {
+      // back to the map at the zoom and tilt you left it, centred on your Gitemon
+      this.zoom = this.mapSaved.zoom;
+      this.pitchOverride = this.mapSaved.pitch;
+      this.mapSaved = null;
+      if (w) {
+        this.target.x = w.x;
+        this.target.z = w.z;
+      }
     }
     this.onFollow?.(on);
     this.dirty = true;
@@ -350,14 +478,15 @@ export class CityScene {
   resetView() {
     if (this.follow) {
       this.orbitAt = 0;
-      this.pitchOverride = FOLLOW_PITCH;
+      this.tpDist = this.tpHome;
+      this.tpPitch = TP_PITCH;
+      const d = this.walker && this.lastTravel;
+      if (d) this.yawTo = followYaw(Math.atan2(d.z, d.x), this.yaw, TP_SIDE);
     } else this.pitchOverride = null;
     this.dirty = true;
   }
-  /** the steering frame: in the walk camera it sits ~34° off the camera, so you see your Gitemon from the side */
-  private get controlYaw() {
-    return this.follow ? this.yaw - FOLLOW_OFFSET : this.yaw;
-  }
+  /** the way your Gitemon last walked (the walk view's double-click puts the camera behind it) */
+  private lastTravel: { x: number; z: number } | null = null;
   /** v14: drift slowly round the island (the landing); any input stops it */
   startIntro() {
     this.intro = true;
@@ -371,6 +500,7 @@ export class CityScene {
   private get moving() {
     return (
       this.intro ||
+      this.modeT !== (this.follow ? 1 : 0) ||
       this.zoomGoal !== null ||
       Math.abs(this.panVel.x) + Math.abs(this.panVel.z) > 0.02 ||
       Math.abs(this.yawVel) > 0.002 ||
@@ -393,11 +523,10 @@ export class CityScene {
       this.target.x += (fx * this.panKeys.y + rx * this.panKeys.x) * v;
       this.target.z += (fz * this.panKeys.y + rz * this.panKeys.x) * v;
     }
-    if (this.tiltKeys)
-      this.pitchOverride = clampPitch(
-        this.pitch + this.tiltKeys * 0.9 * dt,
-        this.follow ? FOLLOW_PITCH_MIN : undefined,
-      );
+    if (this.tiltKeys) {
+      if (this.follow) this.tpPitch = clampTpPitch(this.tpPitch + this.tiltKeys * 0.9 * dt);
+      else this.pitchOverride = clampPitch(this.pitch + this.tiltKeys * 0.9 * dt);
+    }
     // inertia: a released drag glides and settles (G2)
     if (!held) {
       this.target.x += this.panVel.x * dt;
@@ -417,9 +546,22 @@ export class CityScene {
       if (this.anchor) this.keepAnchor();
       if (this.zoomGoal === null) this.anchor = null;
     }
-    // the walk camera: follow the Gitemon; on a tapped walk, turn lazily behind-and-beside it
+    // v13.2: the glide between the map view and the walk view
+    const goal = this.follow ? 1 : 0;
+    this.modeT = approach(this.modeT, goal, dt, 5);
+    if (Math.abs(this.modeT - goal) < 0.002) this.modeT = goal;
+    // the walk view follows your Gitemon closely; on a tapped walk it swings round behind it
     const w = this.walker;
     if (this.follow && w) {
+      this.tpFocus.x = approach(this.tpFocus.x, w.x, dt, 12);
+      this.tpFocus.z = approach(this.tpFocus.z, w.z, dt, 12);
+      this.tpFocus.y = approach(
+        this.tpFocus.y,
+        this.groundY(w.x, w.z) + this.walkerHeight * 0.7,
+        dt,
+        8,
+      );
+      // the map view's pivot keeps up, so leaving the walk view lands over your Gitemon
       this.target.x = approach(this.target.x, w.x, dt, 6);
       this.target.z = approach(this.target.z, w.z, dt, 6);
       const last = this.lastWalk;
@@ -427,8 +569,18 @@ export class CityScene {
         const dx = w.x - last.x;
         const dz = w.z - last.z;
         if (Math.hypot(dx, dz) > 0.02)
-          this.yaw = approachAngle(this.yaw, followYaw(Math.atan2(dz, dx), this.yaw), dt, 1 / 1.2);
+          this.yaw = approachAngle(
+            this.yaw,
+            followYaw(Math.atan2(dz, dx), this.yaw, TP_SIDE),
+            dt,
+            1 / 1.2,
+          );
       }
+    }
+    if (w) {
+      const last = this.lastWalk;
+      if (last && Math.hypot(w.x - last.x, w.z - last.z) > 0.02)
+        this.lastTravel = { x: w.x - last.x, z: w.z - last.z };
       this.lastWalk = { x: w.x, z: w.z };
     }
   }
@@ -606,6 +758,8 @@ export class CityScene {
         this.pinch = {
           d: Math.hypot(a.x - b.x, a.y - b.y),
           z: this.zoom,
+          td: this.tpDist,
+          tp: this.tpPitch,
           a: Math.atan2(b.y - a.y, b.x - a.x),
           yaw: this.yaw,
           my: (a.y + b.y) / 2,
@@ -629,10 +783,8 @@ export class CityScene {
         const dyaw = (e.clientX - t.x) * 0.006;
         this.rotateBy(dyaw);
         // v13 (V13-D2): up and down tilts
-        this.pitchOverride = clampPitch(
-          this.pitch + (e.clientY - t.y) * 0.004,
-          this.follow ? FOLLOW_PITCH_MIN : undefined,
-        );
+        if (this.follow) this.tpPitch = clampTpPitch(this.tpPitch + (e.clientY - t.y) * 0.004);
+        else this.pitchOverride = clampPitch(this.pitch + (e.clientY - t.y) * 0.004);
         this.yawVel = dyaw / Math.max(0.008, (now - t.t) / 1000);
         t.x = e.clientX;
         t.y = e.clientY;
@@ -649,12 +801,16 @@ export class CityScene {
         const pc = this.pinch;
         // v13.1: decide once whether this is a tilt or a zoom, so one never leaks into the other
         pc.mode ??= twoFingerMode(pc.a0, pc.b0, a, b);
-        const floor = this.follow ? FOLLOW_PITCH_MIN : undefined;
+        const dy = ((a.y + b.y) / 2 - pc.my) * 0.004;
+        const spread = Math.hypot(a.x - b.x, a.y - b.y) / pc.d;
         if (pc.mode === 'tilt') {
           // both fingers up or down: tilt only, like R / F
-          this.pitchOverride = clampPitch(pc.pitch + ((a.y + b.y) / 2 - pc.my) * 0.004, floor);
+          if (this.follow) this.tpPitch = clampTpPitch(pc.tp + dy);
+          else this.pitchOverride = clampPitch(pc.pitch + dy);
         } else if (pc.mode === 'zoom') {
-          this.zoom = Math.max(0.12, Math.min(6, (pc.z * Math.hypot(a.x - b.x, a.y - b.y)) / pc.d));
+          // the walk view: a pinch brings the camera closer to your Gitemon
+          if (this.follow) this.tpDist = clampTpDist(pc.td / spread);
+          else this.zoom = Math.max(0.12, Math.min(6, pc.z * spread));
           // a clear twist turns the island with the fingers (v12); a small one while pinching does not
           const twist = wrapAngle(Math.atan2(b.y - a.y, b.x - a.x) - pc.a);
           if (pc.rot === null && Math.abs(twist) > TWIST_START) pc.rot = twist;
@@ -671,16 +827,15 @@ export class CityScene {
             this.keepAnchor();
             this.anchor = null;
           }
-          if (this.follow && this.zoom < FOLLOW_MIN_ZOOM) this.setFollow(false);
         }
         this.moved += 10;
         this.dirty = true;
         return;
       }
-      // v13: in the walk camera a drag orbits round your Gitemon instead of moving the map
+      // the walk view: a drag looks round your Gitemon instead of moving the map
       if (this.follow) {
         this.rotateBy((e.clientX - p.x) * 0.006);
-        this.pitchOverride = clampPitch(this.pitch + (e.clientY - p.y) * 0.004, FOLLOW_PITCH_MIN);
+        this.tpPitch = clampTpPitch(this.tpPitch + (e.clientY - p.y) * 0.004);
         this.moved += Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y);
         this.orbitAt = now;
         p.x = e.clientX;
@@ -737,13 +892,18 @@ export class CityScene {
         e.preventDefault();
         this.anim = null;
         this.intro = false;
+        // the walk view: the wheel brings the camera closer to your Gitemon or further back
+        if (this.follow) {
+          this.tpDist = clampTpDist(this.tpDist * Math.exp(e.deltaY * 0.0015));
+          this.dirty = true;
+          return;
+        }
         const goal = Math.max(
           0.12,
           Math.min(6, (this.zoomGoal ?? this.zoom) * Math.exp(-e.deltaY * 0.0018)),
         );
-        if (this.follow && goal < FOLLOW_MIN_ZOOM) this.setFollow(false);
-        // v13 (V13-D2): zoom toward the ground under the pointer (in the walk camera: your Gitemon)
-        const g = this.follow ? null : this.terrainAt(e.clientX, e.clientY);
+        // v13 (V13-D2): zoom toward the ground under the pointer
+        const g = this.terrainAt(e.clientX, e.clientY);
         this.anchor = g ? { px: e.clientX, py: e.clientY, x: g.x, y: g.y, z: g.z } : null;
         this.zoomGoal = goal;
         this.dirty = true;
@@ -793,8 +953,8 @@ export class CityScene {
       this.onBuilding(k);
       return;
     }
-    // tapping the ground zooms toward it
-    const g = this.groundAt(px, py);
+    // tapping the ground zooms toward it (v13.2: the real ground — the walk view looks along hills)
+    const g = this.terrainAt(px, py) ?? this.groundAt(px, py);
     // v6: a signed-in player's tap on the ground walks their Gitemon there
     if (g && this.onGround?.(g.x, g.z)) return;
     if (g) this.flyTo(g.x, g.z, Math.min(4, this.zoom * 2.2));
@@ -989,7 +1149,7 @@ export class CityScene {
   /** set by the app: return true when a ground tap was used for walking */
   onGround: ((x: number, z: number) => boolean) | null = null;
   private walkable: Walkable | null = null;
-  private solids: { x: number; z: number; r: number }[] = [];
+  private solids: { x: number; z: number; r: number; top: number }[] = [];
   private walker: { i: number; home: Spot; walk: Walk | null; x: number; z: number } | null = null;
   private walkCity: Island | null = null;
   /** called about twice a second while walking, with where the walker is */
@@ -1009,7 +1169,6 @@ export class CityScene {
     this.stick = l > 1 ? { x: x / l, y: y / l } : { x, y };
     if (l > 0 && this.walker) {
       this.walker.walk = null; // steering takes over from a tapped walk
-      this.setFollow(true); // v13 (V13-D4): moving your Gitemon turns the walk camera on
     }
     this.dirty = true;
   }
@@ -1019,8 +1178,8 @@ export class CityScene {
   private stepSteer(dt: number) {
     const w = this.walker;
     if (!w || !this.walkable || !this.crowd || !this.walkCity || !this.steering) return;
-    // up the screen = away from the camera along the ground (the walk camera: its side frame)
-    const cy = this.controlYaw;
+    // up the screen = away from the camera along the ground: in the walk view, straight ahead
+    const cy = this.yaw;
     const fx = -Math.cos(cy);
     const fz = -Math.sin(cy);
     const rx = Math.sin(cy);
@@ -1043,8 +1202,6 @@ export class CityScene {
     w.z = nz;
     const y = this.groundY(nx, nz);
     this.crowd.setPos(w.i, nx, nz, y);
-    this.target.x += (nx - this.target.x) * 0.15;
-    this.target.z += (nz - this.target.z) * 0.15;
     this.onSteer?.(moved);
     const now = performance.now();
     if (now - this.lastWalkPing > 500) {
@@ -1091,7 +1248,6 @@ export class CityScene {
     const path = this.walkable.path(this.walker.x, this.walker.z, x, z);
     if (!path) return null;
     this.walker.walk = new Walk(path);
-    this.setFollow(true); // v13 (V13-D4)
     this.dirty = true;
     return path.length;
   }
@@ -1116,10 +1272,8 @@ export class CityScene {
     w.x = x;
     w.z = z;
     const y = this.groundY(x, z);
+    // (the map view stays where you put it; the walk view follows in stepCamera)
     this.crowd.setPos(w.i, x, z, y);
-    // the camera follows the walker
-    this.target.x += (x - this.target.x) * 0.08;
-    this.target.z += (z - this.target.z) * 0.08;
     const now = performance.now();
     const arrived = w.walk.done;
     if (arrived || now - this.lastWalkPing > 500) {
@@ -1253,11 +1407,16 @@ export class CityScene {
 
   /** sprites grow a little when zoomed far out, so the crowd still reads (Transit does the same) */
   private get grow() {
-    return Math.max(1, Math.min(2, 1.1 / this.zoom));
+    return Math.max(1, Math.min(2, 1.1 / this.viewZoom));
   }
   /** upright sprites are foreshortened by the camera pitch; stretch them back to true proportions */
   private get upScale() {
-    return 1 / Math.cos(this.pitch);
+    const b = this.modeT * this.modeT * (3 - 2 * this.modeT);
+    return 1 / Math.cos(this.pitch + (this.tpPitch - this.pitch) * b);
+  }
+  /** the zoom the level of detail follows: the walk view is as close as the map goes */
+  private get viewZoom() {
+    return this.modeT > 0.5 ? 6 : this.zoom;
   }
 
   // ---- loop --------------------------------------------------------------------------------------------
@@ -1266,7 +1425,7 @@ export class CityScene {
     this.raf = requestAnimationFrame(this.loop);
     if (document.hidden) return;
     // walkers only matter when they are big enough to see: animate at street and district zoom
-    const animate = this.crowd && this.zoom > 0.45;
+    const animate = this.crowd && this.viewZoom > 0.45;
     const turning = this.spinning !== 0 || this.yawTo !== null || this.moving;
     if (!animate && !this.dirty && !this.anim && !this.walker?.walk && !this.steering && !turning)
       return;
@@ -1289,7 +1448,7 @@ export class CityScene {
       (this.town.water.material as THREE.ShaderMaterial).uniforms.uTime!.value = this.clock;
     if (this.air) {
       const px = this.host.clientHeight / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
-      const fade = Math.min(1, Math.max(0, (this.zoom - 0.7) / 0.6));
+      const fade = Math.min(1, Math.max(0, (this.viewZoom - 0.7) / 0.6));
       this.air.update(this.clock, this.target.x, this.target.z, px, fade);
     }
     this.stepWalker(dt);
@@ -1307,10 +1466,11 @@ export class CityScene {
     this.dirty = false;
     this.placeCamera();
     // LOD: windows, add-ons and street furniture only where they can be seen (v3 build file 08)
-    const near = this.zoom > 0.42;
-    this.labels.visible = this.zoom < 0.55;
+    const vz = this.viewZoom;
+    const near = vz > 0.42;
+    this.labels.visible = vz < 0.55;
     // pillars are for finding legends from afar: close up they fade so the creatures read
-    const fade = this.zoom < 0.7 ? 1 : Math.max(0.12, (0.7 / this.zoom) ** 1.4);
+    const fade = vz < 0.7 ? 1 : Math.max(0.12, (0.7 / vz) ** 1.4);
     for (const [mat, o] of this.beams) mat.opacity = o * fade;
     if (near !== this.detailOn) {
       this.detailOn = near;
@@ -1318,7 +1478,8 @@ export class CityScene {
     }
     if (this.crowd) {
       const right = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-      this.crowd.update(this.clock, right, this.grow, this.upScale);
+      // v13.2: in the walk view your Gitemon's cut-out turns toward the way it walks
+      this.crowd.update(this.clock, right, this.grow, this.upScale, this.modeT);
     }
     const t = performance.now();
     this.renderer.render(this.scene, this.camera);
@@ -1335,6 +1496,7 @@ export class CityScene {
     return this.yaw;
   }
   get view(): { x: number; z: number; span: number } {
+    if (this.follow) return { x: this.tpFocus.x, z: this.tpFocus.z, span: this.tpDist * 3 };
     return { x: this.target.x, z: this.target.z, span: this.span };
   }
 

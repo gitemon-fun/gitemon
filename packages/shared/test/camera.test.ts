@@ -9,6 +9,9 @@ import {
   decay,
   followYaw,
   offBehind,
+  PAPER_MAX,
+  paperTurn,
+  springArm,
   twoFingerMode,
   wrapAngle,
 } from '../src/index.js';
@@ -61,5 +64,32 @@ describe('camera maths (v13)', () => {
     expect(twoFingerMode(a0, b0, { x: 100, y: 430 }, { x: 260, y: 370 })).toBe('zoom');
     // a sideways slide: zoom (which pans)
     expect(twoFingerMode(a0, b0, { x: 140, y: 400 }, { x: 300, y: 400 })).toBe('zoom');
+  });
+
+  it('walk view: the spring arm comes in before a hill behind, and stays out on flat ground (v13.2)', () => {
+    const flat = () => 0;
+    // looking down 14° from a focus 1.5 m up: a flat island never shortens the arm
+    const dy = Math.sin(0.24);
+    const dx = Math.cos(0.24);
+    expect(springArm(0, 1.5, 0, dx, dy, 0, 9, flat)).toBe(9);
+    // a 4 m bank from 3 m behind: the camera stops in front of it
+    const bank = (x: number) => (x > 3 ? 4 : 0);
+    const d = springArm(0, 1.5, 0, dx, dy, 0, 9, bank);
+    expect(d).toBeLessThan(3.5);
+    expect(d).toBeGreaterThanOrEqual(2.2);
+  });
+
+  it('walk view: the paper turn follows the walk, never past its limit (v13.2)', () => {
+    // camera right = +x; walking a little off +x: the cut-out turns all the way to it
+    const [ax, az] = paperTurn(1, 0, Math.cos(0.3), Math.sin(0.3), 1, PAPER_MAX, 1);
+    expect(Math.atan2(az, ax)).toBeCloseTo(0.3, 6);
+    // walking straight into the picture (+z here): it turns only as far as the limit
+    const [bx, bz] = paperTurn(1, 0, 0, 1, 1, PAPER_MAX, 1);
+    expect(Math.atan2(bz, bx)).toBeCloseTo(PAPER_MAX, 6);
+    // in the map view (k = 0) it stays flat to the camera
+    expect(paperTurn(1, 0, 0, 1, 1, PAPER_MAX, 0)).toEqual([1, 0]);
+    // facing left on screen, walking left and a little in: it turns toward the walk, not away
+    const [cx, cz] = paperTurn(1, 0, -Math.cos(0.3), Math.sin(0.3), -1, PAPER_MAX, 1);
+    expect(Math.atan2(cz, cx)).toBeCloseTo(-0.3, 6);
   });
 });

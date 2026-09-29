@@ -29,8 +29,18 @@
   let base: HTMLCanvasElement;
   let dots: HTMLCanvasElement;
   let needle = $state(0);
-  /** v13 (V13-D4): the walk camera is on; the minimap then turns heading-up */
+  /** v13.2 (V13-D10): the walk view is on; the minimap then turns heading-up */
   let following = $state(false);
+  /** the walk view's one-time tip */
+  let tip = $state(false);
+  const touch = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+  function setView(walk: boolean) {
+    // held keys belong to the view they were pressed in
+    keys.clear();
+    scene.steer(0, 0);
+    scene.pan(0, 0);
+    scene.setFollow(walk);
+  }
   let mapTurn = $state(0);
   let open = $state(true);
   /** island north points at Frost Peaks (the top of the opening view) */
@@ -52,6 +62,20 @@
   let lastPos: [number, number] | null = null;
 
   onMount(() => {
+    scene.onFollow = (on) => {
+      following = on;
+      // the page styles itself for the walk view (the map's hint steps aside)
+      document.body.classList.toggle('walkview', on);
+      if (!on) return;
+      try {
+        if (localStorage.getItem('gitemon.walkTip')) return;
+        localStorage.setItem('gitemon.walkTip', '1');
+      } catch {
+        /* private window: show it anyway */
+      }
+      tip = true;
+      setTimeout(() => (tip = false), 6000);
+    };
     try {
       if (localStorage.getItem('gitemon.sound') === 'on')
         window.addEventListener('pointerdown', () => setSound(true), { once: true });
@@ -73,7 +97,6 @@
       const n = [Math.cos(NORTH), Math.sin(NORTH)];
       needle =
         (Math.atan2(n[0]! * r[0]! + n[1]! * r[1]!, n[0]! * f[0]! + n[1]! * f[1]!) * 180) / Math.PI;
-      following = scene.following;
       // heading-up while following: the way the camera looks points to the top of the minimap
       mapTurn = following ? -90 - (Math.atan2(f[1]!, f[0]!) * 180) / Math.PI : 0;
       if (sound.on) {
@@ -167,8 +190,8 @@
         y += v[1];
       }
     }
-    // v13 (V13-D3): walking, the keys steer your Gitemon; otherwise they move the map
-    if (walking) scene.steer(x, y);
+    // v13.2 (V13-D10): in the walk view the keys walk your Gitemon; in the map view they move the map
+    if (scene.following) scene.steer(x, y);
     else scene.pan(Math.sign(x), Math.sign(y));
   }
   function typing(e: KeyboardEvent) {
@@ -178,6 +201,11 @@
   function down(e: KeyboardEvent) {
     const k = e.key.toLowerCase();
     if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+    // v13.2: V switches between the map view and the walk view (as in GTA)
+    if (k === 'v') {
+      if (!e.repeat && walking) setView(!scene.following);
+      return;
+    }
     // v12: Q / E turn the camera; v13: R / F tilt it, + / − zoom
     if (k === 'q' || k === 'e') {
       if (!e.repeat) scene.spin(k === 'q' ? -1 : 1);
@@ -246,9 +274,14 @@
       <button
         class="hud-btn hud-follow"
         class:on={following}
-        onclick={() => scene.setFollow(!following)}
-        aria-label={following ? 'Free camera' : 'Follow my Gitemon'}
-        title={following ? 'Free camera' : 'Follow my Gitemon'}>{following ? '⤢' : '◎'}</button
+        onclick={() => setView(!following)}
+        aria-label={following ? 'Map view (V)' : 'Walk with your Gitemon (V)'}
+        title={following ? 'Map view (V)' : 'Walk with your Gitemon (V)'}
+        ><img
+          src={following ? '/ui/map.png' : '/ui/steps.png'}
+          alt=""
+          onerror={(e) => ((e.currentTarget as HTMLElement).style.display = 'none')}
+        /><span class="glyph">{following ? '▦' : '⇡'}</span></button
       >
     {/if}
     <button
@@ -310,7 +343,15 @@
   </div>
 </div>
 
-{#if walking}
+{#if tip}
+  <div class="hud-tip" role="status">
+    {touch
+      ? 'Walk with the stick · drag to look round · the map button goes back'
+      : 'Walk with WASD · drag to look round · V goes back to the map'}
+  </div>
+{/if}
+
+{#if walking && following}
   <div
     class="hud-stick"
     bind:this={stickEl}
