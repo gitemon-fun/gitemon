@@ -62,6 +62,10 @@
   let lastPos: [number, number] | null = null;
 
   onMount(() => {
+    const onSound = (e: Event) => {
+      if ((e as CustomEvent).detail === 'catch') sound.caught();
+    };
+    window.addEventListener('gitemon:sound', onSound);
     scene.onFollow = (on) => {
       following = on;
       // the page styles itself for the walk view (the map's hint steps aside)
@@ -140,7 +144,11 @@
         ctx.stroke();
       }
     }, 200);
-    return () => (clearInterval(t), sound.disable());
+    return () => (
+      clearInterval(t),
+      sound.disable(),
+      window.removeEventListener('gitemon:sound', onSound)
+    );
   });
 
   function flyFromMap(e: MouseEvent) {

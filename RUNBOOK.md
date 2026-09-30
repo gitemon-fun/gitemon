@@ -72,6 +72,18 @@ art repo; `scripts/icons.ts` copies them in at deploy. **When the island's look 
 changes, capture them again** (the capture script lives in the gitignored `.claude/tools/`), commit
 them to the art repo and deploy — otherwise the fade shows the old island for a moment.
 
+## Free assets (v14.1)
+
+Third-party files are CC0 only in this public repo, and each one has a line in `apps/api/src/credits.ts`
+(shown on `/credits`; a test fails when a file in `apps/web/public/env/` or `audio/` has none). Anything that
+is not CC0 goes to the private art repo and is copied in at deploy, like the 3D models.
+
+- **Light:** `env/sky-overcast-256.hdr` lights the Meshy pieces (PBR materials only). `?env=0` / `?env=1`
+  force it off or on; it is off by default on AMD Radeon 740M-class GPUs on D3D11 (`packages/shared/src/gpu.ts`)
+  until a `?diag&env=1` frame report from one comes back drawn.
+- **Sound:** `audio/*.ogg` (Opus) load only after the player turns sound on; the synth plays whatever a
+  browser cannot decode.
+
 ## Camera (v13)
 
 The camera's pure maths (springs, tilt limits, the walk camera's three-quarter angle) lives in

@@ -424,6 +424,8 @@
     const r = await api.catch(picked.id);
     busy = false;
     if (r.data.ok) {
+      // v14.1: the HUD's soundscape plays the catch (when sound is on)
+      window.dispatchEvent(new CustomEvent('gitemon:sound', { detail: 'catch' }));
       say(
         r.data.n && r.data.n <= 10
           ? `Caught! You are catcher #${r.data.n} — an early scout.`

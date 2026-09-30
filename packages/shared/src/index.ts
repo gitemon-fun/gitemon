@@ -10,3 +10,4 @@ export * from './skew.js';
 export * from './watch.js';
 export * from './standing.js';
 export * from './camera.js';
+export * from './gpu.js';

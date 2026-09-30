@@ -1,6 +1,7 @@
 import { SHAPE_NAME, STAT_MEANING, TYPE_INFO, type Stats } from '@gitemon/shared';
 import { art } from '@gitemon/art';
 import type { Row } from './world.js';
+import { CREDITS } from './credits.js';
 
 const esc = (s: string) =>
   s.replace(
@@ -66,7 +67,7 @@ export function layout(o: {
 <style>${CSS}</style></head><body>
 <header><a class="brand" href="/">Gitemon</a><a href="/map">Open the island</a></header>
 <main>${o.body}</main>
-<footer><a href="/map">Map</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/gitemon-fun/gitemon">Source (AGPL)</a><span>Made by AIgnited</span></footer>
+<footer><a href="/map">Map</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/credits">Credits</a><a href="https://github.com/gitemon-fun/gitemon">Source (AGPL)</a><span>Made by AIgnited</span></footer>
 </body></html>`;
 }
 
@@ -209,7 +210,7 @@ const landingCard = () => `<section class="welcome" id="welcome" aria-label="Wel
 </ul>
 <p class="welcome-fair"><b>Power is not size.</b> Only work other people accepted counts, and steady work beats volume, so AI-generated volume changes nothing.</p>
 <p class="welcome-small">Public profile only. Never private repositories. Gitemon never contacts anyone.</p>
-<nav class="welcome-links"><a href="/how">How it works</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/gitemon-fun/gitemon">Source</a><span>Made by AIgnited</span></nav>
+<nav class="welcome-links"><a href="/how">How it works</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/credits">Credits</a><a href="https://github.com/gitemon-fun/gitemon">Source</a><span>Made by AIgnited</span></nav>
 </section>`;
 
 /**
@@ -266,4 +267,23 @@ export const howPage = () =>
 <h2>Look around</h2><p>There are two views. The <b>map view</b> works like a city builder: drag to move the map, scroll or pinch to zoom, right-drag (or two fingers) to turn and tilt. Keys: WASD or the arrows move, Q&nbsp;/&nbsp;E turn, R&nbsp;/&nbsp;F tilt. The <b>walk view</b> puts the camera behind your Gitemon, like a third-person game: press the footsteps button or V, walk with WASD or the thumb stick, and drag to look round. V or the map button takes you back.</p>
 <h2>Privacy</h2><p>Gitemon never requests access to private repositories, never stores where you live, and never contacts anyone. Your private work counts only through the anonymous number GitHub itself shows on your profile, and only if you turned that setting on.</p>
 <div class="btns"><a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn" href="/">Back to the island</a></div></section>`,
+  });
+
+/** v14.1: every third-party file with its source and licence */
+export const creditsPage = () =>
+  layout({
+    title: 'Gitemon credits',
+    description: 'The free sounds and light Gitemon uses, with their authors and licences.',
+    path: '/credits',
+    body: `<section class="card prose"><h1>Credits</h1>
+<p>Gitemon's creatures, 3D pieces and code are its own. These files come from others, all public domain (CC0). Thank you.</p>
+<table class="rank"><tr><th>File</th><th>What</th><th>By</th><th>Licence</th></tr>
+${CREDITS.map(
+  (c) =>
+    `<tr><td>${esc(c.file)}</td><td>${esc(c.what)}</td><td>${esc(c.author)}<br><span class="dim">${c.source
+      .split(' and ')
+      .map((u) => `<a href="${esc(u)}">${esc(u.replace('https://', ''))}</a>`)
+      .join(' and ')}</span></td><td>${esc(c.license)}</td></tr>`,
+).join('')}
+</table></section>`,
   });

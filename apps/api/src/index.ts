@@ -37,6 +37,7 @@ import { safeEqual } from './crypto.js';
 import { bonusLevels, checkBonded, doCatch, foundTown, joinTown, leaveTown } from './game.js';
 import { ogPng, spritePng } from './og.js';
 import {
+  creditsPage,
   howPage,
   landingShell,
   messagePage,
@@ -1100,6 +1101,7 @@ app.get('/', async (c) => {
   });
 });
 app.get('/how', (c) => html(c, howPage(), 200, 3600));
+app.get('/credits', (c) => html(c, creditsPage(), 200, 3600));
 app.get('/privacy', (c) => html(c, privacyPage(), 200, 3600));
 app.get('/terms', (c) => html(c, termsPage(), 200, 3600));
 

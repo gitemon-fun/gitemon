@@ -1,13 +1,21 @@
 import type { ClimateId } from '@gitemon/shared';
 
 /**
- * The soundscape (GRANDPLAN v8 §0 V8-D10, build file 07). Every sound is made in the browser with
- * Web Audio — no audio files to download, no licences to track. Off until the player turns it on
- * (G7); the AudioContext is only created by that tap.
+ * The soundscape (GRANDPLAN v8 §0 V8-D10, build file 07). Off until the player turns it on (G7); the
+ * AudioContext is only created by that tap.
  *
  *   sea: waves (noise breathing in and out) · wind for the open lands · birds, frogs, rumble and
  *   chimes by region · soft footsteps while walking · a small arpeggio for a catch
+ *
+ * v14.1 (V14-D13, reverses V8-D10's "no audio files"): real CC0 recordings (listed on /credits) take
+ * over the waves, wind, birds and frogs once they have loaded, and a catch plays a recorded sound. They
+ * are fetched only after the player turns sound on (~0.5 MB). The synth stays underneath as the
+ * fallback: a file that fails to load or decode (older Safari cannot read Ogg Opus) changes nothing.
  */
+
+/** the recorded beds, loaded after sound is turned on */
+const RECORDED = ['waves', 'wind', 'birds', 'jungle', 'frogs'] as const;
+type Recorded = (typeof RECORDED)[number];
 
 type Place = ClimateId | 'town' | 'sea';
 
@@ -23,6 +31,9 @@ export class Soundscape {
   private beds = new Map<string, Bed>();
   private place: Place = 'town';
   private timers: ReturnType<typeof setTimeout>[] = [];
+  /** v14.1: the recordings playing now, and every decoded file (kept for the next time sound is on) */
+  private recorded = new Map<Recorded, Bed>();
+  private buffers = new Map<string, AudioBuffer>();
   on = false;
 
   enable() {
@@ -51,6 +62,54 @@ export class Soundscape {
     this.bed('rumble', () => this.rumble());
     this.mix(true);
     this.loop();
+    void this.loadRecordings();
+  }
+
+  /** v14.1: fetch and start the recordings, the one for where you are first */
+  private async loadRecordings() {
+    const c = this.ctx;
+    if (!c) return;
+    const order = [...RECORDED].sort((a, b) => this.level(b) - this.level(a));
+    for (const k of order) {
+      const buf = await this.file(`/audio/${k}.ogg`);
+      if (!buf || !this.on || this.ctx !== c || !this.master || this.recorded.has(k)) continue;
+      const s = c.createBufferSource();
+      s.buffer = buf;
+      s.loop = true;
+      const g = c.createGain();
+      g.gain.value = 0;
+      s.connect(g).connect(this.master);
+      s.start(0, Math.random() * buf.duration);
+      this.recorded.set(k, { gain: g, stop: () => s.stop() });
+      this.mix(false);
+    }
+    void this.file('/audio/catch.ogg');
+  }
+  private async file(url: string): Promise<AudioBuffer | null> {
+    const had = this.buffers.get(url);
+    if (had) return had;
+    try {
+      const res = await fetch(url);
+      if (!res.ok || !this.ctx) return null;
+      const buf = await this.ctx.decodeAudioData(await res.arrayBuffer());
+      this.buffers.set(url, buf);
+      return buf;
+    } catch {
+      return null; // cannot load or decode here: the synth carries on
+    }
+  }
+
+  /** a catch: the recorded one when it has loaded, else the synth arpeggio */
+  caught() {
+    if (!this.on || !this.ctx || !this.master) return;
+    const buf = this.buffers.get('/audio/catch.ogg');
+    if (!buf) return this.chime();
+    const s = this.ctx.createBufferSource();
+    s.buffer = buf;
+    const g = this.ctx.createGain();
+    g.gain.value = 0.9;
+    s.connect(g).connect(this.master);
+    s.start();
   }
 
   disable() {
@@ -59,6 +118,8 @@ export class Soundscape {
     this.timers = [];
     for (const b of this.beds.values()) b.stop();
     this.beds.clear();
+    for (const b of this.recorded.values()) b.stop();
+    this.recorded.clear();
     this.master?.disconnect();
     this.master = null;
     void this.ctx?.suspend();
@@ -102,19 +163,44 @@ export class Soundscape {
     this.beds.set(name, make());
   }
 
+  /** v14.1: how loud each recording plays where you are */
+  private level(k: Recorded): number {
+    const p = this.place;
+    if (k === 'waves') return p === 'sea' || p === 'tide' ? 0.9 : p === 'bloom' ? 0.35 : 0.12;
+    if (k === 'wind')
+      return p === 'frost'
+        ? 0.75
+        : p === 'canyon' || p === 'savanna' || p === 'crystal'
+          ? 0.4
+          : 0.08;
+    if (k === 'birds') return p === 'bloom' || p === 'savanna' ? 0.7 : p === 'town' ? 0.18 : 0;
+    if (k === 'jungle') return p === 'jungle' ? 0.8 : 0;
+    return p === 'marsh' ? 0.8 : 0; // frogs
+  }
+
   private mix(now: boolean) {
     if (!this.ctx) return;
     const p = this.place;
+    const rec = (k: Recorded) => this.recorded.has(k);
+    // a synth bed gives way to its recording once that has loaded
     const want: Record<string, number> = {
-      waves: p === 'sea' || p === 'tide' ? 0.9 : p === 'bloom' ? 0.45 : 0.18,
-      wind: p === 'frost' ? 0.8 : p === 'canyon' || p === 'savanna' || p === 'crystal' ? 0.5 : 0.12,
+      waves: rec('waves') ? 0 : p === 'sea' || p === 'tide' ? 0.9 : p === 'bloom' ? 0.45 : 0.18,
+      wind: rec('wind')
+        ? 0
+        : p === 'frost'
+          ? 0.8
+          : p === 'canyon' || p === 'savanna' || p === 'crystal'
+            ? 0.5
+            : 0.12,
       rumble: p === 'volcano' ? 0.9 : 0,
     };
     const t = this.ctx.currentTime;
-    for (const [k, b] of this.beds) {
-      b.gain.gain.cancelScheduledValues(t);
-      b.gain.gain.setTargetAtTime(want[k] ?? 0, t, now ? 0.01 : 1.2);
-    }
+    const fade = (g: GainNode, v: number) => {
+      g.gain.cancelScheduledValues(t);
+      g.gain.setTargetAtTime(v, t, now ? 0.01 : 1.2);
+    };
+    for (const [k, b] of this.beds) fade(b.gain, want[k] ?? 0);
+    for (const [k, b] of this.recorded) fade(b.gain, this.level(k));
   }
 
   private src(filter: BiquadFilterType, freq: number, q = 0.7) {
@@ -174,9 +260,14 @@ export class Soundscape {
   private loop() {
     if (!this.on) return;
     const p = this.place;
-    if (p === 'bloom' || p === 'jungle' || p === 'savanna') this.bird(p === 'jungle');
-    else if (p === 'marsh') this.frog();
-    else if (p === 'crystal' || p === 'frost')
+    // (the synth birds and frogs step aside once their recordings play)
+    if (p === 'bloom' || p === 'savanna') {
+      if (!this.recorded.has('birds')) this.bird(false);
+    } else if (p === 'jungle') {
+      if (!this.recorded.has('jungle')) this.bird(true);
+    } else if (p === 'marsh') {
+      if (!this.recorded.has('frogs')) this.frog();
+    } else if (p === 'crystal' || p === 'frost')
       this.tone(1568 * 2 ** ((Math.floor(Math.random() * 5) * 2) / 12), 1.6, 0, 0.12);
     else if (p === 'volcano') this.crackle();
     else if (p === 'town' && Math.random() < 0.15) this.tone(392, 2.2, 0, 0.1);

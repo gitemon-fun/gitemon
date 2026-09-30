@@ -50,6 +50,8 @@ const HEIGHT: Record<string, number> = {
 };
 
 const STONE = new THREE.MeshStandardMaterial({ color: '#a8a39a', roughness: 0.95, metalness: 0 });
+// v14.1: sealed stone keeps its grey — the sky's environment light would turn it to pale marble
+STONE.userData.noEnv = true;
 
 export interface Pieces {
   group: THREE.Group;

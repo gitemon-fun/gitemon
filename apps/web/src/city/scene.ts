@@ -7,6 +7,7 @@ import {
   TP_SIDE,
   clampTpDist,
   clampTpPitch,
+  envLighting,
   springArm,
   TWIST_START,
   TOWN_Y,
@@ -52,6 +53,8 @@ const PITCH_HIGH = (58 * Math.PI) / 180;
 const PITCH_LOW = (18 * Math.PI) / 180;
 /** golden hour (V8-D7, V8-D11): the horizon colour is the haze colour, so the sea melts into the sky */
 const HORIZON = '#f1e4cc';
+/** v14.1: how strongly the sky's environment map lights the PBR pieces (tuned on the town and a wonder) */
+const ENV_INTENSITY = 0.5;
 const ZENITH = '#78aee0';
 
 /** a gradient sky sphere that travels with the camera (no texture, never fogged) */
@@ -1047,12 +1050,66 @@ export class CityScene {
     cam.updateProjectionMatrix();
     this.renderer.shadowMap.needsUpdate = true;
     this.dirty = true;
-    // the frame check (v10 debugging) now runs only on request: ?diag
+    const env = this.addEnvironment();
+    // the frame check (v10 debugging) now runs only on request: ?diag (after the environment map, v14.1)
     if (location.search.includes('diag'))
-      setTimeout(() => {
-        this.probeDue = true;
-        this.dirty = true;
-      }, 1500);
+      void env.finally(() =>
+        setTimeout(() => {
+          this.probeDue = true;
+          this.dirty = true;
+        }, 1500),
+      );
+  }
+
+  // ---- v14.1: the sky's light on the 3D pieces ----------------------------------------------------
+  /** on when the environment map is in place (the frame check reports it) */
+  private envOn = false;
+  private envMap: THREE.Texture | null = null;
+  /** the Meshy pieces (their PBR materials take the environment map) */
+  private piecesGroup: THREE.Object3D | null = null;
+  /**
+   * Only the PBR materials (the Meshy pieces) take the sky's light: in this three.js the scene-wide
+   * environment also lights Lambert materials, which washed the terrain and the town out.
+   */
+  private lightPieces() {
+    const env = this.envMap;
+    if (!env || !this.piecesGroup) return;
+    this.piecesGroup.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      for (const mat of Array.isArray(m) ? m : m ? [m] : [])
+        if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial && !mat.userData.noEnv) {
+          const std = mat as THREE.MeshStandardMaterial;
+          std.envMap = env;
+          std.envMapIntensity = ENV_INTENSITY;
+          std.needsUpdate = true;
+        }
+    });
+    this.dirty = true;
+  }
+  /**
+   * A small CC0 sky (Poly Haven, 256 × 128, overcast so there is no hard sun) lights the Meshy pieces as
+   * an environment map. It is never shown: the sky dome and the haze stay as they are, and the pixel
+   * creatures, the terrain and the town are not touched. Off on the blank-map GPUs.
+   */
+  private async addEnvironment() {
+    const gl = this.renderer.getContext();
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const gpu = String(gl.getParameter(dbg ? dbg.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? '');
+    if (!envLighting(location.search, gpu)) return;
+    try {
+      const { HDRLoader } = await import('three/examples/jsm/loaders/HDRLoader.js');
+      const sky = await new HDRLoader().loadAsync('/env/sky-overcast-256.hdr');
+      sky.mapping = THREE.EquirectangularReflectionMapping;
+      const pm = new THREE.PMREMGenerator(this.renderer);
+      this.envMap = pm.fromEquirectangular(sky).texture;
+      pm.dispose();
+      sky.dispose();
+      this.envOn = true;
+      this.lightPieces();
+    } catch (e) {
+      this.envMap = null;
+      report('warn', `environment map: ${String(e)}`);
+    }
   }
 
   // ---- frame check (debugging a blank map on some GPUs) ------------------------------------------------
@@ -1091,6 +1148,7 @@ export class CityScene {
       'frame',
       JSON.stringify({
         blank: same.length === pts.length,
+        env: this.envOn,
         pts,
         calls: this.renderer.info.render.calls,
         tris: this.renderer.info.render.triangles,
@@ -1380,6 +1438,8 @@ export class CityScene {
     const pcs = await loadPieces(city, placed, homes);
     if (!pcs) return;
     this.scene.add(pcs.group);
+    this.piecesGroup = pcs.group;
+    this.lightPieces();
     if (pcs.monument && this.town) this.town.monument.visible = false;
     if (pcs.landmarks && this.town) for (const l of this.town.landmarks) l.visible = false;
     if (pcs.town && this.town) this.town.plots.visible = false;
