@@ -62,4 +62,11 @@ export const CREDITS: Credit[] = [
     source: 'https://kenney.nl/assets/impact-sounds and https://kenney.nl/assets/interface-sounds',
     license: CC0,
   },
+  {
+    file: 'models/props.glb',
+    what: 'Street props: barrels, crates, sacks, a bucket, a wheelbarrow, market tents, lumber and wooden fences',
+    author: 'Kay Lousberg (KayKit Medieval Hexagon Pack 1.0)',
+    source: 'https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0',
+    license: CC0,
+  },
 ];

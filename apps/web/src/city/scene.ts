@@ -1444,6 +1444,11 @@ export class CityScene {
     if (pcs.landmarks && this.town) for (const l of this.town.landmarks) l.visible = false;
     if (pcs.town && this.town) this.town.plots.visible = false;
     for (const i of pcs.replaced) this.crowd?.hide(i);
+    // v14.1: the street props are detail — hidden at far zoom like the windows and lamps
+    if (pcs.props) {
+      pcs.props.visible = this.detailOn;
+      this.detail.push(pcs.props);
+    }
     this.bob = pcs.bob;
     // v11 (V11-D7): the solid pieces block walking once they stand there
     this.solids = pcs.solids;

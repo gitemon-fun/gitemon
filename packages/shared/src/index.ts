@@ -11,3 +11,4 @@ export * from './watch.js';
 export * from './standing.js';
 export * from './camera.js';
 export * from './gpu.js';
+export * from './props.js';

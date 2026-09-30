@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import {
+  PROP_H,
   SERVICES,
   STREET_OUT,
   TOWN_R,
@@ -9,6 +10,7 @@ import {
   WATER_Y,
   gridHeight,
   hash32,
+  townProps,
   type Island,
 } from '@gitemon/shared';
 import type { Placed } from './crowd';
@@ -23,7 +25,7 @@ import { plotHeight } from './town';
  *   the top 10 legends (a sealed one is a stone statue, a woken one is alive) · the monument ·
  *   one landmark per mini plaza · a giant wonder per region + a floating shrine near the town ·
  *   a gate at every town gate · two set pieces per region, away from the groups and the roads ·
- *   v9: the guild halls, Merit Houses and Town Services
+ *   v9: the guild halls, Merit Houses and Town Services · v14.1: the KayKit street props (CC0)
  */
 
 type Key = string;
@@ -66,6 +68,8 @@ export interface Pieces {
   /** v11 (V11-D7): ground footprints of the solid pieces (wonders, set pieces, legend statues) */
   /** r = the inner base that blocks walking; top = its height (v13.2: the walk view's camera stops at it) */
   solids: { x: number; z: number; r: number; top: number }[];
+  /** v14.1 (V14-D15): the street props — small, so the renderer hides them at far zoom */
+  props: THREE.Object3D | null;
 }
 
 const cache = new Map<Key, Promise<THREE.Group | null>>();
@@ -212,6 +216,7 @@ export async function loadPieces(
     monument: false,
     town: false,
     solids: [],
+    props: null,
   };
   const jobs: Promise<void>[] = [];
   const put = (
@@ -417,6 +422,28 @@ export async function loadPieces(
       );
     }
   });
+
+  // ---- v14.1 (V14-D15): street props — one file, a scene per prop, each prop drawn instanced ----
+  jobs.push(
+    loader
+      .loadAsync('/models/props.glb')
+      .then((g) => {
+        const byKey = new Map<string, [number, number, number, number, number, number][]>();
+        for (const p of townProps(isl)) {
+          const list = byKey.get(p.key) ?? [];
+          list.push([PROP_H[p.key], p.x, p.y, p.z, p.yaw, Infinity]);
+          byKey.set(p.key, list);
+        }
+        const props = new THREE.Group();
+        for (const [key, list] of byKey) {
+          const src = g.scenes.find((sc) => sc.name === key);
+          if (src) props.add(instanced(src, list));
+        }
+        group.add(props);
+        out.props = props;
+      })
+      .catch(() => undefined),
+  );
 
   await Promise.all(jobs);
   return out;
