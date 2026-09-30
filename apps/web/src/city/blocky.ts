@@ -41,6 +41,24 @@ export class Blocky {
   private lastPick = -Infinity;
   /** false = every creature a sprite again (the before/after check, ?debug) */
   enabled = true;
+  /**
+   * v17 (V17-D4): your Gitemon's silhouette where something stands in front of it — the same shape in a
+   * flat light colour, drawn after the world and before your Gitemon, only where the world is nearer
+   * (so its own legs never show through its body). Opaque, so it sorts with the world by renderOrder.
+   */
+  private ghost = new THREE.Mesh(
+    new THREE.BufferGeometry(),
+    new THREE.MeshBasicMaterial({
+      color: '#ffe9a8',
+      depthWrite: false,
+      depthFunc: THREE.GreaterDepth,
+      // a ground bump at its feet is not "in front": the world must be clearly nearer
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+      fog: false,
+    }),
+  );
   private tmpQ = new THREE.Quaternion();
   private tmpE = new THREE.Euler(0, 0, 0, 'YXZ');
 
@@ -48,7 +66,10 @@ export class Blocky {
     private crowd: Crowd,
     /** at most this many bodies at once (phone 16, desktop 32) */
     private cap: number,
-  ) {}
+  ) {
+    this.ghost.renderOrder = 10;
+    this.ghost.frustumCulled = false;
+  }
 
   private shape(key: string): Shape | null {
     if (this.shapes.has(key)) return this.shapes.get(key)!;
@@ -199,6 +220,8 @@ export class Blocky {
     upScale: number,
     focus: { x: number; z: number; radius: number } | null,
     walker: number | null,
+    /** v17: draw this creature's silhouette through walls (your walker in the follow view) */
+    seeThrough: number | null = null,
   ) {
     const now = performance.now();
     if (now - this.lastPick > PICK_MS) {
@@ -232,7 +255,18 @@ export class Blocky {
       b.mesh.quaternion.copy(this.tmpQ.setFromEuler(this.tmpE));
       b.mesh.scale.set(flip * pose.sx * s, pose.sy * (1 + breath) * s * upScale, s);
       b.mesh.position.set(m.x, m.y + pose.lift, m.z);
+      b.mesh.renderOrder = i === seeThrough ? 11 : 0;
     }
+    // v17 (V17-D4): the silhouette follows its body exactly
+    const g =
+      seeThrough != null && this.active.has(seeThrough) ? this.bodies.get(seeThrough) : null;
+    if (g) {
+      this.ghost.geometry = g.mesh.geometry;
+      this.ghost.position.copy(g.mesh.position);
+      this.ghost.quaternion.copy(g.mesh.quaternion);
+      this.ghost.scale.copy(g.mesh.scale);
+      if (!this.ghost.parent) this.group.add(this.ghost);
+    } else if (this.ghost.parent) this.group.remove(this.ghost);
   }
 
   /** the crowd indices standing as blocks right now (tests, ?debug) */
@@ -241,6 +275,8 @@ export class Blocky {
   }
 
   dispose() {
+    this.group.remove(this.ghost);
+    (this.ghost.material as THREE.Material).dispose();
     for (const i of this.active) this.crowd.setShown(i, true);
     for (const b of this.bodies.values()) {
       b.mat.map?.dispose();

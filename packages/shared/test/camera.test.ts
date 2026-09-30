@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FOLLOW_DIST_MAX,
+  FOLLOW_DIST_MIN,
+  FOLLOW_PITCH,
+  clampFollowDist,
+  followLook,
+  snapQuarter,
   FOLLOW_OFFSET,
   PITCH_MAX,
   PITCH_MIN,
@@ -91,5 +97,31 @@ describe('camera maths (v13)', () => {
     // facing left on screen, walking left and a little in: it turns toward the walk, not away
     const [cx, cz] = paperTurn(1, 0, -Math.cos(0.3), Math.sin(0.3), -1, PAPER_MAX, 1);
     expect(Math.atan2(cz, cx)).toBeCloseTo(-0.3, 6);
+  });
+});
+
+// v17: the close follow camera — quarter turns only, and your Gitemon below the middle of the screen
+describe('follow camera (v17)', () => {
+  it('snaps any heading to the quarter-turn grid it started from', () => {
+    const base = 0.7;
+    for (const y of [0.7, 0.9, 2.1, -1.0, 7.3]) {
+      const s = snapQuarter(y, base);
+      const k = (s - base) / (Math.PI / 2);
+      expect(Math.abs(k - Math.round(k))).toBeLessThan(1e-9);
+      expect(Math.abs(s - y)).toBeLessThanOrEqual(Math.PI / 4 + 1e-9);
+    }
+  });
+  it('looks a little beyond your Gitemon, away from the camera', () => {
+    const yaw = 1.1;
+    const [lx, , lz] = followLook(10, 1, -4, yaw, 12);
+    // the camera stands at +(cos, sin) · dist; the look point is on the other side of the focus
+    const toCam = [Math.cos(yaw), Math.sin(yaw)];
+    expect((lx - 10) * toCam[0]! + (lz + 4) * toCam[1]!).toBeLessThan(0);
+    expect(Math.hypot(lx - 10, lz + 4)).toBeCloseTo(12 * 0.12);
+  });
+  it('keeps the distance in range and the angle high enough', () => {
+    expect(clampFollowDist(2)).toBe(FOLLOW_DIST_MIN);
+    expect(clampFollowDist(99)).toBe(FOLLOW_DIST_MAX);
+    expect(FOLLOW_PITCH).toBeGreaterThan((30 * Math.PI) / 180);
   });
 });

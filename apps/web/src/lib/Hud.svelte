@@ -317,7 +317,18 @@
   <div class="rail-group" aria-label="Zoom">
     <button class="hud-btn" onclick={() => scene.zoomBy(1.6)} aria-label="Zoom in">+</button>
     <button class="hud-btn" onclick={() => scene.zoomBy(1 / 1.6)} aria-label="Zoom out">−</button>
-    <button class="hud-btn" onclick={() => scene.rotate(1)} aria-label="Turn the city">⟳</button>
+    <!-- v17: an arrow drawn, not the ⟳ character — the pixel font has no ⟳ and showed a 0 -->
+    <button class="hud-btn" onclick={() => scene.rotate(1)} aria-label="Turn the view"
+      ><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"
+        ><path
+          d="M19 12a7 7 0 1 1-2.05-4.95"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="3"
+          stroke-linecap="square"
+        /><path d="M20 3v7h-7z" fill="currentColor" /></svg
+      ></button
+    >
     <button class="hud-btn hud-home" onclick={home} aria-label="Back to the town"
       ><img
         class="ico"
@@ -356,8 +367,8 @@
   <div class="hud-tip px-frame dialogue pop" role="status">
     <img src="/favicon.png" alt="" /><span
       >{touch
-        ? 'Walk with the stick · drag to look round · the map button goes back'
-        : 'Walk with WASD · drag to look round · V goes back to the map'}</span
+        ? 'Walk with the stick or a tap · the turn button turns the view · the map button goes back'
+        : 'Walk with WASD or a click · Q / E turn the view · V goes back to the map'}</span
     >
   </div>
 {/if}

@@ -145,3 +145,38 @@ export function paperTurn(
   const sn = Math.sin(turn);
   return [rx * c - rz * sn, rx * sn + rz * c];
 }
+
+// ---- v17 the close follow camera (GRANDPLAN v17, V17-D1…D3) --------------------------------------------
+
+/** a fixed angle looking down on your Gitemon — never low enough to show a drawing's missing back */
+export const FOLLOW_PITCH = (35 * Math.PI) / 180;
+export const FOLLOW_FOV = 45;
+export const FOLLOW_DIST = 12;
+/** a tall phone screen is narrow, so the camera starts further back */
+export const FOLLOW_DIST_TALL = 15;
+export const FOLLOW_DIST_MIN = 8;
+export const FOLLOW_DIST_MAX = 18;
+export const clampFollowDist = (d: number) =>
+  Math.min(FOLLOW_DIST_MAX, Math.max(FOLLOW_DIST_MIN, d));
+
+/** V17-D3: the nearest heading on the quarter-turn grid the follow view started from */
+export function snapQuarter(yaw: number, base: number): number {
+  const q = Math.PI / 2;
+  return base + Math.round((yaw - base) / q) * q;
+}
+
+/**
+ * V17-D2: where the follow camera looks — a little beyond your Gitemon (away from the camera), so your
+ * Gitemon sits below the middle of the screen with the way ahead above it. The camera stands at
+ * focus + (cos yaw, ·, sin yaw) · dist, so "beyond" is the opposite way on the ground.
+ */
+export function followLook(
+  fx: number,
+  fy: number,
+  fz: number,
+  yaw: number,
+  dist: number,
+  lead = 0.12,
+): [number, number, number] {
+  return [fx - Math.cos(yaw) * dist * lead, fy, fz - Math.sin(yaw) * dist * lead];
+}

@@ -1,22 +1,20 @@
 import * as THREE from 'three';
 import {
   PLAZA_R,
-  TP_DIST,
-  TP_FOV,
-  TP_PITCH,
-  TP_SIDE,
-  clampTpDist,
-  clampTpPitch,
+  FOLLOW_DIST,
+  FOLLOW_DIST_TALL,
+  FOLLOW_FOV,
+  FOLLOW_PITCH,
+  clampFollowDist,
+  followLook,
+  snapQuarter,
   envLighting,
-  springArm,
   TWIST_START,
   TOWN_Y,
   WATER_Y,
   approach,
-  approachAngle,
   clampPitch,
   decay,
-  followYaw,
   twoFingerMode,
   wrapAngle,
   bridgeLift,
@@ -279,7 +277,7 @@ export class CityScene {
       const tp = this.thirdPerson();
       pos.lerp(tp.pos, b);
       look.lerp(tp.look, b);
-      fov += (TP_FOV - fov) * b;
+      fov += (FOLLOW_FOV - fov) * b;
       near += (0.25 - near) * b;
       far = Math.max(far, 900);
       fogNear += (70 - fogNear) * b;
@@ -317,52 +315,63 @@ export class CityScene {
       if ((x - s.x) ** 2 + (z - s.z) ** 2 < (s.r / 0.55 + 0.4) ** 2) h = Math.max(h, s.top);
     return h;
   }
-  /** entering the walk view: the camera's way nearest the map's own that is not blocked close by */
-  private clearYaw(yaw: number): number {
-    const f = this.tpFocus;
+  /**
+   * v17 (V17-D1, D2): the close follow camera — at a fixed angle above your Gitemon, on the heading the
+   * view started from (quarter turns only), never behind it. It rises over a hill in the way; a house in
+   * the way does not pull it in (your Gitemon's outline shows through instead, V17-D4).
+   */
+  /** the follow camera's point at a distance along its arm (fixed angle, current heading) */
+  private armPoint(f: THREE.Vector3, yaw: number, d: number) {
     const p = this.tpPitch;
+    return new THREE.Vector3(
+      f.x + Math.cos(yaw) * Math.cos(p) * d,
+      f.y + Math.sin(p) * d,
+      f.z + Math.sin(yaw) * Math.cos(p) * d,
+    );
+  }
+  /** is the camera point inside a building or a big 3D piece? */
+  private inside(v: THREE.Vector3) {
+    return this.camGround(v.x, v.z) + 0.5 > v.y;
+  }
+  /**
+   * v17 (V17-D3): entering the follow view, the least blocked of the four quarter-turn headings from
+   * the map's own (the map's heading first): the camera must not start inside a house.
+   */
+  private openQuarter(yaw: number): number {
+    const f = this.tpFocus;
     let best = yaw;
-    let bestD = -1;
-    for (const k of [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6]) {
-      const y = yaw + (k * Math.PI) / 6;
-      const d = springArm(
-        f.x,
-        f.y,
-        f.z,
-        Math.cos(y) * Math.cos(p),
-        Math.sin(p),
-        Math.sin(y) * Math.cos(p),
-        this.tpDist,
-        (x, z) => this.camGround(x, z),
-        0.6,
-        0,
-      );
-      if (d >= this.tpDist * 0.8) return y;
-      if (d > bestD) {
-        bestD = d;
+    let bestN = Infinity;
+    for (const k of [0, 1, -1, 2]) {
+      const y = yaw + (k * Math.PI) / 2;
+      let n = this.inside(this.armPoint(f, y, this.tpDist)) ? 100 : 0;
+      for (let t = 0.2; t < 1; t += 0.2) if (this.inside(this.armPoint(f, y, this.tpDist * t))) n++;
+      if (n < bestN) {
+        bestN = n;
         best = y;
       }
+      if (n === 0) break;
     }
     return best;
   }
-  /**
-   * The walk view's camera: behind your Gitemon at its own distance and height, looking a little above
-   * its head so the horizon shows. The spring arm brings it closer rather than into a hill.
-   */
   private thirdPerson(): { pos: THREE.Vector3; look: THREE.Vector3 } {
     const f = this.tpFocus;
-    const p = this.tpPitch;
-    const dx = Math.cos(this.yaw) * Math.cos(p);
-    const dy = Math.sin(p);
-    const dz = Math.sin(this.yaw) * Math.cos(p);
-    const ground = (x: number, z: number) => this.camGround(x, z);
-    const dist = springArm(f.x, f.y, f.z, dx, dy, dz, this.tpDist, ground, 0.6, 1.2);
-    const pos = new THREE.Vector3(f.x + dx * dist, f.y + dy * dist, f.z + dz * dist);
-    // right against a wall: over the roof rather than inside the house
-    pos.y = Math.max(pos.y, ground(pos.x, pos.z) + 0.6);
-    const look = f.clone();
-    look.y += this.walkerHeight * 0.45;
-    return { pos, look };
+    // a camera that would stand inside a house comes closer until it is out (same angle, V17-D2);
+    // a house between the camera and your Gitemon does not pull it in — the outline shows through
+    let dist = this.tpDist;
+    while (dist > 4 && this.inside(this.armPoint(f, this.yaw, dist))) dist -= 0.5;
+    // right against a wall even 4 m is inside: stay at the full distance and rise over the roof instead
+    const walled = this.inside(this.armPoint(f, this.yaw, dist));
+    if (walled) dist = this.tpDist;
+    const pos = this.armPoint(f, this.yaw, dist);
+    if (walled) pos.y = Math.max(pos.y, this.camGround(pos.x, pos.z) + 1);
+    // over the hills between the camera and your Gitemon (the map view lifts the same way)
+    for (let k = 1; k <= 10; k++) {
+      const t = k / 10;
+      const gh = this.groundY(f.x + (pos.x - f.x) * t, f.z + (pos.z - f.z) * t) + 1.5;
+      pos.y = Math.max(pos.y, f.y + (gh - f.y) / t);
+    }
+    const [lx, ly, lz] = followLook(f.x, f.y, f.z, this.yaw, dist);
+    return { pos, look: new THREE.Vector3(lx, ly, lz) };
   }
 
   /** the ⟳ button: a quarter turn, eased (it used to jump) */
@@ -373,11 +382,18 @@ export class CityScene {
   }
   /** v12: free rotation — by an angle now (drag, twist), or steadily while Q / E are held */
   rotateBy(rad: number) {
+    // v17 (V17-D3): the follow view turns only in quarter turns
+    if (this.follow) return;
     this.yawTo = null;
     this.yaw += rad;
     this.dirty = true;
   }
   spin(dir: -1 | 0 | 1) {
+    // v17 (V17-D3): in the follow view Q / E are quarter turns, one per press
+    if (this.follow) {
+      if (dir) this.rotate(dir);
+      return;
+    }
     this.spinning = dir;
     if (dir) this.yawTo = null;
     this.dirty = true;
@@ -392,7 +408,7 @@ export class CityScene {
     this.dirty = true;
     // the walk view: + / − bring the camera closer or further
     if (this.follow) {
-      this.tpDist = clampTpDist(this.tpDist / f);
+      this.tpDist = clampFollowDist(this.tpDist / f);
       return;
     }
     this.zoomGoal = Math.max(0.12, Math.min(6, (this.zoomGoal ?? this.zoom) * f));
@@ -407,13 +423,13 @@ export class CityScene {
   private yawVel = 0;
   private panKeys = { x: 0, y: 0 };
   private tiltKeys = 0;
-  /** v13.2 (V13-D10): the walk view is on — a third-person camera behind your Gitemon */
+  /** v13.2: the walk view is on — v17 (V17-D1): the close follow camera at a fixed angle */
   private follow = false;
-  private orbitAt = 0;
-  private lastWalk: { x: number; z: number } | null = null;
-  /** the walk view's own distance and height; the map view keeps its zoom and tilt meanwhile */
-  private tpDist = TP_DIST;
-  private tpPitch = TP_PITCH;
+  /** v17 (V17-D3): the heading the follow view started from; it only turns in quarter turns from here */
+  private followBase = 0;
+  /** the walk view's own distance (8–18 m) and its fixed angle; the map view keeps its zoom and tilt */
+  private tpDist = FOLLOW_DIST;
+  private readonly tpPitch = FOLLOW_PITCH;
   /** where the walk view looks (your Gitemon, smoothed) */
   private tpFocus = new THREE.Vector3();
   /** 0 = map view … 1 = walk view: the camera glides between the two */
@@ -427,8 +443,8 @@ export class CityScene {
   /** the walk view's starting distance: a tall phone screen is narrow, so it starts further back */
   private get tpHome() {
     return this.host.clientWidth / Math.max(1, this.host.clientHeight) < 0.8
-      ? TP_DIST * 1.35
-      : TP_DIST;
+      ? FOLLOW_DIST_TALL
+      : FOLLOW_DIST;
   }
   private get walkerHeight() {
     return this.walker && this.crowd ? this.crowd.heightOf(this.walker.i, 1) : 2;
@@ -450,11 +466,12 @@ export class CityScene {
     if (on && w) {
       this.mapSaved = { zoom: this.zoom, pitch: this.pitchOverride };
       this.tpDist = this.tpHome;
-      this.tpPitch = TP_PITCH;
-      this.orbitAt = 0;
       this.tpFocus.set(w.x, this.groundY(w.x, w.z) + this.walkerHeight * 0.7, w.z);
-      // turn (eased) to the nearest way the camera is not blocked by a house
-      this.yawTo = this.clearYaw(this.yaw);
+      // v17 (V17-D3): the map's heading, or the least blocked quarter turn from it; quarter turns from here
+      this.spinning = 0;
+      this.yawVel = 0;
+      this.followBase = this.openQuarter(this.yawTo ?? this.yaw);
+      this.yawTo = this.followBase;
     } else if (this.mapSaved) {
       // back to the map at the zoom and tilt you left it, centred on your Gitemon
       this.zoom = this.mapSaved.zoom;
@@ -481,17 +498,10 @@ export class CityScene {
   }
   /** double-click: back to the automatic tilt (or, walking, back behind your Gitemon) */
   resetView() {
-    if (this.follow) {
-      this.orbitAt = 0;
-      this.tpDist = this.tpHome;
-      this.tpPitch = TP_PITCH;
-      const d = this.walker && this.lastTravel;
-      if (d) this.yawTo = followYaw(Math.atan2(d.z, d.x), this.yaw, TP_SIDE);
-    } else this.pitchOverride = null;
+    if (this.follow) this.tpDist = this.tpHome;
+    else this.pitchOverride = null;
     this.dirty = true;
   }
-  /** the way your Gitemon last walked (the walk view's double-click puts the camera behind it) */
-  private lastTravel: { x: number; z: number } | null = null;
   /** v14: drift slowly round the island (the landing); any input stops it */
   startIntro() {
     this.intro = true;
@@ -528,10 +538,9 @@ export class CityScene {
       this.target.x += (fx * this.panKeys.y + rx * this.panKeys.x) * v;
       this.target.z += (fz * this.panKeys.y + rz * this.panKeys.x) * v;
     }
-    if (this.tiltKeys) {
-      if (this.follow) this.tpPitch = clampTpPitch(this.tpPitch + this.tiltKeys * 0.9 * dt);
-      else this.pitchOverride = clampPitch(this.pitch + this.tiltKeys * 0.9 * dt);
-    }
+    // v17 (V17-D2): the follow view keeps its angle; R / F tilt the map view only
+    if (this.tiltKeys && !this.follow)
+      this.pitchOverride = clampPitch(this.pitch + this.tiltKeys * 0.9 * dt);
     // inertia: a released drag glides and settles (G2)
     if (!held) {
       this.target.x += this.panVel.x * dt;
@@ -569,24 +578,12 @@ export class CityScene {
       // the map view's pivot keeps up, so leaving the walk view lands over your Gitemon
       this.target.x = approach(this.target.x, w.x, dt, 6);
       this.target.z = approach(this.target.z, w.z, dt, 6);
-      const last = this.lastWalk;
-      if (w.walk && last && performance.now() - this.orbitAt > 2500) {
-        const dx = w.x - last.x;
-        const dz = w.z - last.z;
-        if (Math.hypot(dx, dz) > 0.02)
-          this.yaw = approachAngle(
-            this.yaw,
-            followYaw(Math.atan2(dz, dx), this.yaw, TP_SIDE),
-            dt,
-            1 / 1.2,
-          );
+      // v17 (V17-D3): never a free heading — whatever moved it, it settles back on the quarter grid
+      this.yawVel = 0;
+      if (this.yawTo === null) {
+        const snap = snapQuarter(this.yaw, this.followBase);
+        if (Math.abs(snap - this.yaw) > 1e-3) this.yawTo = snap;
       }
-    }
-    if (w) {
-      const last = this.lastWalk;
-      if (last && Math.hypot(w.x - last.x, w.z - last.z) > 0.02)
-        this.lastTravel = { x: w.x - last.x, z: w.z - last.z };
-      this.lastWalk = { x: w.x, z: w.z };
     }
   }
   /**
@@ -748,6 +745,8 @@ export class CityScene {
       this.yawVel = 0;
       // v12/v13: right-drag (or Shift + drag) turns and tilts the camera
       if (e.pointerType === 'mouse' && (e.button === 2 || e.shiftKey)) {
+        // v17 (V17-D3): the follow view does not orbit or tilt
+        if (this.follow) return;
         this.turning = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
         this.yawTo = null;
         return;
@@ -787,14 +786,12 @@ export class CityScene {
         const t = this.turning;
         const dyaw = (e.clientX - t.x) * 0.006;
         this.rotateBy(dyaw);
-        // v13 (V13-D2): up and down tilts
-        if (this.follow) this.tpPitch = clampTpPitch(this.tpPitch + (e.clientY - t.y) * 0.004);
-        else this.pitchOverride = clampPitch(this.pitch + (e.clientY - t.y) * 0.004);
+        // v13 (V13-D2): up and down tilts (the map view only)
+        this.pitchOverride = clampPitch(this.pitch + (e.clientY - t.y) * 0.004);
         this.yawVel = dyaw / Math.max(0.008, (now - t.t) / 1000);
         t.x = e.clientX;
         t.y = e.clientY;
         t.t = now;
-        if (this.follow) this.orbitAt = now;
         return;
       }
       const p = this.pointers.get(e.pointerId);
@@ -809,17 +806,16 @@ export class CityScene {
         const dy = ((a.y + b.y) / 2 - pc.my) * 0.004;
         const spread = Math.hypot(a.x - b.x, a.y - b.y) / pc.d;
         if (pc.mode === 'tilt') {
-          // both fingers up or down: tilt only, like R / F
-          if (this.follow) this.tpPitch = clampTpPitch(pc.tp + dy);
-          else this.pitchOverride = clampPitch(pc.pitch + dy);
+          // both fingers up or down: tilt only, like R / F (the follow view keeps its angle)
+          if (!this.follow) this.pitchOverride = clampPitch(pc.pitch + dy);
         } else if (pc.mode === 'zoom') {
           // the walk view: a pinch brings the camera closer to your Gitemon
-          if (this.follow) this.tpDist = clampTpDist(pc.td / spread);
+          if (this.follow) this.tpDist = clampFollowDist(pc.td / spread);
           else this.zoom = Math.max(0.12, Math.min(6, pc.z * spread));
           // a clear twist turns the island with the fingers (v12); a small one while pinching does not
           const twist = wrapAngle(Math.atan2(b.y - a.y, b.x - a.x) - pc.a);
           if (pc.rot === null && Math.abs(twist) > TWIST_START) pc.rot = twist;
-          if (pc.rot !== null) this.yaw = pc.yaw - (twist - pc.rot);
+          if (pc.rot !== null && !this.follow) this.yaw = pc.yaw - (twist - pc.rot);
           // the ground under the fingers stays under them, and moves with them (V13-D2)
           if (!this.follow) {
             this.anchor = {
@@ -837,12 +833,9 @@ export class CityScene {
         this.dirty = true;
         return;
       }
-      // the walk view: a drag looks round your Gitemon instead of moving the map
+      // v17 (V17-D3): in the follow view a drag neither orbits nor moves the map (it is still not a tap)
       if (this.follow) {
-        this.rotateBy((e.clientX - p.x) * 0.006);
-        this.tpPitch = clampTpPitch(this.tpPitch + (e.clientY - p.y) * 0.004);
         this.moved += Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y);
-        this.orbitAt = now;
         p.x = e.clientX;
         p.y = e.clientY;
         return;
@@ -899,7 +892,7 @@ export class CityScene {
         this.intro = false;
         // the walk view: the wheel brings the camera closer to your Gitemon or further back
         if (this.follow) {
-          this.tpDist = clampTpDist(this.tpDist * Math.exp(e.deltaY * 0.0015));
+          this.tpDist = clampFollowDist(this.tpDist * Math.exp(e.deltaY * 0.0015));
           this.dirty = true;
           return;
         }
@@ -1555,8 +1548,8 @@ export class CityScene {
     }
     if (this.crowd) {
       const right = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-      // v13.2: in the walk view your Gitemon's cut-out turns toward the way it walks
-      this.crowd.update(this.clock, right, this.grow, this.upScale, this.modeT);
+      // v17 (V17-D5): the camera is never behind a creature, so no cut-out turns (v13.2's paper turn off)
+      this.crowd.update(this.clock, right, this.grow, this.upScale, 0);
       // v16 (V16-D2): pixel blocks near your walker in the walk view, or near the map's centre close up
       const focus =
         this.modeT > 0.5 && this.walker
@@ -1571,6 +1564,8 @@ export class CityScene {
         this.upScale,
         focus,
         this.walker?.i ?? null,
+        // v17 (V17-D4): in the follow view your Gitemon shows through the houses in front of it
+        this.modeT > 0.5 ? (this.walker?.i ?? null) : null,
       );
     }
     const t = performance.now();
