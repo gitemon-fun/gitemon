@@ -601,6 +601,12 @@ body.walkview .hint {
   .toast {
     top: calc(env(safe-area-inset-top, 0px) + 66px);
   }
+  /* v17: the walk tip sits low, between the stick and the button rail, clear of the minimap */
+  .hud-tip {
+    top: auto;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    max-width: calc(100vw - 300px);
+  }
 }
 @media (max-height: 560px) and (min-width: 560px) {
   .sheet,
