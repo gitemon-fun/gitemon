@@ -84,6 +84,7 @@ export class Soundscape {
       this.mix(false);
     }
     void this.file('/audio/catch.ogg');
+    void this.file('/audio/paper.ogg');
   }
   private async file(url: string): Promise<AudioBuffer | null> {
     const had = this.buffers.get(url);
@@ -108,6 +109,19 @@ export class Soundscape {
     s.buffer = buf;
     const g = this.ctx.createGain();
     g.gain.value = 0.9;
+    s.connect(g).connect(this.master);
+    s.start();
+  }
+
+  /** v15 (V15-D9): a panel opens — a soft page turn; silent until the recording has loaded */
+  paper() {
+    if (!this.on || !this.ctx || !this.master) return;
+    const buf = this.buffers.get('/audio/paper.ogg');
+    if (!buf) return;
+    const s = this.ctx.createBufferSource();
+    s.buffer = buf;
+    const g = this.ctx.createGain();
+    g.gain.value = 0.7;
     s.connect(g).connect(this.master);
     s.start();
   }

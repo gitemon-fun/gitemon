@@ -1,4 +1,11 @@
-import { SHAPE_NAME, STAT_MEANING, TYPE_INFO, type Stats } from '@gitemon/shared';
+import {
+  SHAPE_NAME,
+  STAT_MEANING,
+  TYPE_INFO,
+  readable,
+  type Stats,
+  type TypeId,
+} from '@gitemon/shared';
 import { art } from '@gitemon/art';
 import type { Row } from './world.js';
 import { CREDITS } from './credits.js';
@@ -9,41 +16,19 @@ const esc = (s: string) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
 
-export const CSS = `
-:root{--bg:#f5f5f7;--card:#fff;--text:#1d1d1f;--dim:#6e6e73;--line:#d2d2d7;--tint:#0a66d8;--tint-text:#fff;--good:#1e8e3e;--fill:#f2f2f5;
-font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;color-scheme:light}
-@media (prefers-color-scheme:dark){:root{--bg:#000;--card:#1c1c1e;--text:#f5f5f7;--dim:#98989d;--line:#38383a;--tint:#3d8bff;--good:#30d158;--fill:#2c2c2e;color-scheme:dark}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-size:17px;line-height:1.47}
-a{color:var(--tint);text-decoration:none}a:hover{text-decoration:underline}
-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;max-width:760px;margin:0 auto}
-.brand{font-weight:700;font-size:20px;color:var(--text);letter-spacing:-.02em}
-main{max-width:760px;margin:0 auto;padding:8px 20px 48px}
-.card{background:var(--card);border-radius:18px;padding:24px;margin-bottom:16px}
-.hero{display:flex;gap:24px;align-items:center;flex-wrap:wrap}
-.hero img{width:192px;height:192px;image-rendering:pixelated;border-radius:14px}
-.hero .who{flex:1;min-width:220px}
-h1{font-size:34px;line-height:1.1;margin:0 0 4px;letter-spacing:-.02em;word-break:break-word}
-h2{font-size:22px;margin:0 0 12px}
-.sub{color:var(--dim);margin:0 0 12px}
-.lv{font-size:28px;font-weight:700}.bonus{font-size:17px;color:var(--good);font-weight:600}
-.chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
-.chip{border-radius:999px;padding:4px 12px;font-size:15px;font-weight:600;color:#fff}
-.chip.plain{background:var(--fill);color:var(--text)}
-.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
-.btn{display:inline-block;border-radius:12px;padding:11px 18px;font-weight:600;font-size:16px;background:var(--fill);color:var(--text)}
-.btn.primary{background:var(--tint);color:var(--tint-text)}.btn:hover{text-decoration:none;opacity:.9}
-.stat{margin:14px 0}.stat .row{display:flex;justify-content:space-between;font-weight:600}
-.stat .why{color:var(--dim);font-size:14px}
-.bar{height:8px;border-radius:4px;background:var(--fill);overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:var(--tint)}
-footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--dim);font-size:14px}
-footer a{color:var(--dim);margin-right:14px}
-.prose p,.prose li{color:var(--text)}.prose h2{margin-top:28px}
-.rank{width:100%;border-collapse:collapse;font-size:16px}.rank th{text-align:left;color:var(--dim);font-weight:600;font-size:14px;padding:6px 8px}
-.rank td{padding:8px;border-top:1px solid var(--line)}.rank .num{text-align:right;font-variant-numeric:tabular-nums}.rank .rk{color:var(--dim);width:2.5em}
-.dim{color:var(--dim)}
-.code{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.code input{font:inherit;font-size:24px;letter-spacing:.3em;width:9.5em;padding:9px 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
-.code button{border:0;cursor:pointer;font:inherit}.err{color:#ff453a;font-weight:600;margin:10px 0 0}
-`;
+/**
+ * v15 (V15-D1): the pages wear the game's Island UI — the same /island.css the map links, at one
+ * stable URL (a page cached for an hour never points at a stylesheet a deploy removed).
+ */
+const HEAD = `<link rel="preload" href="/fonts/pixelify-sans.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/nunito.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/island.css">`;
+
+/** a type chip whose text colour is measured (V15-D10) */
+const chip = (t: TypeId) => {
+  const c = readable(TYPE_INFO[t].colors[0]);
+  return `<span class="chip" style="background:${c.bg};color:${c.fg}">${TYPE_INFO[t].name}</span>`;
+};
 
 export function layout(o: {
   noindex?: boolean;
@@ -63,11 +48,11 @@ export function layout(o: {
 <meta property="og:type" content="website"><meta property="og:site_name" content="Gitemon"><meta property="og:url" content="${url}">
 <meta property="og:title" content="${esc(o.title)}"><meta property="og:description" content="${esc(o.description)}">
 <meta property="og:image" content="${img}"><meta property="og:image:alt" content="${esc(o.title)} — pixel creature card">
-<meta name="twitter:card" content="summary_large_image"><meta name="theme-color" content="#0a66d8">
-<style>${CSS}</style></head><body>
-<header><a class="brand" href="/">Gitemon</a><a href="/map">Open the island</a></header>
+<meta name="twitter:card" content="summary_large_image"><meta name="theme-color" content="#e9dcc2">
+${HEAD}</head><body class="page">
+<header class="page-bar px-frame"><a class="page-brand" href="/"><img src="/favicon.png" alt="">Gitemon</a><a class="btn primary" href="/map">Open the island</a></header>
 <main>${o.body}</main>
-<footer><a href="/map">Map</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/credits">Credits</a><a href="https://github.com/gitemon-fun/gitemon">Source (AGPL)</a><span>Made by AIgnited</span></footer>
+<footer><a href="/map">Map</a><a href="/how">How it works</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/credits">Credits</a><a href="https://github.com/gitemon-fun/gitemon">Source (AGPL)</a><span>Made by AIgnited</span></footer>
 </body></html>`;
 }
 
@@ -82,30 +67,28 @@ export function profilePage(r: Row, bonus: number, town: string | null, caughtBy
       (
         k,
       ) => `<div class="stat"><div class="row"><span>${k[0]!.toUpperCase() + k.slice(1)}</span><span>${stats[k]}</span></div>
-<div class="why">${STAT_MEANING[k]}</div><div class="bar"><i style="width:${stats[k]}%"></i></div></div>`,
+<div class="why">${STAT_MEANING[k]}</div><div class="meter"><i style="width:${stats[k]}%"></i></div></div>`,
     )
     .join('');
   const body = `
-<section class="card hero">
-  <img style="background:radial-gradient(ellipse at 50% 85%, ${t1.colors[1]}55 0%, ${t1.colors[0]}33 38%, transparent 70%),linear-gradient(180deg, #8ec5ee33, transparent)" src="/sprite/${r.id}.png?s=8&a=${art.id}&v=${r.scorer_version}${r.form}${r.shiny}" width="192" height="192" alt="${esc(r.login)}'s Gitemon, a ${t1.name} ${SHAPE_NAME[r.shape]}">
+<section class="card px-frame hero">
+  <div class="card-window" style="--ground:${t1.colors[1]}"><img src="/sprite/${r.id}.png?s=8&a=${art.id}&v=${r.scorer_version}${r.form}${r.shiny}" width="160" height="160" alt="${esc(r.login)}'s Gitemon, a ${t1.name} ${SHAPE_NAME[r.shape]}"></div>
   <div class="who">
     <h1>${esc(r.login)}</h1>
     <p class="sub">${name}${wild ? 'Wild Gitemon' : 'Claimed Gitemon'}${r.shiny ? ' · ✦ Shiny' : ''}${r.machine ? ' · Agent account' : ''}</p>
     <div><span class="lv">Lv ${r.level}</span>${bonus ? ` <span class="bonus">+${bonus} friendship</span>` : ''}</div>
     <div class="chips">
-      <span class="chip" style="background:${t1.colors[2]}">${t1.name}</span>
-      ${t2 ? `<span class="chip" style="background:${t2.colors[2]}">${t2.name}</span>` : ''}
-      <span class="chip plain">${SHAPE_NAME[r.shape]}</span><span class="chip plain">Form ${r.form}</span>
+      ${chip(r.t1)}${r.t2 ? chip(r.t2) : ''}<span class="chip">${SHAPE_NAME[r.shape]}</span> <span class="form-text">Form ${r.form} of 3</span>
     </div>
     <p class="sub">${wild ? `Lives in ${esc(town ?? t1.biome)}` : `Has a house in ${esc(t1.biome)}${town ? ` · ${esc(town)}` : ''}`} · caught by ${caughtBy} ${caughtBy === 1 ? 'player' : 'players'}</p>
     <div class="btns">
-      <a class="btn primary" href="/map?${wild ? 'focus' : 'house'}=${encodeURIComponent(r.login)}">${wild ? 'See in the city' : 'Visit house'}</a>
-      ${wild ? `<a class="btn" href="/auth/login?next=/map?focus=${encodeURIComponent(r.login)}">Is this you? Claim it</a>` : ''}
+      <a class="btn sky" href="/map?${wild ? 'focus' : 'house'}=${encodeURIComponent(r.login)}">${wild ? 'See in the city' : 'Visit house'}</a>
+      ${wild ? `<a class="btn primary" href="/auth/login?next=/map?focus=${encodeURIComponent(r.login)}">Is this you? Claim it</a>` : ''}
       <a class="btn" href="https://github.com/${encodeURIComponent(r.login)}" rel="nofollow">GitHub profile</a>
     </div>
   </div>
 </section>
-<section class="card"><h2>Stats</h2>${statRows}
+<section class="card px-frame"><h2>Stats</h2>${statRows}
 <p class="sub" style="margin-top:16px">Stats come from public GitHub data only. Size never grows with volume: only work other people accepted counts, and every stat has a ceiling.</p></section>`;
   return layout({
     title: `${r.login} — Lv ${r.level} ${t1.name}${t2 ? `/${t2.name}` : ''} Gitemon`,
@@ -122,7 +105,7 @@ export function pendingPage(login: string) {
     description: 'This developer has not appeared on the Gitemon map yet.',
     path: `/${login}`,
     noindex: true,
-    body: `<section class="card"><h1>${esc(login)}</h1><p class="sub">This Gitemon has not hatched yet. We asked for it just now — it usually appears within a few minutes.</p>
+    body: `<section class="card px-frame"><h1>${esc(login)}</h1><p class="sub">This Gitemon has not hatched yet. We asked for it just now — it usually appears within a few minutes.</p>
 <div class="btns"><a class="btn primary" href="/auth/login?next=/map?focus=${encodeURIComponent(login)}">Sign in with GitHub to hatch yours now</a><a class="btn" href="/map">Open the map</a></div></section>`,
   });
 }
@@ -132,7 +115,7 @@ export function messagePage(status: number, title: string, text: string) {
     title: `${title} · Gitemon`,
     description: text,
     path: '/',
-    body: `<section class="card"><h1>${esc(title)}</h1><p class="sub">${esc(text)}</p><div class="btns"><a class="btn primary" href="/map">Open the map</a><a class="btn" href="/">Home</a></div></section>`,
+    body: `<section class="card px-frame"><h1>${esc(title)}</h1><p class="sub">${esc(text)}</p><div class="btns"><a class="btn primary" href="/map">Open the map</a><a class="btn" href="/">Home</a></div></section>`,
     status: String(status),
     noindex: true,
   });
@@ -144,7 +127,7 @@ export function codePage(email: string, error: string | null) {
     title: 'Check your email · Gitemon',
     description: 'Finish signing in with the code from your email.',
     path: '/auth/verify',
-    body: `<section class="card"><h1>Check your email</h1><p class="sub">GitHub sign-in worked. To finish, type the 6-digit code that our sign-in provider (WorkOS) just sent to <b>${esc(email)}</b>. You only do this once.</p>${error ? `<p class="err">${esc(error)}</p>` : ''}<form class="code" method="post" action="/auth/verify"><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus placeholder="123456" aria-label="6-digit code"><button class="btn primary" type="submit">Finish signing in</button></form></section>`,
+    body: `<section class="card px-frame"><h1>Check your email</h1><p class="sub">GitHub sign-in worked. To finish, type the 6-digit code that our sign-in provider (WorkOS) just sent to <b>${esc(email)}</b>. You only do this once.</p>${error ? `<p class="err">${esc(error)}</p>` : ''}<form class="code" method="post" action="/auth/verify"><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus placeholder="123456" aria-label="6-digit code"><button class="btn primary" type="submit">Finish signing in</button></form></section>`,
     status: '200',
     noindex: true,
   });
@@ -155,7 +138,7 @@ export const privacyPage = () =>
     title: 'Privacy · Gitemon',
     description: 'What Gitemon stores, why, and how to remove your Gitemon.',
     path: '/privacy',
-    body: `<section class="card prose"><h1>Privacy</h1>
+    body: `<section class="card px-frame prose"><h1>Privacy</h1>
 <p>Gitemon turns public GitHub activity into a pixel creature. This page says exactly what we keep.</p>
 <h2>What we read</h2><ul>
 <li>Public GitHub profile data: your login, name, account age, follower count, your public repositories (stars, language), and your public contribution counts for the last year.</li>
@@ -182,7 +165,7 @@ export const termsPage = () =>
     title: 'Terms · Gitemon',
     description: 'The short terms for using Gitemon.',
     path: '/terms',
-    body: `<section class="card prose"><h1>Terms</h1>
+    body: `<section class="card px-frame prose"><h1>Terms</h1>
 <p>Gitemon is a free game. By using it you agree to the following.</p><ul>
 <li>Play fair. Do not automate catching, create accounts to farm buffs, or overload the service.</li>
 <li>Town names must not be abusive. We may rename or remove towns and hide Gitemon that break this.</li>
@@ -198,11 +181,12 @@ export const LANDING = {
     'Sign in with GitHub and your public work hatches into a pixel creature on one shared island. Walk nine lands, find the 500 sealed legends, catch other developers.',
 };
 
-const landingCard = () => `<section class="welcome" id="welcome" aria-label="Welcome to Gitemon">
+const landingCard =
+  () => `<section class="welcome px-frame" id="welcome" aria-label="Welcome to Gitemon">
 <h1>Every developer is a creature.</h1>
 <p class="welcome-sub">Sign in with GitHub and your public work hatches into a pixel Gitemon on one shared island.</p>
 <div class="welcome-creatures" aria-hidden="true">${'<span></span>'.repeat(9)}</div>
-<div class="welcome-btns"><a class="welcome-go" href="/auth/login?next=/map">Sign in with GitHub</a><a class="welcome-look" id="welcome-look" href="/map">Look around first</a></div>
+<div class="welcome-btns"><a class="btn primary btn-big welcome-go" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn btn-big welcome-look" id="welcome-look" href="/map">Look around first</a></div>
 <ul class="welcome-beats">
 <li><img src="/ui/blessing.png" alt=""><span><b>Hatch.</b> Your languages pick your creature and its colours. No two look the same.</span></li>
 <li><img src="/ui/steps.png" alt=""><span><b>Walk.</b> Explore nine lands round one town. Real GitHub work earns more steps each day.</span></li>
@@ -241,7 +225,7 @@ export function landingShell(app: string, lqip: { wide?: string; tall?: string }
         (blur ? `<style>${blur}</style>` : '') +
         '</head>',
     )
-    .replace(/<body>/, '<body class="welcoming">')
+    .replace(/<body class="game">/, '<body class="game welcoming">')
     .replace(
       '<div id="app"></div>',
       '<div id="app"></div><div class="poster" id="poster"><picture><source media="(orientation: portrait)" srcset="/poster-tall.webp"><img src="/poster-wide.webp" alt="" fetchpriority="high"></picture></div>' +
@@ -256,7 +240,7 @@ export const howPage = () =>
     description:
       'Hatch from your public GitHub work, walk nine lands, find the sealed legends, earn a house. Power is not size.',
     path: '/how',
-    body: `<section class="card prose"><h1>How Gitemon works</h1>
+    body: `<section class="card px-frame prose"><h1>How Gitemon works</h1>
 <h2>Hatch</h2><p>Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you. Your main language picks the creature, your second language colours its markings, and each one moves in its own way: it hops, waddles, trots, slithers or floats.</p>
 <h2>Walk</h2><p>Tap the map to walk, or steer with WASD, the arrow keys or the thumb stick on a phone. Your Gitemon walks home when you stop. Real GitHub work (merged pull requests, reviews, active weeks) earns more steps each day.</p>
 <h2>Catch</h2><p>Walk up to another player's Gitemon and catch it. Worked together for real? It's a bonded catch.</p>
@@ -273,10 +257,11 @@ export const howPage = () =>
 export const creditsPage = () =>
   layout({
     title: 'Gitemon credits',
-    description: 'The free sounds and light Gitemon uses, with their authors and licences.',
+    description:
+      'The free sounds, light, props and fonts Gitemon uses, with their authors and licences.',
     path: '/credits',
-    body: `<section class="card prose"><h1>Credits</h1>
-<p>Gitemon's creatures, 3D pieces and code are its own. These files come from others, all public domain (CC0). Thank you.</p>
+    body: `<section class="card px-frame prose"><h1>Credits</h1>
+<p>Gitemon's creatures, most 3D pieces and the code are its own. These files come from others: public domain (CC0), and two fonts under the SIL Open Font License. Thank you.</p>
 <table class="rank"><tr><th>File</th><th>What</th><th>By</th><th>Licence</th></tr>
 ${CREDITS.map(
   (c) =>

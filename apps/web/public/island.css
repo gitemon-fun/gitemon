@@ -1,0 +1,692 @@
+/*
+ * Gitemon Island UI (GRANDPLAN v15, V15-D1…D11). ONE file for the map app and the Worker's pages:
+ * both link /island.css (a stable URL, so an hour-cached page never points at a stylesheet a deploy
+ * removed). Parchment, wood, pixel edges, a hard shadow; no blur, no glass (V15-D14).
+ * Every text colour on a fill below is measured (WCAG 2): the ratio sits beside it; the pairs are
+ * enforced by packages/shared/test/ui.test.ts. One daylight look: no prefers-color-scheme (V15-D4).
+ */
+
+@font-face {
+  font-family: 'Pixelify Sans';
+  src: url('/fonts/pixelify-sans.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Nunito';
+  src: url('/fonts/nunito.woff2') format('woff2');
+  font-weight: 200 1000;
+  font-display: swap;
+}
+
+:root {
+  --ink: #3b2a1e; /* on paper 11.75 */
+  --ink2: #6b5443; /* on paper 6.07 */
+  --muted: #766657; /* paper 4.74 · note 5.30 · yellow note 4.95 · blue note 4.81 */
+  --paper: #f7edd6;
+  --paper2: #efe0bf; /* ink 10.47 */
+  --note: #fffaf0;
+  --edge: #4a3526;
+  --shadow: rgba(59, 42, 30, 0.35);
+  --leaf: #4a843d; /* white 4.51 (was #5aa04a, 3.20) */
+  --leaf-d: #33602a;
+  --wood: #9c6c41; /* white 4.53 (was #b07a4a, 3.67) */
+  --wood-d: #6e4526;
+  --sky: #5fa8d8; /* ink 5.26 (white only 2.60) */
+  --sky-d: #3b7fb0;
+  --link: #2a6592; /* paper 5.35 · note 5.98 · paper2 4.77 (sky-d was 3.72) */
+  --gold: #e8b23a; /* ink 7.07 */
+  --gold-d: #b8841c;
+  --gold-text: #8d6515; /* on paper 4.50 */
+  --board: #8d6034; /* board-text 4.56 (was #a8733f, 3.39) */
+  --board-text: #fbe9c8;
+  --stone: #b8b2a6; /* ink 6.48 */
+  --tablet: #3f434d; /* tablet-text 7.98 */
+  --tablet-text: #efe6d2;
+  --awning: #f4e3c8; /* ink 10.85 */
+  --awning-red: #d95a5a;
+  --inn: #c98f55; /* ink 4.91 */
+  --plaque: #d9b86a; /* ink 7.17 */
+  --danger: #a3261e;
+  --pixel: 'Pixelify Sans', ui-monospace, 'Cascadia Mono', monospace;
+  --read: 'Nunito', ui-rounded, 'Segoe UI', system-ui, sans-serif;
+  color-scheme: light;
+}
+
+/* ---- the frame: a pixel edge (four offset shadows leave the corners notched), a bevel, a hard shadow ---- */
+.px-frame {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow:
+    0 -3px 0 0 var(--edge),
+    0 3px 0 0 var(--edge),
+    -3px 0 0 0 var(--edge),
+    3px 0 0 0 var(--edge),
+    inset 0 3px 0 0 #fff8e6,
+    inset 0 -3px 0 0 var(--paper2),
+    6px 9px 0 0 var(--shadow);
+}
+
+/* ---- buttons (V15-D7): wood = neutral, leaf = go, sky = travel / look, gold = legend actions ---- */
+:is(.btn, .game button:not(.bare)) {
+  --c: var(--wood);
+  --d: var(--wood-d);
+  font: 700 15px/1.1 var(--pixel);
+  letter-spacing: 0.02em;
+  color: #fff;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+  background: var(--c);
+  border: 0;
+  border-radius: 0;
+  padding: 11px 14px 13px;
+  min-height: 44px;
+  min-width: 44px;
+  margin: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow:
+    0 -2px 0 0 var(--edge),
+    0 2px 0 0 var(--edge),
+    -2px 0 0 0 var(--edge),
+    2px 0 0 0 var(--edge),
+    inset 0 -4px 0 0 var(--d),
+    inset 0 2px 0 0 rgba(255, 255, 255, 0.28);
+  transition: transform 60ms ease;
+}
+:is(.btn, .game button:not(.bare)):is(.primary, .leaf) {
+  --c: var(--leaf);
+  --d: var(--leaf-d);
+}
+:is(.btn, .game button:not(.bare)).sky {
+  --c: var(--sky);
+  --d: var(--sky-d);
+  color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+:is(.btn, .game button:not(.bare)):is(.gold, .on) {
+  --c: var(--gold);
+  --d: var(--gold-d);
+  color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+:is(.btn, .game button:not(.bare)):active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow:
+    0 -2px 0 0 var(--edge),
+    0 2px 0 0 var(--edge),
+    -2px 0 0 0 var(--edge),
+    2px 0 0 0 var(--edge),
+    inset 0 2px 0 0 var(--d);
+}
+:is(.btn, .game button:not(.bare)):disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn:hover {
+  text-decoration: none;
+  filter: brightness(1.05);
+}
+.btn-big {
+  font-size: 17px;
+  min-height: 48px;
+  padding: 13px 18px 15px;
+}
+/* a text link that looks like one (no frame) */
+.game button.bare {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.game button.link,
+a.link {
+  color: var(--link);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 3px;
+}
+
+/* ---- chips, meters ---- */
+.chip {
+  display: inline-block;
+  font: 700 14px/1 var(--pixel);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 5px 8px 6px;
+  background: var(--paper2);
+  color: var(--ink);
+  box-shadow:
+    0 -2px 0 0 var(--edge),
+    0 2px 0 0 var(--edge),
+    -2px 0 0 0 var(--edge),
+    2px 0 0 0 var(--edge);
+  margin: 2px;
+}
+.meter {
+  height: 12px;
+  background: #e3d3b2;
+  box-shadow: inset 0 0 0 2px var(--edge);
+}
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--leaf);
+  box-shadow:
+    inset 0 -3px 0 0 var(--leaf-d),
+    inset 0 0 0 2px var(--edge);
+}
+
+/* ---- the mascot's dialogue box (V15-D8) ---- */
+.dialogue {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font: 700 14px/1.35 var(--read);
+}
+.dialogue > img {
+  width: 34px;
+  height: 34px;
+  image-rendering: pixelated;
+  flex: none;
+}
+
+/* ---- paper notes (the Notice Board, V15-D5) ---- */
+.notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px 12px;
+  margin: 12px 2px 4px;
+  padding: 0;
+  list-style: none;
+}
+.note {
+  position: relative;
+  background: var(--note);
+  color: var(--ink);
+  padding: 18px 11px 11px;
+  font: 700 14px/1.35 var(--read);
+  box-shadow: 3px 4px 0 0 var(--shadow);
+}
+.note:nth-child(4n + 1) {
+  transform: rotate(-1.6deg);
+}
+.note:nth-child(4n + 2) {
+  transform: rotate(1.3deg);
+  background: #fff3c4;
+}
+.note:nth-child(4n + 3) {
+  transform: rotate(0.9deg);
+  background: #e4f1ff;
+}
+.note:nth-child(4n + 4) {
+  transform: rotate(-1.1deg);
+}
+.note::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  background: #d8453b;
+  box-shadow:
+    inset -3px -3px 0 0 #9e2a22,
+    0 2px 0 0 rgba(0, 0, 0, 0.3);
+}
+.note b {
+  display: block;
+  font: 700 15px/1.2 var(--pixel);
+  margin-bottom: 4px;
+}
+.note .who {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--ink2);
+}
+.note.blank {
+  background: #f7f0e6;
+  color: var(--muted);
+}
+
+/* ---- pop-in (V15-D9) ---- */
+.pop {
+  animation: kit-pop 0.12s ease-out;
+}
+@keyframes kit-pop {
+  from {
+    transform: scale(0.96);
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pop {
+    animation: none;
+  }
+  :is(.btn, .game button:not(.bare)) {
+    transition: none;
+  }
+}
+
+/* ================================ skins (V15-D5, D6) ================================ */
+/* every skin is a .px-frame with its own ground; titles use the pixel font */
+.skin-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+}
+.skin-head .icon {
+  width: 34px;
+  height: 34px;
+  image-rendering: pixelated;
+  flex: none;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.25));
+}
+.skin-head h2 {
+  margin: 0;
+  padding: 0;
+}
+
+/* Notice Board: wood with grain; the notes pin onto it */
+.skin-board {
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.07) 0 2px, transparent 2px 22px),
+    linear-gradient(90deg, #96683a, var(--board) 30%, #96683a 60%, #875b31);
+  color: var(--board-text);
+  box-shadow:
+    0 -4px 0 0 #5e3b20,
+    0 4px 0 0 #5e3b20,
+    -4px 0 0 0 #5e3b20,
+    4px 0 0 0 #5e3b20,
+    inset 0 3px 0 0 #b07a4a,
+    inset 0 -3px 0 0 #6a4524,
+    6px 9px 0 0 var(--shadow);
+}
+.skin-board h2 {
+  color: #fff6e0;
+  text-shadow: 0 3px 0 #5b3a1f;
+}
+.skin-board .dim,
+.skin-board p {
+  color: var(--board-text);
+}
+
+/* Legend Hall: a stone slab with a gold trim */
+.skin-stone {
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.18) 0 2px, transparent 3px) 0 0 / 23px
+      19px,
+    linear-gradient(160deg, #c4beb2, var(--stone) 55%, #aaa498);
+  box-shadow:
+    0 -3px 0 0 var(--gold-d),
+    0 3px 0 0 var(--gold-d),
+    -3px 0 0 0 var(--gold-d),
+    3px 0 0 0 var(--gold-d),
+    inset 0 0 0 3px var(--gold),
+    6px 9px 0 0 var(--shadow);
+}
+
+/* Dex Library, the Dex: a book — a leather spine down the left edge */
+.skin-book {
+  /* no ruled lines: they cross the words (readability first, V15-D10) */
+  background:
+    linear-gradient(90deg, #7a2b2b 0 12px, #5e1f1f 12px 15px, transparent 15px), var(--paper);
+  padding-left: 30px !important;
+}
+
+/* a guild hall: its region's banner across the top */
+.skin-banner {
+  padding-top: 0 !important;
+}
+.skin-banner .banner {
+  margin: 0 -16px 12px;
+  padding: 14px 52px 16px 16px;
+  background: var(--banner, var(--sky));
+  color: var(--banner-text, var(--ink));
+  box-shadow: inset 0 -5px 0 0 rgba(0, 0, 0, 0.18);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 86%, 0 100%);
+}
+.skin-banner .banner h2 {
+  color: inherit;
+}
+.skin-banner .banner .chip {
+  margin-top: 6px;
+}
+
+/* a Merit House: a brass door plaque */
+.skin-plaque .plaque {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: var(--plaque);
+  color: var(--ink);
+  padding: 10px 12px;
+  margin: 6px 0 10px;
+  box-shadow:
+    inset 0 0 0 3px #b89040,
+    inset 0 3px 0 0 #f0d890;
+}
+
+/* the Inn: warm wood with a paper menu */
+.skin-inn {
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.06) 0 2px, transparent 2px 20px), var(--inn);
+}
+.skin-inn .menu,
+.skin-market .menu,
+.skin-stone .menu {
+  background: var(--note);
+  color: var(--ink);
+  padding: 10px 12px;
+  box-shadow: 3px 4px 0 0 var(--shadow);
+}
+
+/* the Market: the striped awning of its stalls, and a Closed tag */
+.skin-market {
+  padding-top: 0 !important;
+}
+.skin-market .awning {
+  height: 34px;
+  margin: 0 -16px 12px;
+  background:
+    radial-gradient(circle at 10px 0, transparent 9px, var(--paper) 10px) 0 24px / 20px 12px
+      repeat-x,
+    repeating-linear-gradient(90deg, var(--awning-red) 0 20px, var(--awning) 20px 40px);
+}
+.tag {
+  display: inline-block;
+  font: 700 14px/1 var(--pixel);
+  color: var(--ink);
+  background: var(--awning);
+  padding: 6px 10px 7px;
+  transform: rotate(-3deg);
+  box-shadow:
+    0 0 0 2px var(--edge),
+    3px 3px 0 0 var(--shadow);
+}
+
+/* the Town Gate: a ticket stub, perforated on the left */
+.skin-ticket {
+  background:
+    radial-gradient(circle at 0 50%, transparent 5px, var(--paper) 6px) 0 0 / 12px 14px repeat-y,
+    linear-gradient(90deg, transparent 22px, rgba(107, 84, 67, 0.35) 22px 24px, transparent 24px),
+    var(--paper);
+  padding-left: 36px !important;
+}
+
+/* a sealed legend: a dark stone tablet, carved light text */
+.skin-tablet {
+  background: linear-gradient(170deg, #4a4f5a, var(--tablet) 60%, #34373f);
+  color: var(--tablet-text);
+  box-shadow:
+    0 -3px 0 0 #22252b,
+    0 3px 0 0 #22252b,
+    -3px 0 0 0 #22252b,
+    3px 0 0 0 #22252b,
+    inset 0 3px 0 0 #5a606c,
+    6px 9px 0 0 var(--shadow);
+}
+.skin-tablet h2,
+.skin-tablet p,
+.skin-tablet .dim {
+  color: var(--tablet-text);
+}
+
+/* a Gitemon: a trading card — the frame in its two type colours, a paper face */
+.skin-card {
+  background: linear-gradient(160deg, var(--c1, #e8708e), var(--c2, #e0803a));
+  padding: 10px !important;
+}
+.card-face {
+  background: var(--paper);
+  color: var(--ink);
+  padding: 12px 14px 14px;
+  box-shadow: inset 0 3px 0 0 #fff8e6;
+}
+.card-name {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.card-name .lv {
+  font: 700 17px var(--pixel);
+  color: var(--ink2);
+  white-space: nowrap;
+}
+.card-window {
+  height: 132px;
+  margin: 8px 0 10px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
+  background: linear-gradient(#bfe3f5, #e8f4f0 60%, var(--ground, #a9cf7c) 60%);
+  box-shadow: inset 0 0 0 3px var(--edge);
+}
+.card-window > :is(canvas, img) {
+  image-rendering: pixelated;
+  filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.18));
+}
+.form-text {
+  font: 700 14px var(--pixel);
+  color: var(--gold-text);
+}
+
+/* the Towns panel: a ledger — ruled lines and a red margin */
+.skin-ledger {
+  padding-left: 40px !important;
+  background:
+    linear-gradient(90deg, transparent 26px, rgba(217, 90, 90, 0.55) 26px 28px, transparent 28px),
+    var(--note);
+}
+.skin-ledger li + li {
+  border-top: 2px dashed rgba(95, 168, 216, 0.45);
+}
+
+/* ================================ Worker pages ================================ */
+body.page {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(rgba(107, 84, 67, 0.12) 1px, transparent 1.5px) 0 0 / 14px 14px,
+    #e9dcc2;
+  color: var(--ink);
+  font: 600 16px/1.55 var(--read);
+}
+.page-bar {
+  max-width: 800px;
+  margin: 14px auto 18px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.page-bar {
+  width: calc(100% - 32px);
+}
+.page-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 700 20px var(--pixel);
+  color: var(--ink);
+  text-decoration: none;
+}
+.page-brand img {
+  width: 28px;
+  height: 28px;
+  image-rendering: pixelated;
+}
+.page main {
+  max-width: 800px;
+  width: calc(100% - 32px);
+  margin: 0 auto;
+  padding: 0 0 36px;
+}
+.page .card {
+  padding: 22px 22px 20px;
+  margin: 0 0 22px;
+}
+.page h1 {
+  font: 700 32px/1.1 var(--pixel);
+  margin: 0 0 8px;
+  word-break: break-word;
+}
+.page h2 {
+  font: 700 22px/1.2 var(--pixel);
+  margin: 26px 0 8px;
+}
+.page .card > h2:first-child {
+  margin-top: 0;
+}
+.page .sub,
+.page .dim {
+  color: var(--ink2);
+}
+.page a:not(.btn) {
+  color: var(--link);
+  font-weight: 800;
+}
+.page footer {
+  max-width: 800px;
+  width: calc(100% - 32px);
+  margin: 0 auto;
+  padding: 0 0 40px;
+  color: var(--ink2);
+  font-size: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.page footer a {
+  color: var(--ink2) !important;
+}
+.page .btns {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.page .hero {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.page .hero .who {
+  flex: 1;
+  min-width: 220px;
+}
+.page .hero .card-window {
+  width: 200px;
+  height: 200px;
+  margin: 0;
+}
+.page .lv {
+  font: 700 26px var(--pixel);
+}
+.page .bonus {
+  color: var(--leaf);
+  font-weight: 800;
+}
+.page .stat {
+  margin: 14px 0;
+}
+.page .stat .row {
+  display: flex;
+  justify-content: space-between;
+  font: 700 16px var(--pixel);
+}
+.page .stat .why {
+  color: var(--ink2);
+  font-size: 14px;
+  margin: 2px 0 6px;
+}
+.page .rank {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+.page .rank th {
+  text-align: left;
+  font: 700 14px var(--pixel);
+  color: var(--ink2);
+  padding: 6px 8px;
+}
+.page .rank td {
+  padding: 8px;
+  border-top: 2px dashed rgba(107, 84, 67, 0.3);
+  vertical-align: top;
+  word-break: break-word;
+}
+.page .code {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.page .code input {
+  font: 700 24px var(--pixel);
+  letter-spacing: 0.3em;
+  width: 9.5em;
+  padding: 9px 14px;
+  border: 0;
+  background: var(--note);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 3px var(--wood);
+}
+.page .err {
+  color: var(--danger);
+  font-weight: 800;
+  margin: 10px 0 0;
+}
+.page .prose li {
+  margin: 4px 0;
+}
+.page a.page-brand {
+  color: var(--ink);
+}
+@media (max-width: 560px) {
+  .page h1 {
+    font-size: 26px;
+  }
+  /* a table is too narrow on a phone: each row becomes a small block */
+  .page .rank tr:first-child {
+    display: none;
+  }
+  .page .rank tr,
+  .page .rank td {
+    display: block;
+  }
+  .page .rank tr {
+    border-top: 2px dashed rgba(107, 84, 67, 0.3);
+    padding: 8px 0;
+  }
+  .page .rank td {
+    border: 0;
+    padding: 1px 0;
+  }
+  .page .rank td:first-child {
+    font: 700 15px var(--pixel);
+  }
+  .page .card {
+    padding: 18px 16px 16px;
+  }
+}

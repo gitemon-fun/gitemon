@@ -64,6 +64,7 @@
   onMount(() => {
     const onSound = (e: Event) => {
       if ((e as CustomEvent).detail === 'catch') sound.caught();
+      if ((e as CustomEvent).detail === 'paper') sound.paper();
     };
     window.addEventListener('gitemon:sound', onSound);
     scene.onFollow = (on) => {
@@ -352,10 +353,12 @@
 </div>
 
 {#if tip}
-  <div class="hud-tip" role="status">
-    {touch
-      ? 'Walk with the stick · drag to look round · the map button goes back'
-      : 'Walk with WASD · drag to look round · V goes back to the map'}
+  <div class="hud-tip px-frame dialogue pop" role="status">
+    <img src="/favicon.png" alt="" /><span
+      >{touch
+        ? 'Walk with the stick · drag to look round · the map button goes back'
+        : 'Walk with WASD · drag to look round · V goes back to the map'}</span
+    >
   </div>
 {/if}
 

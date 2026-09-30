@@ -1,6 +1,7 @@
 /**
  * v14.1: every third-party file Gitemon ships, with its source and licence (shown on /credits).
- * Only CC0 files may live in this public repo; anything else stays in the private art repo.
+ * Only CC0 files (and OFL fonts, which allow bundling with their licence) may live in this public repo;
+ * anything else stays in the private art repo.
  */
 export interface Credit {
   file: string;
@@ -11,6 +12,7 @@ export interface Credit {
 }
 
 const CC0 = 'CC0 1.0 (public domain)';
+const OFL = 'SIL Open Font License 1.1';
 
 export const CREDITS: Credit[] = [
   {
@@ -61,6 +63,41 @@ export const CREDITS: Credit[] = [
     author: 'Kenney',
     source: 'https://kenney.nl/assets/impact-sounds and https://kenney.nl/assets/interface-sounds',
     license: CC0,
+  },
+  {
+    file: 'audio/paper.ogg',
+    what: 'bookFlip2 (RPG Audio), quieter: the sound of a panel opening',
+    author: 'Kenney',
+    source: 'https://kenney.nl/assets/rpg-audio',
+    license: CC0,
+  },
+  {
+    file: 'fonts/pixelify-sans.woff2',
+    what: 'Pixelify Sans, latin letters only: titles and buttons',
+    author: 'The Pixelify Sans Project Authors (Stefie Justprince)',
+    source: 'https://github.com/eifetx/Pixelify-Sans',
+    license: OFL,
+  },
+  {
+    file: 'fonts/nunito.woff2',
+    what: 'Nunito, latin letters only: all reading text',
+    author: 'The Nunito Project Authors (Vernon Adams, Cyreal, Jacques Le Bailly)',
+    source: 'https://github.com/googlefonts/nunito',
+    license: OFL,
+  },
+  {
+    file: 'fonts/OFL-pixelify-sans.txt',
+    what: 'The licence that ships with Pixelify Sans',
+    author: 'SIL International',
+    source: 'https://openfontlicense.org',
+    license: OFL,
+  },
+  {
+    file: 'fonts/OFL-nunito.txt',
+    what: 'The licence that ships with Nunito',
+    author: 'SIL International',
+    source: 'https://openfontlicense.org',
+    license: OFL,
   },
   {
     file: 'models/props.glb',

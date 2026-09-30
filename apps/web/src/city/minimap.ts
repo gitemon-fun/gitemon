@@ -5,7 +5,7 @@ import { TOWN_R, WATER_Y, gridHeight, type ClimateId, type Island } from '@gitem
  * shore, the nine regions, the town ring — as a small canvas. The HUD draws the live dots on top.
  */
 
-const COLOUR: Record<ClimateId, string> = {
+export const COLOUR: Record<ClimateId, string> = {
   frost: '#eef3f8',
   marsh: '#8f93a8',
   bloom: '#a9cf7c',

@@ -4,8 +4,10 @@
     SHAPE_NAME,
     STAT_MEANING,
     TYPE_INFO,
+    readable,
     type MapGitemon,
     type Stats,
+    type TypeId,
   } from '@gitemon/shared';
   import { api, ERRORS, type Detail, type Me, type Town } from './lib/api';
   import { CityScene } from './city/scene';
@@ -21,6 +23,7 @@
     type TownPlot,
   } from '@gitemon/shared';
   import { plotName } from './city/town';
+  import { COLOUR as CLIMATE_COLOUR } from './city/minimap';
   import Sprite from './lib/Sprite.svelte';
   import Hud from './lib/Hud.svelte';
   import { sprite } from './lib/sprites';
@@ -281,14 +284,21 @@
   /** every Merit House sign, for the Notice Board (V9-D4) */
   function boardSigns() {
     if (!town) return [];
-    const out: { login: string; text: string; region: string }[] = [];
+    const out: { g: MapGitemon; title: string; project: string | null; region: string }[] = [];
     town.city.town.forEach((p, k) => {
       const h = town!.homes.get(k);
       if (p.kind !== 'house' || !h?.sign) return;
       const [tpl, project] = h.sign.split('|');
       const text = signText(tpl ?? '', project || null);
       const g = town!.byId.get(h.id)?.g;
-      if (text && g) out.push({ login: g.login, text, region: town!.city.regions[p.region]!.name });
+      const title = SIGN_TEMPLATES[tpl as keyof typeof SIGN_TEMPLATES];
+      if (text && g && title)
+        out.push({
+          g,
+          title,
+          project: project || null,
+          region: town!.city.regions[p.region]!.name,
+        });
     });
     return out;
   }
@@ -564,6 +574,54 @@
 
   const typeLine = (g: MapGitemon) =>
     g.t2 ? `${TYPE_INFO[g.t1].name} / ${TYPE_INFO[g.t2].name}` : TYPE_INFO[g.t1].name;
+
+  // ---- v15 Island UI (GRANDPLAN v15): skins, type colours, the page-turn sound ----------------------
+  /** a type chip's fill and text colour, measured (V15-D10) */
+  const chip = (t: TypeId) => {
+    const c = readable(TYPE_INFO[t].colors[0]);
+    return `background:${c.bg};color:${c.fg}`;
+  };
+  /** a trading card's frame: its two type colours (one type: its two shades) */
+  const cardFrame = (g: MapGitemon) =>
+    `--c1:${TYPE_INFO[g.t1].colors[0]};--c2:${g.t2 ? TYPE_INFO[g.t2].colors[0] : TYPE_INFO[g.t1].colors[1]}`;
+  /** the card window's ground: the colour of its land on the minimap */
+  const groundOf = (t: TypeId) => {
+    const climate = town?.city.regions.find((r) => r.types.includes(t))?.climate;
+    return climate ? CLIMATE_COLOUR[climate] : '#a9cf7c';
+  };
+  /** a guild hall's banner: its region's first type colour, with text that reads */
+  const bannerOf = (region: number) => {
+    const t = town?.city.regions[region]?.types[0];
+    const c = readable(t ? TYPE_INFO[t].colors[0] : '#5fa8d8');
+    return `--banner:${c.bg};--banner-text:${c.fg}`;
+  };
+  const SKIN: Record<string, string> = {
+    'legend-hall': 'skin-stone',
+    'dex-library': 'skin-book',
+    'notice-board': 'skin-board',
+    'gate-office': 'skin-ticket',
+    market: 'skin-market',
+    inn: 'skin-inn',
+  };
+  const skinOf = (p: TownPlot) =>
+    p.kind === 'hall'
+      ? 'skin-banner'
+      : p.kind === 'house'
+        ? 'skin-plaque'
+        : SKIN[SERVICES[p.slot]!]!;
+  /** each building's pixel icon (v15 build 07); a missing file simply hides */
+  const iconOf = (p: TownPlot) =>
+    `/ui/b-${p.kind === 'hall' ? 'guild' : p.kind === 'house' ? 'house' : SERVICES[p.slot]}.png`;
+  const dropImg = (e: Event) => (e.currentTarget as HTMLElement).remove();
+  // V15-D9: a soft page turn whenever a sheet or panel opens (the HUD plays it only with sound on)
+  let lastOpen = '';
+  $effect(() => {
+    const open =
+      building != null ? `b${building}` : picked ? `g${picked.id}` : panel ? `p${panel}` : '';
+    if (open && open !== lastOpen)
+      window.dispatchEvent(new CustomEvent('gitemon:sound', { detail: 'paper' }));
+    lastOpen = open;
+  });
 </script>
 
 <div
@@ -575,26 +633,24 @@
   onwheel={firstTouch}
 ></div>
 
-<header class="bar">
+<header class="bar px-frame">
   <a class="brand" href="/" title="Gitemon home" onclick={brandClick}
     ><img class="brand-mark" src="/favicon.png" alt="" /><span class="brand-name">Gitemon</span></a
   >
   <form class="search" onsubmit={search} role="search">
     <input
+      class="field"
       bind:value={query}
-      placeholder="Find a GitHub username"
+      placeholder="Find a user"
       aria-label="GitHub username"
       autocomplete="off"
       autocapitalize="off"
       spellcheck="false"
     />
-    <button disabled={searching} aria-label="Find" class="findbtn"
-      >{#if !searching}<img
-          class="ico"
-          src="/ui/find.png"
-          alt=""
-          onerror={(e) => (e.currentTarget as HTMLElement).remove()}
-        />{/if}<span class="label">{searching ? '…' : 'Find'}</span></button
+    <button disabled={searching} aria-label="Find" class="findbtn sky"
+      >{#if !searching}<img class="ico" src="/ui/find.png" alt="" onerror={dropImg} />{/if}<span
+        class="label">{searching ? '…' : 'Find'}</span
+      ></button
     >
   </form>
   <nav>
@@ -614,8 +670,10 @@
         <Sprite g={me} size={28} />
       </button>
     {:else}
-      <button onclick={() => go(panel === 'towns' ? '/map' : '/towns')}>Towns</button>
-      <a class="signin" href="/auth/login?next=/map">Sign in</a>
+      <button class:on={panel === 'towns'} onclick={() => go(panel === 'towns' ? '/map' : '/towns')}
+        >Towns</button
+      >
+      <a class="btn primary" href="/auth/login?next=/map">Sign in</a>
     {/if}
   </nav>
 </header>
@@ -631,35 +689,51 @@
 {/if}
 
 {#if failed}
-  <div class="hint">The city could not load. Try again in a minute.</div>
+  <div class="hint px-frame dialogue">
+    <img src="/favicon.png" alt="" /><span>The island could not load. Try again in a minute.</span>
+  </div>
 {:else if !loaded}
-  <div class="hint">Building the island…</div>
+  <div class="hint px-frame dialogue">
+    <img src="/favicon.png" alt="" /><span>Building the island…</span>
+  </div>
 {:else if !picked && !panel && !hintGone}
-  <div class="hint" class:raised={walking}>
-    {sealed.toLocaleString('en-US')} sealed legends sleep on the island. The stronger a Gitemon, the nearer
-    the town it lives.{me ? '' : ' Sign in with GitHub to hatch yours.'} Tap anyone.
+  <div class="hint px-frame dialogue" class:raised={walking}>
+    <img src="/favicon.png" alt="" /><span
+      >{sealed.toLocaleString('en-US')} sealed legends sleep on the island. The stronger a Gitemon, the
+      nearer the town it lives.{me ? '' : ' Sign in with GitHub to hatch yours.'} Tap anyone.</span
+    >
   </div>
 {/if}
 
 {#if plot && town && building != null}
-  <section class="sheet" aria-label={plotName(town.city, plot)}>
+  {@const name = plotName(town.city, plot)}
+  <section class="sheet px-frame pop {skinOf(plot)}" aria-label={name}>
     <button class="close" onclick={() => (building = null)} aria-label="Close">×</button>
-    <h2>{plotName(town.city, plot)}</h2>
     {#if plot.kind === 'hall'}
       {@const members = guildMembers(plot.region)}
       {@const tot = guildTotals(plot.region)}
       {@const rank = guildRank(plot.region)}
+      {@const types = town.city.regions[plot.region]!.types}
+      <div class="banner" style={bannerOf(plot.region)}>
+        <div class="skin-head">
+          <img class="icon" src={iconOf(plot)} alt="" onerror={dropImg} />
+          <h2>{name}</h2>
+        </div>
+        {#each types as t (t)}<span class="chip" style={chip(t)}>{TYPE_INFO[t].name}</span>{/each}
+      </div>
       <p class="dim">
-        {town.city.regions[plot.region]!.types.map((t) => TYPE_INFO[t].name).join(' + ')} · every
-        {town.city.regions[plot.region]!.types.map((t) => TYPE_INFO[t].name).join(' and ')} Gitemon belongs
-        here.
+        Every {types.map((t) => TYPE_INFO[t].name).join(' and ')} Gitemon belongs here.
       </p>
-      <p>
-        <b>{members.length}</b> members on the map{#if guildWeek}
-          · <b>{tot.active}</b> active this week{#if rank}
-            (#{rank} of 9){/if} · <b>{tot.legends}</b>
-          legends logged this week{/if}.
-      </p>
+      <div class="tiles">
+        <div class="tile"><b>{members.length}</b><span>members on the map</span></div>
+        <div class="tile"><b>{guildWeek ? tot.active : '–'}</b><span>active this week</span></div>
+        <div class="tile">
+          <b>{rank ? `#${rank}` : '–'}</b><span>of 9 guilds</span>
+        </div>
+      </div>
+      {#if guildWeek}<p class="small">
+          <b>{tot.legends}</b> legends logged by members this week.
+        </p>{/if}
       <p class="dim small">
         Guilds compete on how many members walk or log a legend each week — not on raw volume.
       </p>
@@ -667,93 +741,128 @@
         <ol class="guild-top">
           {#each members.slice(0, 10) as g (g.id)}
             <li>
-              <button class="linkish" onclick={() => ((building = null), show(g, 3))}
+              <button class="bare linkish" onclick={() => ((building = null), show(g, 3))}
                 ><Sprite {g} size={28} /> {g.login}</button
               >
               <span class="dim">merit {(g.m ?? 0).toFixed(0)}</span>
             </li>
           {/each}
         </ol>
-      {:else}
-        <p class="dim">No members yet. Sign in with GitHub to be the first.</p>
-      {/if}
-    {:else if plot.kind === 'house'}
-      {@const h = town.homes.get(building)}
-      {@const g = h ? town.byId.get(h.id)?.g : undefined}
-      {#if g}
-        <p>
-          The home of <b>{g.login}</b>, one of the top 3 in {town.city.regions[plot.region]!.name} by
-          merit.
-        </p>
-        <button class="primary" onclick={() => ((building = null), show(g, 3))}
-          >See their Gitemon</button
+      {:else if !me}
+        <a class="btn primary btn-big" style="width:100%" href="/auth/login?next=/map"
+          >Sign in with GitHub to join</a
         >
       {:else}
-        <p>
-          Empty for now. It goes to one of the top 3 players by merit in {town.city.regions[
-            plot.region
-          ]!.name} — consistent GitHub work: active days, merged pull requests, reviews. You keep it while
-          you stay in the top 5.
-        </p>
+        <p class="dim">No members on the map yet.</p>
       {/if}
     {:else}
-      {@const svc = SERVICES[plot.slot]}
-      {#if svc === 'legend-hall'}
-        <p>
-          The island's 500 sealed legends. Walk near one to log it; stand near the legend of the day
-          to be blessed for 6 hours.
-        </p>
-        {#if me}<p><b>Your Legend Log:</b> {me.walk.seen.length} of 500 seen.</p>{:else}<p
-            class="dim"
+      {#if plot.kind === 'service' && SERVICES[plot.slot] === 'market'}<div
+          class="awning"
+        ></div>{/if}
+      <div class="skin-head">
+        <img class="icon" src={iconOf(plot)} alt="" onerror={dropImg} />
+        <h2>{name}</h2>
+      </div>
+      {#if plot.kind === 'house'}
+        {@const h = town.homes.get(building)}
+        {@const g = h ? town.byId.get(h.id)?.g : undefined}
+        {#if g}
+          <div class="plaque">
+            <Sprite {g} size={56} />
+            <p>
+              The home of <b>{g.login}</b>, one of the top 3 in {town.city.regions[plot.region]!
+                .name}
+              by merit.
+            </p>
+          </div>
+          <button class="primary" onclick={() => ((building = null), show(g, 3))}
+            >See their Gitemon</button
           >
-            Sign in to keep a Legend Log.
-          </p>{/if}
-      {:else if svc === 'dex-library'}
-        <p>Every Gitemon you catch goes into your Dex.</p>
-        {#if me}<button class="primary" onclick={() => ((building = null), go('/dex'))}
-            >Open your Dex</button
-          >{:else}<p class="dim">Sign in to start a Dex.</p>{/if}
-      {:else if svc === 'notice-board'}
-        {@const signs = boardSigns()}
-        <p>
-          Signs from the Merit Houses — what the island's best are working on, and who is hiring.
-        </p>
-        {#if signs.length}
-          <ul class="board">
-            {#each signs as sg}<li>
-                <b>{sg.login}</b> <span class="dim">({sg.region})</span> — {sg.text}
-              </li>{/each}
-          </ul>
-        {:else}<p class="dim">No signs yet.</p>{/if}
-      {:else if svc === 'gate-office'}
-        {#if me}
-          <p>
-            <b>Steps today:</b>
-            {Math.round(Math.max(0, me.walk.budget - walked))} of {me.walk.budget} m left{#if me.walk.streak}
-              · <b>Streak:</b> {me.walk.streak} {me.walk.streak === 1 ? 'day' : 'days'}{/if}
-          </p>
+        {:else}
+          <div class="plaque">
+            <p>
+              <b>Empty for now.</b> It goes to one of the top 3 players by merit in {town.city
+                .regions[plot.region]!.name} — consistent GitHub work: active days, merged pull requests,
+              reviews. You keep it while you stay in the top 5.
+            </p>
+          </div>
         {/if}
-        <p class="dim">
-          Real GitHub work — merged pull requests, reviews, active weeks — earns more steps. Walking
-          home is free.
-        </p>
-      {:else if svc === 'market'}
-        <p>
-          Closed for now. Cosmetic skins for your Gitemon will be sold here later — looks only,
-          never power.
-        </p>
       {:else}
-        <p>
-          Welcome to Gitemon Island. Sign in with GitHub and your Gitemon hatches. Tap the map to
-          walk, or steer with WASD, the arrow keys or the stick. Find the sealed legends; catch
-          other developers.
-        </p>
-        {#if !me}<a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a>{/if}
+        {@const svc = SERVICES[plot.slot]}
+        {#if svc === 'legend-hall'}
+          <div class="menu">
+            <p>
+              The island's 500 sealed legends. Walk near one to log it; stand near the legend of the
+              day to be blessed for 6 hours.
+            </p>
+            {#if me}<p><b>Your Legend Log:</b> {me.walk.seen.length} of 500 seen.</p>{:else}<p
+                class="dim"
+              >
+                Sign in to keep a Legend Log.
+              </p>{/if}
+          </div>
+        {:else if svc === 'dex-library'}
+          <p>Every Gitemon you catch goes into your Dex.</p>
+          {#if me}<button class="primary" onclick={() => ((building = null), go('/dex'))}
+              >Open your Dex</button
+            >{:else}<p class="dim">Sign in to start a Dex.</p>{/if}
+        {:else if svc === 'notice-board'}
+          {@const signs = boardSigns()}
+          {@const blanks = signs.length === 0 ? 3 : signs.length < 27 ? 1 : 0}
+          <p>
+            Signs from the Merit Houses — what the island's best are working on, and who is hiring.
+          </p>
+          <ul class="notes board-notes">
+            {#each signs as sg (sg.g.id)}
+              <li class="note">
+                <b>{sg.title}</b>{#if sg.project}{sg.project}{/if}
+                <span class="who"><Sprite g={sg.g} size={20} /> {sg.g.login} · {sg.region}</span>
+              </li>
+            {/each}
+            {#each Array.from({ length: blanks }) as _, i (i)}
+              <li class="note blank">
+                <b>Empty spot</b>Earn a Merit House to pin a sign here.
+              </li>
+            {/each}
+          </ul>
+        {:else if svc === 'gate-office'}
+          {#if me}
+            <p>
+              <b>Steps today:</b>
+              {Math.round(Math.max(0, me.walk.budget - walked))} of {me.walk.budget} m left{#if me.walk.streak}
+                · <b>Streak:</b> {me.walk.streak} {me.walk.streak === 1 ? 'day' : 'days'}{/if}
+            </p>
+          {/if}
+          <p class="dim">
+            Real GitHub work — merged pull requests, reviews, active weeks — earns more steps.
+            Walking home is free.
+          </p>
+        {:else if svc === 'market'}
+          <span class="tag">Closed</span>
+          <div class="menu" style="margin-top:12px">
+            <p>
+              Cosmetic skins for your Gitemon will be sold here later — looks only, never power.
+            </p>
+          </div>
+        {:else}
+          <div class="menu">
+            <p>
+              Welcome to Gitemon Island. Sign in with GitHub and your Gitemon hatches. Tap the map
+              to walk, or steer with WASD, the arrow keys or the stick. Find the sealed legends;
+              catch other developers.
+            </p>
+          </div>
+          {#if !me}<a
+              class="btn primary btn-big"
+              href="/auth/login?next=/map"
+              style="margin-top:12px">Sign in with GitHub</a
+            >{/if}
+        {/if}
       {/if}
     {/if}
   </section>
 {:else if picked?.special?.sealed}
-  <section class="sheet sealed" aria-label="A sealed legend">
+  <section class="sheet px-frame pop skin-tablet" aria-label="A sealed legend">
     <button
       class="close"
       onclick={() => {
@@ -777,7 +886,11 @@
     </p>
   </section>
 {:else if picked}
-  <section class="sheet" aria-label="Selected Gitemon">
+  <section
+    class="sheet px-frame pop skin-card"
+    style={cardFrame(picked)}
+    aria-label="Selected Gitemon"
+  >
     <button
       class="close"
       onclick={() => {
@@ -787,84 +900,85 @@
       }}
       aria-label="Close">×</button
     >
-    <div class="head">
-      <Sprite g={picked} size={96} />
-      <div>
+    <div class="card-face">
+      <div class="card-name">
         <h2>{picked.login}</h2>
-        <p class="dim">
-          {detail?.name ? detail.name + ' · ' : ''}{picked.st === 'c' ? 'Claimed' : 'Wild'}{picked.s
-            ? ' · ✦ Shiny'
-            : ''}
-        </p>
-        {#if picked.special}<p class="dim">
-            {picked.special.title ?? `${TIER_NAME[picked.special.tier]} legend`} · {picked.special
-              .earned
-              ? 'earned on merit'
-              : 'awake'}
-          </p>{/if}
-        {#if detail?.sign}<p class="signline">
-            🪧 {signText(detail.sign.template, detail.sign.project)}{#if detail.website}
-              · <a href={detail.website} rel="nofollow noopener" target="_blank">website</a>{/if}
-            {#if me && me.id !== picked.id}<button
-                class="link"
-                onclick={() => reportSign(picked!.id)}>report</button
-              >{/if}
-          </p>{/if}
-        <p class="lv">
-          Lv {picked.lv}{#if detail?.bonus}<span class="bonus"> +{detail.bonus}</span>{/if}
-        </p>
-        <p class="chips">
-          <span class="chip" style="background:{TYPE_INFO[picked.t1].colors[2]}"
-            >{TYPE_INFO[picked.t1].name}</span
-          >
-          {#if picked.t2}<span class="chip" style="background:{TYPE_INFO[picked.t2].colors[2]}"
-              >{TYPE_INFO[picked.t2].name}</span
-            >{/if}
-          <span class="chip plain">{SHAPE_NAME[picked.sh]}</span><span class="chip plain"
-            >Form {picked.f}</span
-          >
-        </p>
-      </div>
-    </div>
-    {#if detail}
-      <div class="stats">
-        {#each statKeys as k (k)}
-          <div class="stat" title={STAT_MEANING[k]}>
-            <span>{k}</span>
-            <div class="barbg"><i style="width:{detail.stats[k]}%"></i></div>
-            <b>{detail.stats[k]}</b>
-          </div>
-        {/each}
+        <span class="lv"
+          >Lv {picked.lv}{#if detail?.bonus}<span class="bonus"> +{detail.bonus}</span>{/if}</span
+        >
       </div>
       <p class="dim small">
-        {TYPE_INFO[picked.t1].biome}{detail.town ? ` · ${detail.town.name}` : ''} · caught by {detail.caughtCount}
+        {detail?.name ? detail.name + ' · ' : ''}{picked.st === 'c' ? 'Claimed' : 'Wild'}{picked.s
+          ? ' · ✦ Shiny'
+          : ''}{#if picked.special}
+          · {picked.special.title ?? `${TIER_NAME[picked.special.tier]} legend`} · {picked.special
+            .earned
+            ? 'earned on merit'
+            : 'awake'}{/if}
       </p>
-    {/if}
-    <div class="actions">
-      {#if me && picked.id === me.id}
-        <span class="dim">This is you.</span>
-      {:else if detail?.caughtByMe}
-        <span class="done">In your Dex{detail.caughtByMe.bonded ? ' · Bonded' : ''}</span>
-      {:else if !detail?.machine}
-        {#if me && walking && distanceTo(picked) > CATCH_M}
-          <button class="primary" disabled
-            >Walk closer to catch ({Math.round(distanceTo(picked))} m away)</button
-          >
-        {:else}
-          <button class="primary" disabled={busy} onclick={doCatch}
-            >{me
-              ? `Catch${me.catchesLeft != null ? ` (${me.catchesLeft} left today)` : ''}`
-              : 'Sign in to catch'}</button
-          >
-        {/if}
+      <div class="card-window" style="--ground:{groundOf(picked.t1)}">
+        <Sprite g={picked} size={104} />
+      </div>
+      <div class="chips">
+        <span class="chip" style={chip(picked.t1)}>{TYPE_INFO[picked.t1].name}</span>
+        {#if picked.t2}<span class="chip" style={chip(picked.t2)}>{TYPE_INFO[picked.t2].name}</span
+          >{/if}
+        <span class="chip">{SHAPE_NAME[picked.sh]}</span>
+        <span class="form-text">Form {picked.f} of 3</span>
+      </div>
+      {#if detail?.sign}<p class="signline">
+          <b>{signText(detail.sign.template, detail.sign.project)}</b>{#if detail.website}
+            · <a href={detail.website} rel="nofollow noopener" target="_blank">website</a>{/if}
+          {#if me && me.id !== picked.id}<button
+              class="bare link"
+              onclick={() => reportSign(picked!.id)}>report</button
+            >{/if}
+        </p>{/if}
+      {#if detail}
+        <div class="stats">
+          {#each statKeys as k (k)}
+            <div class="stat" title={STAT_MEANING[k]}>
+              <span>{k}</span>
+              <div class="meter"><i style="width:{detail.stats[k]}%"></i></div>
+              <b>{detail.stats[k]}</b>
+            </div>
+          {/each}
+        </div>
+        <p class="dim small">
+          {TYPE_INFO[picked.t1].biome}{detail.town ? ` · ${detail.town.name}` : ''} · caught by {detail.caughtCount}
+        </p>
       {/if}
-      <a class="btn" href={'/' + picked.login}>Profile</a>
+      <div class="actions">
+        {#if me && picked.id === me.id}
+          <span class="done">This is you.</span>
+        {:else if detail?.caughtByMe}
+          <span class="done">In your Dex{detail.caughtByMe.bonded ? ' · Bonded' : ''}</span>
+        {:else if !detail?.machine}
+          {#if me && walking && distanceTo(picked) > CATCH_M}
+            <button class="gold" disabled
+              >Walk closer to catch ({Math.round(distanceTo(picked))} m away)</button
+            >
+          {:else}
+            <button class="gold" disabled={busy} onclick={doCatch}
+              >{me
+                ? `Catch${me.catchesLeft != null ? ` (${me.catchesLeft} left today)` : ''}`
+                : 'Sign in to catch'}</button
+            >
+          {/if}
+        {/if}
+        <a class="btn sky" href={'/' + picked.login}>Profile</a>
+      </div>
     </div>
   </section>
 {/if}
 
 {#if panel}
-  <section class="panel" aria-label={panel}>
+  <section
+    class="panel px-frame pop"
+    class:skin-book={panel === 'dex'}
+    class:skin-ledger={panel === 'towns'}
+    aria-label={panel}
+  >
     <button class="close" onclick={() => go('/map')} aria-label="Close">×</button>
     {#if panel === 'dex'}
       <h2>Your Dex</h2>
@@ -904,11 +1018,14 @@
         {#if me.town}
           <p>
             You live in <b>{me.town.name}</b>.
-            <button class="link" onclick={leave} disabled={busy}>Move back to the village</button>
+            <button class="bare link" onclick={leave} disabled={busy}
+              >Move back to the village</button
+            >
           </p>
         {:else}
           <form class="found" onsubmit={found}>
             <input
+              class="field"
               bind:value={townName}
               maxlength="24"
               placeholder="Name a new town"
@@ -919,7 +1036,7 @@
           </form>
         {/if}
       {:else}
-        <p><a href="/auth/login?next=/towns">Sign in</a> to found or join a town.</p>
+        <a class="btn primary" href="/auth/login?next=/towns">Sign in to found or join a town</a>
       {/if}
       <ul class="towns">
         {#each towns as t (t.id)}
@@ -931,8 +1048,10 @@
                 {t.members === 1 ? 'member' : 'members'}</small
               >
             </div>
-            {#if me && me.town?.id !== t.id}<button disabled={busy} onclick={() => join(t)}
-                >Join</button
+            {#if me && me.town?.id !== t.id}<button
+                class="primary"
+                disabled={busy}
+                onclick={() => join(t)}>Join</button
               >{/if}
           </li>
         {:else}
@@ -941,13 +1060,24 @@
       </ul>
     {:else if panel === 'me' && me}
       <div class="head">
-        <Sprite g={me} size={96} />
+        <div
+          class="card-window"
+          style="--ground:{groundOf(me.t1)};width:112px;height:112px;margin:0"
+        >
+          <Sprite g={me} size={88} />
+        </div>
         <div>
           <h2>{me.login}</h2>
-          <p class="lv">
+          <p class="lv" style="font:700 17px var(--pixel)">
             Lv {me.lv}{#if me.bonus}<span class="bonus"> +{me.bonus} friendship</span>{/if}
           </p>
-          <p class="dim">{typeLine(me)} · {SHAPE_NAME[me.sh]} · Form {me.f}</p>
+          <div class="chips">
+            <span class="chip" style={chip(me.t1)}>{TYPE_INFO[me.t1].name}</span>
+            {#if me.t2}<span class="chip" style={chip(me.t2)}>{TYPE_INFO[me.t2].name}</span>{/if}
+          </div>
+          <p class="dim small">
+            {SHAPE_NAME[me.sh]} · <span class="form-text">Form {me.f} of 3</span>
+          </p>
         </div>
       </div>
       {#if me.legend && !me.legend.woken}
@@ -958,36 +1088,24 @@
             can see it is yours. Wake it to show it with your name, or remove it for good.
           </p>
           <div class="actions">
-            <button class="primary" disabled={busy} onclick={wakeLegend}>Wake it</button>
+            <button class="gold" disabled={busy} onclick={wakeLegend}>Wake it</button>
             <button disabled={busy} onclick={removeLegend}>Remove it</button>
           </div>
         </div>
       {/if}
       <div class="walkstats">
         <p>
-          <img
-            class="ico"
-            src="/ui/log.png"
-            alt=""
-            onerror={(e) => (e.currentTarget as HTMLElement).remove()}
-          /><span class="glyph"></span><b>Legend Log:</b>
+          <img class="ico" src="/ui/log.png" alt="" onerror={dropImg} /><span class="glyph"
+          ></span><b>Legend Log:</b>
           {me.walk.seen.length} of 500 seen{#each ['legendary', 'mythic', 'epic', 'rare'] as t}{#if me.walk.tally[t]}
               · {TIER_NAME[t as keyof typeof TIER_NAME]} {me.walk.tally[t]}{/if}{/each}
         </p>
         <p>
-          <img
-            class="ico"
-            src="/ui/steps.png"
-            alt=""
-            onerror={(e) => (e.currentTarget as HTMLElement).remove()}
-          /><span class="glyph"></span><b>Steps today:</b>
+          <img class="ico" src="/ui/steps.png" alt="" onerror={dropImg} /><span class="glyph"
+          ></span><b>Steps today:</b>
           {Math.round(Math.max(0, me.walk.budget - walked))} of {me.walk.budget} m left{#if me.walk.streak}
-            · <img
-              class="ico"
-              src="/ui/streak.png"
-              alt=""
-              onerror={(e) => (e.currentTarget as HTMLElement).remove()}
-            /><span class="glyph"></span><b>Streak:</b>
+            · <img class="ico" src="/ui/streak.png" alt="" onerror={dropImg} /><span class="glyph"
+            ></span><b>Streak:</b>
             {me.walk.streak}
             {me.walk.streak === 1 ? 'day' : 'days'}{/if}
         </p>
@@ -1009,12 +1127,13 @@
               >{/each}
           </select>
           {#if signTpl === 'building'}<input
+              class="field"
               bind:value={signProject}
               maxlength="32"
               placeholder="Project name"
               aria-label="Project name"
             />{/if}
-          <button disabled={busy} onclick={saveSign}>Save</button>
+          <button class="primary" disabled={busy} onclick={saveSign}>Save</button>
           <button disabled={busy} onclick={clearSign}>Remove</button>
         </div>
         <p class="dim small">
@@ -1028,7 +1147,7 @@
           : ''}.
       </p>
       <div class="actions">
-        <a class="btn" href={'/' + me.login}>Public profile</a>
+        <a class="btn sky" href={'/' + me.login}>Public profile</a>
         {#if me.hidden}
           <button class="primary" disabled={busy} onclick={() => release(false)}
             >Bring my Gitemon back</button
@@ -1043,4 +1162,6 @@
   </section>
 {/if}
 
-{#if toast}<div class="toast" role="status">{toast}</div>{/if}
+{#if toast}<div class="toast px-frame dialogue pop" role="status">
+    <img src="/favicon.png" alt="" /><span>{toast}</span>
+  </div>{/if}
