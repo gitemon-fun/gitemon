@@ -72,12 +72,28 @@ export interface Pieces {
   props: THREE.Object3D | null;
 }
 
+/**
+ * v14.1: at most 6 model downloads at once. Started together (~50), Chrome fails the last ones with
+ * ERR_INSUFFICIENT_RESOURCES (its in-flight limit per page) and those pieces never appear.
+ */
+let active = 0;
+const waiting: (() => void)[] = [];
+async function slot<T>(f: () => Promise<T>): Promise<T> {
+  if (active >= 6) await new Promise<void>((r) => waiting.push(r));
+  active++;
+  try {
+    return await f();
+  } finally {
+    active--;
+    waiting.shift()?.();
+  }
+}
+
 const cache = new Map<Key, Promise<THREE.Group | null>>();
 function load(loader: GLTFLoader, key: Key): Promise<THREE.Group | null> {
   let p = cache.get(key);
   if (!p) {
-    p = loader
-      .loadAsync(`/models/${key}.glb`)
+    p = slot(() => loader.loadAsync(`/models/${key}.glb`))
       .then((g) => {
         g.scene.traverse((o) => {
           const m = o as THREE.Mesh;
@@ -425,8 +441,7 @@ export async function loadPieces(
 
   // ---- v14.1 (V14-D15): street props — one file, a scene per prop, each prop drawn instanced ----
   jobs.push(
-    loader
-      .loadAsync('/models/props.glb')
+    slot(() => loader.loadAsync('/models/props.glb'))
       .then((g) => {
         const byKey = new Map<string, [number, number, number, number, number, number][]>();
         for (const p of townProps(isl)) {
