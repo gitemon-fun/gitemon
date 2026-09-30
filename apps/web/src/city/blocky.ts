@@ -1,7 +1,17 @@
 import * as THREE from 'three';
 import { voxelize } from '@gitemon/creature-gen';
-import { PAPER_MAX, gaitPose, hash32, paperTurn, type Gait } from '@gitemon/shared';
+import {
+  PAPER_MAX,
+  STRIDE,
+  STRIDE_TOY,
+  TOY,
+  gaitPose,
+  hash32,
+  paperTurn,
+  type Gait,
+} from '@gitemon/shared';
 import { CELL, gaitOf, specialAttr, speciesPixels, spriteKey, type Crowd } from './crowd';
+import type { Toys } from './toys';
 
 /**
  * v16 Pixel-block Gitemon (GRANDPLAN v16). Near the camera a creature's sprite gives way to its own
@@ -17,6 +27,10 @@ const DEPTH = 0.18;
 const IDLE_TURN = 0.4;
 /** how often the near set is chosen again (ms) */
 const PICK_MS = 300;
+/** v18: a 3D body's height as a share of its sprite's height (the drawing has empty space round it) */
+const TOY_H = 0.8;
+/** v18: how fast a 3D body turns toward where it faces (per second) */
+const TURN_RATE = 8;
 
 interface Shape {
   geo: THREE.BufferGeometry;
@@ -29,6 +43,10 @@ interface Body {
   phase: number;
   fit: number;
   used: number;
+  /** v18: a 3D body of the creature line (V18-D4); its texture is shared, never disposed here */
+  toy: boolean;
+  /** v18: the way a 3D body faces now (yaw, radians), eased toward where it walks */
+  face: number;
 }
 
 export class Blocky {
@@ -61,11 +79,16 @@ export class Blocky {
   );
   private tmpQ = new THREE.Quaternion();
   private tmpE = new THREE.Euler(0, 0, 0, 'YXZ');
+  /** v18: the 3D bodies arrived; the block bodies built before then are rebuilt as 3D */
+  private toysOn = false;
+  private lastTime = 0;
 
   constructor(
     private crowd: Crowd,
     /** at most this many bodies at once (phone 16, desktop 32) */
     private cap: number,
+    /** v18: the 3D creature line (null or not ready = blocks, V18-D4) */
+    private toys: Toys | null = null,
   ) {
     this.ghost.renderOrder = 10;
     this.ghost.frustumCulled = false;
@@ -132,6 +155,23 @@ export class Blocky {
     const have = this.bodies.get(i);
     if (have) return have;
     const g = this.crowd.at(i).g;
+    // v18 (V18-D4): a player of the creature line stands as the 3D model of its form
+    const tint = this.crowd.colourOf(i).tint;
+    const toy = this.toysOn && !g.special ? this.toys!.make(g.f, g, tint) : null;
+    if (toy) {
+      const b: Body = {
+        mesh: toy,
+        mat: toy.material as THREE.MeshLambertMaterial,
+        gait: gaitOf(g),
+        phase: (hash32(`crowd:${g.id}`) % 6283) / 1000,
+        fit: 1,
+        used: 0,
+        toy: true,
+        face: NaN,
+      };
+      this.bodies.set(i, b);
+      return b;
+    }
     const key = spriteKey(g);
     const shape = this.shape(key);
     const map = shape ? this.texture(i, key) : null;
@@ -147,6 +187,8 @@ export class Blocky {
       phase: (hash32(`crowd:${g.id}`) % 6283) / 1000,
       fit: shape.fit,
       used: 0,
+      toy: false,
+      face: 0,
     };
     this.bodies.set(i, b);
     return b;
@@ -202,8 +244,7 @@ export class Blocky {
         .filter(([i]) => !want.has(i))
         .sort((a, b) => a[1].used - b[1].used);
       for (const [i, b] of idle.slice(0, this.bodies.size - this.cap * 2)) {
-        b.mat.map?.dispose();
-        b.mat.dispose();
+        this.drop(b);
         this.bodies.delete(i);
       }
     }
@@ -224,6 +265,20 @@ export class Blocky {
     seeThrough: number | null = null,
   ) {
     const now = performance.now();
+    const dt = Math.min(0.1, Math.max(0, time - this.lastTime));
+    this.lastTime = time;
+    // v18: the 3D bodies just arrived — every body built as blocks is built again
+    if (!this.toysOn && this.toys?.ready) {
+      this.toysOn = true;
+      for (const i of this.active) {
+        this.group.remove(this.bodies.get(i)!.mesh);
+        this.crowd.setShown(i, true);
+      }
+      for (const b of this.bodies.values()) this.drop(b);
+      this.bodies.clear();
+      this.active.clear();
+      this.lastPick = -Infinity;
+    }
     if (now - this.lastPick > PICK_MS) {
       this.lastPick = now;
       this.pick(time, focus?.x ?? 0, focus?.z ?? 0, focus?.radius ?? 0, walker);
@@ -233,6 +288,11 @@ export class Blocky {
       if (!b) continue;
       const m = this.crowd.motion(i, time, right);
       const size = this.crowd.heightOf(i, grow);
+      if (b.toy) {
+        this.stand(b, m, size, time, dt, right, upScale);
+        b.mesh.renderOrder = i === seeThrough ? 11 : 0;
+        continue;
+      }
       const pose = gaitPose(b.gait, m.steps, m.moving, size, time, b.phase);
       const breath = (1 - m.moving) * (Math.sin(time * 1.8 + b.phase) * 0.5 + 0.5) * 0.03;
       // one drawing pixel in world units: the atlas cell (CELL px) spans `size` across
@@ -269,19 +329,59 @@ export class Blocky {
     } else if (this.ghost.parent) this.group.remove(this.ghost);
   }
 
+  /**
+   * v18 (V18-D3): a 3D body walks the toy walk and faces the way it goes; standing, it turns to show a
+   * three-quarter view to the camera. The step phase is the sprite's, rescaled to the toy's stride.
+   */
+  private stand(
+    b: Body,
+    m: ReturnType<Crowd['motion']>,
+    size: number,
+    time: number,
+    dt: number,
+    right: THREE.Vector3,
+    upScale: number,
+  ) {
+    const steps = (m.steps * STRIDE[b.gait]) / STRIDE_TOY;
+    const pose = gaitPose(TOY, steps, m.moving, size, time, b.phase);
+    const breath = (1 - m.moving) * (Math.sin(time * 1.8 + b.phase) * 0.5 + 0.5) * 0.03;
+    const walks = m.moving > 0 && (m.dx !== 0 || m.dz !== 0);
+    // toward the camera = right × up; standing, turned a little off it so its shape shows
+    const want = walks
+      ? Math.atan2(m.dx, m.dz)
+      : Math.atan2(-right.z, right.x) + IDLE_TURN * (b.phase > Math.PI ? 1 : -1);
+    if (Number.isNaN(b.face)) b.face = want;
+    const d = Math.atan2(Math.sin(want - b.face), Math.cos(want - b.face));
+    b.face += d * Math.min(1, dt * TURN_RATE);
+    this.tmpE.set(pose.lean, b.face, pose.roll, 'YXZ');
+    b.mesh.quaternion.copy(this.tmpQ.setFromEuler(this.tmpE));
+    const h = size * TOY_H;
+    b.mesh.scale.set(pose.sx * h, pose.sy * (1 + breath) * h * upScale, pose.sx * h);
+    b.mesh.position.set(m.x, m.y + pose.lift, m.z);
+  }
+
+  /** free a body's own GPU things (a 3D body shares its geometry and texture with the others) */
+  private drop(b: Body) {
+    if (!b.toy) b.mat.map?.dispose();
+    b.mat.dispose();
+  }
+
   /** the crowd indices standing as blocks right now (tests, ?debug) */
   get standing(): number[] {
     return [...this.active];
+  }
+  /** v18: how many of them stand as 3D bodies (?debug, the G1 check) */
+  get toyCount(): number {
+    let n = 0;
+    for (const i of this.active) if (this.bodies.get(i)?.toy) n++;
+    return n;
   }
 
   dispose() {
     this.group.remove(this.ghost);
     (this.ghost.material as THREE.Material).dispose();
     for (const i of this.active) this.crowd.setShown(i, true);
-    for (const b of this.bodies.values()) {
-      b.mat.map?.dispose();
-      b.mat.dispose();
-    }
+    for (const b of this.bodies.values()) this.drop(b);
     for (const s of this.shapes.values()) s?.geo.dispose();
     this.bodies.clear();
     this.shapes.clear();

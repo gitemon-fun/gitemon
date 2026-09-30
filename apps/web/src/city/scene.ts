@@ -28,6 +28,7 @@ import { Walk, Walkable } from './walker';
 import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
 import { Blocky } from './blocky';
+import { Toys } from './toys';
 import { buildTown, plotHeight, type Town } from './town';
 import { airField } from './air';
 import { recoverFromSkew, report } from '../lib/clientlog';
@@ -197,6 +198,7 @@ export class CityScene {
   destroy() {
     cancelAnimationFrame(this.raf);
     this.blocky?.dispose();
+    this.toys?.dispose();
     this.renderer.dispose();
   }
 
@@ -1205,6 +1207,8 @@ export class CityScene {
   private solids: { x: number; z: number; r: number; top: number }[] = [];
   /** v16: near creatures as pixel blocks (GRANDPLAN v16) */
   private blocky: Blocky | null = null;
+  /** v18: the 3D creature line, loaded once (V18-D4) */
+  private toys: Toys | null = null;
   private walker: { i: number; home: Spot; walk: Walk | null; x: number; z: number } | null = null;
   private walkCity: Island | null = null;
   /** called about twice a second while walking, with where the walker is */
@@ -1470,7 +1474,9 @@ export class CityScene {
       this.blocky.dispose();
     }
     const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
-    this.blocky = new Blocky(this.crowd, coarse ? 16 : 32);
+    this.toys ??= new Toys();
+    void this.toys.load().then(() => (this.dirty = true));
+    this.blocky = new Blocky(this.crowd, coarse ? 16 : 32, this.toys);
     this.scene.add(this.blocky.group);
     this.dirty = true;
   }
@@ -1591,6 +1597,13 @@ export class CityScene {
   readonly stats = { frames: 0, ms: 0, buildMs: 0, townMs: 0, layoutMs: 0, homes: 0, piecesMs: 0 };
   get info() {
     const r = this.renderer.info.render;
-    return { calls: r.calls, triangles: r.triangles, ...this.stats };
+    return {
+      calls: r.calls,
+      triangles: r.triangles,
+      ...this.stats,
+      // v18: bodies near the camera, and how many of them are 3D (G1)
+      bodies: this.blocky?.standing.length ?? 0,
+      toys: this.blocky?.toyCount ?? 0,
+    };
   }
 }

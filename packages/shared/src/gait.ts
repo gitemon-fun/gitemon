@@ -54,6 +54,15 @@ export const STRIDE: Record<Gait, number> = {
 /** v10 (V10-D5): a player stands a little bigger with standing (the V7-D6 merit bands) */
 export const standingStep = (merit: number) => (merit >= 60 ? 1.12 : merit >= 35 ? 1.06 : 1);
 
+/**
+ * v18 (V18-D3): the one walk every 3D creature shares — a toy walked across a table. No skeleton: the whole
+ * body lifts on each step, squashes a little as it lands, rocks from side to side (a new side each step) and
+ * leans into travel. Only the 3D bodies use it; sprites keep their species gait (GAITS is unchanged).
+ */
+export const TOY = 'toy' as const;
+/** step length of the toy walk as a share of the creature's height */
+export const STRIDE_TOY = 0.5;
+
 export interface GaitPose {
   /** how far it rises off the ground (world units) */
   lift: number;
@@ -73,7 +82,7 @@ export interface GaitPose {
  * `time` in seconds and `phase` its per-creature offset (only the float bob uses them).
  */
 export function gaitPose(
-  gait: Gait,
+  gait: Gait | typeof TOY,
   steps: number,
   moving: number,
   size: number,
@@ -103,6 +112,14 @@ export function gaitPose(
   } else if (gait === 'slither') {
     p.sway = m * 0.07;
     p.sx = 1 + 0.05 * m * Math.sin(2 * Math.PI * steps);
+  } else if (gait === TOY) {
+    const air = Math.sin(Math.PI * f);
+    const land = 1 - smooth(0, 0.15, Math.min(f, 1 - f));
+    p.lift = m * air * 0.08 * size;
+    p.sy = 1 + m * (0.04 * air - 0.08 * land);
+    p.sx = 1 + m * (0.06 * land - 0.02 * air);
+    p.roll = m * 0.09 * Math.sin(Math.PI * steps);
+    p.lean = 0.06 * m;
   } else {
     p.lift = 0.25 * size + Math.sin(time * 2.2 + phase * 5) * 0.05 * size;
     p.lean = 0.1 * m;

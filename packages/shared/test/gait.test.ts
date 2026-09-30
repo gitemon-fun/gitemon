@@ -58,3 +58,23 @@ describe('gaitPose (v16)', () => {
     expect(gaitPose('hop', 0.02, 1, 2).sy).toBeLessThan(1);
   });
 });
+
+// v18 (V18-D3): the universal toy walk of the 3D bodies
+describe('toy walk (v18)', () => {
+  it('lands with feet down on whole steps and lifts between them', () => {
+    expect(gaitPose('toy', 3, 1, 2).lift).toBeCloseTo(0);
+    expect(gaitPose('toy', 3.5, 1, 2).lift).toBeCloseTo(0.16);
+  });
+  it('squashes as it lands and rocks to a new side each step', () => {
+    expect(gaitPose('toy', 4.02, 1, 2).sy).toBeLessThan(1);
+    expect(gaitPose('toy', 4.02, 1, 2).sx).toBeGreaterThan(1);
+    expect(gaitPose('toy', 0.5, 1, 2).roll).toBeCloseTo(0.09);
+    expect(gaitPose('toy', 1.5, 1, 2).roll).toBeCloseTo(-0.09);
+  });
+  it('stands still with no motion at all', () => {
+    const p = gaitPose('toy', 3.5, 0, 2);
+    expect([p.lift, p.roll, p.lean, p.sway, p.sx, p.sy].map((v) => v + 0)).toEqual([
+      0, 0, 0, 0, 1, 1,
+    ]);
+  });
+});
