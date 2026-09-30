@@ -696,7 +696,7 @@
   <div class="hint px-frame dialogue">
     <img src="/favicon.png" alt="" /><span>Building the island…</span>
   </div>
-{:else if !picked && !panel && !hintGone}
+{:else if !picked && !panel && building == null && !hintGone}
   <div class="hint px-frame dialogue" class:raised={walking}>
     <img src="/favicon.png" alt="" /><span
       >{sealed.toLocaleString('en-US')} sealed legends sleep on the island. The stronger a Gitemon, the
