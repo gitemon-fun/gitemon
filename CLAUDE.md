@@ -4,8 +4,8 @@
 
 > **Read first:** `.claude/ai_context/` is the **source of truth for intent + design, kept in sync
 > with the code** (drift is a bug, fixed in the same change).
-> Entry: `.claude/ai_context/development/v17/implementation/00_INDEX.md` · Live cursor: `…/STATUS.md`
-> · Blueprint: `…/v17/GRANDPLAN.md (v2–v16 = base, still binding)` · Locked decisions: `…/DECISIONS.md` · Raw intent:
+> Entry: `.claude/ai_context/development/v18/implementation/00_INDEX.md` · Live cursor: `…/STATUS.md`
+> · Blueprint: `…/v18/GRANDPLAN.md (v2–v17 = base, still binding)` · Locked decisions: `…/DECISIONS.md` · Raw intent:
 > `.claude/ai_context/raw_materials/` · Methodology: `.claude/FRAMEWORK.md`.
 > **When docs disagree, `DECISIONS.md` wins.**
 > ⚠ This file is tracked in a **public** repo. It must stay safe-as-public: no internal paths beyond
@@ -42,6 +42,7 @@
 - A trusted fetcher (`scripts/drain.ts`, on a timer) hatches requested players, refreshes stale ones and runs the daily job (`scripts/daily.ts`: layout, legend spots, Merit House holders).
 - Signed-in players walk (tap or steer, daily step budget), log legends, get blessed, catch, keep a Dex, set a house sign.
 - 3D models and icons come from the private art repo (`scripts/models.sh`); a fresh clone falls back to simple shapes.
+- v18 3D creature line: near the camera every player stands as a 3D model of its form (`apps/web/src/city/toys.ts`, models from the private art set), coloured per type in the shader, walking one shared toy walk (`gaitPose` 'toy'); without the art set the v16 pixel blocks stay.
 - v15 Island UI: one kit, `apps/web/public/island.css` (served at `/island.css`), dresses the map and the Worker's pages alike — parchment, wood, pixel edges, a skin per building. Text colours on fills are measured (`readable()` in `packages/shared/src/ui.ts`, tests in `ui.test.ts`); no dark-mode variant.
 
 ## Authoritative decisions (mirror — ledger is `…/DECISIONS.md`)
