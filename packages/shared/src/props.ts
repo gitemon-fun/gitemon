@@ -231,14 +231,14 @@ export function townProps(isl: Island): Prop[] {
   });
 
   // a wooden fence along the back of every mini plaza (the side away from the town), open where a
-  // road comes in and wherever a wild group, water or a slope is
+  // road comes in and wherever a wild group, water or a steep slope is
   const wild = [...isl.spots.flat(), ...isl.dens.flat()];
   for (const m of isl.miniPlazas) {
     const R = m.r + 2.6;
     const road = isl.roads[m.region] ?? [];
     const out0 = Math.atan2(m.z, m.x);
     const step = (FENCE_LEN * 0.98) / R;
-    const n = Math.floor((Math.PI * 0.8) / step);
+    const n = Math.floor((Math.PI * 0.5) / step); // the back half: the town side stays open
     const placed: number[] = [];
     for (let k = -n; k <= n; k++) {
       const a = out0 + k * step;
@@ -249,7 +249,7 @@ export function townProps(isl: Island): Prop[] {
         z + Math.cos(a) * s * (FENCE_LEN / 2),
       ]);
       const hs = ends.map(([ex, ez]) => gridHeight(isl.grid, ex!, ez!));
-      if (hs.some((h) => h < WATER_Y + 0.3 || Math.abs(h - m.y) > 1.2)) continue;
+      if (hs.some((h) => h < WATER_Y + 0.3) || Math.abs(hs[0]! - hs[1]!) > 0.7) continue;
       if (roadDist(road, x, z) < 4.5) continue;
       if (wild.some((s) => Math.hypot(s.x - x, s.z - z) < 2.5)) continue;
       out.push({ key: 'fence', x, y: Math.min(...hs) - 0.05, z, yaw: -a });
