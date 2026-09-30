@@ -14,6 +14,7 @@ import {
   type Spot,
   PAPER_MAX,
   paperTurn,
+  patrolSteps,
 } from '@gitemon/shared';
 
 /**
@@ -28,15 +29,72 @@ export interface Placed {
   spot: Spot;
 }
 
-const CELL = 80;
+export const CELL = 80;
 const COLS = 25;
 /** world width of one atlas cell at form 2 */
-const CELL_W = 2.5;
+export const CELL_W = 2.5;
 const FORM_SCALE = { 1: 0.82, 2: 1, 3: 1.3 } as const;
 /** walking speed (radians of the patrol cycle per second) */
-const SPEED = 0.32;
+export const SPEED = 0.32;
 
-const spriteKey = (g: MapGitemon) => `${g.t1}:${g.f}:${g.sh}:${g.s}:${g.special?.species ?? ''}`;
+export const spriteKey = (g: MapGitemon) =>
+  `${g.t1}:${g.f}:${g.sh}:${g.s}:${g.special?.species ?? ''}`;
+
+/** one species drawing, cropped to its drawn pixels, and how many atlas pixels one of its pixels spans */
+export interface SpeciesPixels {
+  w: number;
+  h: number;
+  /** RGBA, row-major; marking pixels carry alpha 191 (recoloured per player, V10-D5) */
+  rgba: Uint8ClampedArray;
+  fit: number;
+}
+const species = new Map<string, SpeciesPixels | null>();
+/** v16: the atlas and the pixel-block creatures read the same cropped drawing */
+export function speciesPixels(key: string): SpeciesPixels | null {
+  if (species.has(key)) return species.get(key)!;
+  const [t1, f, sh, s, one] = key.split(':');
+  // a fixed representative id: the per-creature hue jitter is applied as an instance tint
+  const sp = compose(art, {
+    id: 7,
+    t1: t1 as MapGitemon['t1'],
+    t2: null,
+    sh: sh as MapGitemon['sh'],
+    f: Number(f) as 1 | 2 | 3,
+    s: Number(s) as 0 | 1,
+    sp: one || null,
+  });
+  // v10: marking pixels carry alpha 191 so the shader can recolour them per player (V10-D5)
+  const full = toRgba(sp, 1, 191);
+  // crop to the drawn pixels and scale every species to one standing height, so a small drawing
+  // does not read as a small creature (size is the form's job, not the source image's)
+  let x0 = sp.size,
+    y0 = sp.size,
+    x1 = -1,
+    y1 = -1;
+  for (let y = 0; y < sp.size; y++)
+    for (let x = 0; x < sp.size; x++)
+      if (sp.px[y * sp.size + x]) {
+        x0 = Math.min(x0, x);
+        x1 = Math.max(x1, x);
+        y0 = Math.min(y0, y);
+        y1 = Math.max(y1, y);
+      }
+  if (x1 < 0) {
+    species.set(key, null);
+    return null;
+  }
+  const w = x1 - x0 + 1;
+  const h = y1 - y0 + 1;
+  const rgba = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++)
+    rgba.set(
+      full.subarray(((y0 + y) * sp.size + x0) * 4, ((y0 + y) * sp.size + x0 + w) * 4),
+      y * w * 4,
+    );
+  const out = { w, h, rgba, fit: Math.min((CELL - 2) / w, (CELL * 0.8) / h) };
+  species.set(key, out);
+  return out;
+}
 
 function buildAtlas(list: Placed[]) {
   const keys = new Map<string, number>();
@@ -52,47 +110,21 @@ function buildAtlas(list: Placed[]) {
   ctx.imageSmoothingEnabled = false;
   const tmp = document.createElement('canvas');
   for (const [k, i] of keys) {
-    const [t1, f, sh, s, one] = k.split(':');
-    // a fixed representative id: the per-creature hue jitter is applied as an instance tint
-    const sp = compose(art, {
-      id: 7,
-      t1: t1 as MapGitemon['t1'],
-      t2: null,
-      sh: sh as MapGitemon['sh'],
-      f: Number(f) as 1 | 2 | 3,
-      s: Number(s) as 0 | 1,
-      sp: one || null,
-    });
-    tmp.width = sp.size;
-    tmp.height = sp.size;
-    // v10: marking pixels carry alpha 191 so the shader can recolour them per player (V10-D5)
-    tmp.getContext('2d')!.putImageData(new ImageData(toRgba(sp, 1, 191), sp.size, sp.size), 0, 0);
-    // crop to the drawn pixels and scale every species to one standing height, so a small drawing
-    // does not read as a small creature (size is the form's job, not the source image's)
-    let x0 = sp.size,
-      y0 = sp.size,
-      x1 = -1,
-      y1 = -1;
-    for (let y = 0; y < sp.size; y++)
-      for (let x = 0; x < sp.size; x++)
-        if (sp.px[y * sp.size + x]) {
-          x0 = Math.min(x0, x);
-          x1 = Math.max(x1, x);
-          y0 = Math.min(y0, y);
-          y1 = Math.max(y1, y);
-        }
-    if (x1 < 0) continue;
-    const bw = x1 - x0 + 1;
-    const bh = y1 - y0 + 1;
-    const fit = Math.min((CELL - 2) / bw, (CELL * 0.8) / bh);
-    const w = Math.round(bw * fit);
-    const h = Math.round(bh * fit);
+    const sp = speciesPixels(k);
+    if (!sp) continue;
+    tmp.width = sp.w;
+    tmp.height = sp.h;
+    tmp
+      .getContext('2d')!
+      .putImageData(new ImageData(new Uint8ClampedArray(sp.rgba), sp.w, sp.h), 0, 0);
+    const w = Math.round(sp.w * sp.fit);
+    const h = Math.round(sp.h * sp.fit);
     ctx.drawImage(
       tmp,
-      x0,
-      y0,
-      bw,
-      bh,
+      0,
+      0,
+      sp.w,
+      sp.h,
       (i % COLS) * CELL + (CELL - w) / 2,
       Math.floor(i / COLS) * CELL + CELL - h,
       w,
@@ -118,7 +150,7 @@ const GLOW: Record<string, [number, number, number]> = {
   rare: [0.4, 0.95, 0.55],
 };
 /** [size multiplier, sealed flag, glow r, g, b] for one resident */
-function specialAttr(g: MapGitemon): [number, number, number, number, number] {
+export function specialAttr(g: MapGitemon): [number, number, number, number, number] {
   const sp = g.special;
   if (!sp && g.at) {
     // v6 blessing: not a silhouette (sealed = 1) but a glow halo (2), bigger with the streak
@@ -135,12 +167,12 @@ function specialAttr(g: MapGitemon): [number, number, number, number, number] {
 }
 
 /** v10 (V10-D3): the gait of a resident's species; placeholder art and unknown species hop */
-function gaitOf(g: MapGitemon): Gait {
+export function gaitOf(g: MapGitemon): Gait {
   const k = g.special?.species ?? `${g.t1}-${g.f}`;
   return art.gaits?.[k] ?? art.gaits?.[`${g.t1}-${g.f}`] ?? 'hop';
 }
 /** v10 (V10-D5): the marking colour of a player with a second type, as [hue 0..1, sat, on] */
-function accentAttr(g: MapGitemon): [number, number, number] {
+export function accentAttr(g: MapGitemon): [number, number, number] {
   if (g.special || !g.t2 || g.t2 === g.t1) return [0, 0, 0];
   const n = parseInt(TYPE_INFO[g.t2].colors[0].slice(1), 16);
   const [r, gg, b] = [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
@@ -160,7 +192,8 @@ function accentAttr(g: MapGitemon): [number, number, number] {
   return [h / 6, Math.max(0.35, sat), 1];
 }
 /** a resident's standing height before zoom growth (size is the form's and the standing's job) */
-const baseScale = (g: MapGitemon) => FORM_SCALE[g.f] * (g.special ? 1 : standingStep(g.m ?? 0));
+export const baseScale = (g: MapGitemon) =>
+  FORM_SCALE[g.f] * (g.special ? 1 : standingStep(g.m ?? 0));
 
 const STRIDE_BY_ID = GAITS.map((k) => STRIDE[k].toFixed(3));
 
@@ -239,6 +272,7 @@ export class Crowd {
   private material: THREE.ShaderMaterial;
   private walk: THREE.InstancedBufferAttribute;
   private gait: THREE.InstancedBufferAttribute;
+  private show: THREE.InstancedBufferAttribute;
   /** v10: the player's own walker — steps counted on the CPU from the distance it moved */
   private driven = new Map<
     number,
@@ -315,6 +349,8 @@ export class Crowd {
     const iGlowB = new THREE.InstancedBufferAttribute(glowB, 1);
     this.gait = new THREE.InstancedBufferAttribute(gait, 4);
     const iAccent = new THREE.InstancedBufferAttribute(accent, 3);
+    // v16: 0 = a pixel-block body stands here instead; the blob shadow keeps drawing
+    this.show = new THREE.InstancedBufferAttribute(new Float32Array(n).fill(1), 1);
 
     const quad = new THREE.InstancedBufferGeometry();
     quad.setAttribute(
@@ -338,6 +374,7 @@ export class Crowd {
     quad.setAttribute('iGlowB', iGlowB);
     quad.setAttribute('iGait', this.gait);
     quad.setAttribute('iAccent', iAccent);
+    quad.setAttribute('iShow', this.show);
     quad.instanceCount = n;
 
     this.material = new THREE.ShaderMaterial({
@@ -351,6 +388,7 @@ export class Crowd {
         attribute vec4 iSpec;
         attribute float iGlowB;
         attribute vec3 iAccent;
+        attribute float iShow;
         uniform float uUpScale;
         varying vec3 vAccent;
         varying vec2 vUv;
@@ -361,7 +399,7 @@ export class Crowd {
         void main() {
           float moving; float dirSign;
           vec3 base = walkPos(moving, dirSign);
-          float size = ${CELL_W.toFixed(2)} * iTint.w * iSpec.x * uGrow;
+          float size = ${CELL_W.toFixed(2)} * iTint.w * iSpec.x * uGrow * iShow;
           float lift; float sx; float sy; float roll; float lean; float sway;
           gaitPose(${CELL_W.toFixed(2)} * iTint.w * iSpec.x, size, moving, dirSign, lift, sx, sy, roll, lean, sway);
           // a slow breath while standing
@@ -561,6 +599,68 @@ export class Crowd {
     const spec = this.sprites.geometry.getAttribute('iSpec') as THREE.InstancedBufferAttribute;
     spec.setX(i, 0);
     spec.needsUpdate = true;
+  }
+
+  /** v16: show or hide one sprite (a pixel-block body stands in its place); its blob shadow stays */
+  setShown(i: number, on: boolean) {
+    this.show.setX(i, on ? 1 : 0);
+    this.show.addUpdateRange(i, 1);
+    this.show.needsUpdate = true;
+  }
+  /** v8: a sculpted model stands here (hide() was called) */
+  modelled(i: number) {
+    return (
+      (this.sprites.geometry.getAttribute('iSpec') as THREE.InstancedBufferAttribute).getX(i) === 0
+    );
+  }
+  /** v16: the per-creature colour the shader applies: tint [r, g, b] and markings [hue, sat, on] */
+  colourOf(i: number): { tint: [number, number, number]; accent: [number, number, number] } {
+    const t = this.sprites.geometry.getAttribute('iTint') as THREE.InstancedBufferAttribute;
+    const a = this.sprites.geometry.getAttribute('iAccent') as THREE.InstancedBufferAttribute;
+    return { tint: [t.getX(i), t.getY(i), t.getZ(i)], accent: [a.getX(i), a.getY(i), a.getZ(i)] };
+  }
+  /**
+   * v16: where a resident is and how it is moving right now — the vertex shader's maths on the CPU
+   * (walkPos + the step phase), for the pixel-block body that stands in for its sprite.
+   */
+  motion(i: number, time: number, right: THREE.Vector3) {
+    const p = this.list[i]!;
+    const d = this.driven.get(i);
+    if (d) {
+      return {
+        x: p.spot.x,
+        y: p.spot.y,
+        z: p.spot.z,
+        moving: d.moving,
+        dir: d.dir,
+        steps: d.steps,
+        dx: d.dx,
+        dz: d.dz,
+      };
+    }
+    const amp = this.walk.getZ(i);
+    const tx = this.walk.getX(i);
+    const tz = this.walk.getY(i);
+    const phase = (hash32(`crowd:${p.g.id}`) % 6283) / 1000;
+    const t = time * SPEED + phase;
+    const k = Math.sin(t) * PATROL_K;
+    const s = Math.max(-1, Math.min(1, k));
+    const moving = amp > 0 && Math.abs(k) <= 1 ? 1 : 0;
+    const v = moving ? Math.cos(t) : Math.sin(t);
+    const dir = Math.sign(tx * v * right.x + tz * v * right.z + 1e-4);
+    const gait = GAITS[this.gait.getX(i)] ?? 'hop';
+    const stride = STRIDE[gait] * this.heightOf(i, 1);
+    const steps = amp > 0 ? patrolSteps(t, amp * Math.hypot(tx, tz), stride) : 0;
+    return {
+      x: p.spot.x + tx * amp * s,
+      y: p.spot.y,
+      z: p.spot.z + tz * amp * s,
+      moving,
+      dir,
+      steps,
+      dx: tx * v,
+      dz: tz * v,
+    };
   }
 
   /** A tapped resident stops walking, so it stays where the ring is. */

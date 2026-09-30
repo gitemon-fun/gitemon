@@ -29,6 +29,7 @@ import {
 import { Walk, Walkable } from './walker';
 import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
+import { Blocky } from './blocky';
 import { buildTown, plotHeight, type Town } from './town';
 import { airField } from './air';
 import { recoverFromSkew, report } from '../lib/clientlog';
@@ -197,6 +198,7 @@ export class CityScene {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    this.blocky?.dispose();
     this.renderer.dispose();
   }
 
@@ -1208,6 +1210,8 @@ export class CityScene {
   onGround: ((x: number, z: number) => boolean) | null = null;
   private walkable: Walkable | null = null;
   private solids: { x: number; z: number; r: number; top: number }[] = [];
+  /** v16: near creatures as pixel blocks (GRANDPLAN v16) */
+  private blocky: Blocky | null = null;
   private walker: { i: number; home: Spot; walk: Walk | null; x: number; z: number } | null = null;
   private walkCity: Island | null = null;
   /** called about twice a second while walking, with where the walker is */
@@ -1467,6 +1471,14 @@ export class CityScene {
     }
     this.crowd = new Crowd(placed);
     this.scene.add(this.crowd.shadows, this.crowd.sprites);
+    // v16 (V16-D2): phones carry fewer block bodies than desktops
+    if (this.blocky) {
+      this.scene.remove(this.blocky.group);
+      this.blocky.dispose();
+    }
+    const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+    this.blocky = new Blocky(this.crowd, coarse ? 16 : 32);
+    this.scene.add(this.blocky.group);
     this.dirty = true;
   }
 
@@ -1545,6 +1557,21 @@ export class CityScene {
       const right = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       // v13.2: in the walk view your Gitemon's cut-out turns toward the way it walks
       this.crowd.update(this.clock, right, this.grow, this.upScale, this.modeT);
+      // v16 (V16-D2): pixel blocks near your walker in the walk view, or near the map's centre close up
+      const focus =
+        this.modeT > 0.5 && this.walker
+          ? { x: this.walker.x, z: this.walker.z, radius: 26 }
+          : this.zoom >= 1.6
+            ? { x: this.target.x, z: this.target.z, radius: 22 }
+            : null;
+      this.blocky?.update(
+        this.clock,
+        right,
+        this.grow,
+        this.upScale,
+        focus,
+        this.walker?.i ?? null,
+      );
     }
     const t = performance.now();
     this.renderer.render(this.scene, this.camera);
