@@ -1091,12 +1091,15 @@ async function spa(c: Context<AppEnv>) {
 // Never edge-cached: the page names this deploy's scripts, which the next deploy removes.
 app.get('/', async (c) => {
   if (getCookie(c, 'gm_session')) return spa(c);
-  const [res, lqip] = await Promise.all([
+  const [res, lqip, kit] = await Promise.all([
     c.env.STATIC.fetch(new Request(new URL('/app.html', c.req.url))),
     c.env.STATIC.fetch(new Request(new URL('/poster-lqip.json', c.req.url))),
+    // v15 (G3): the Island UI kit rides inside the landing page — one round trip less before first paint
+    c.env.STATIC.fetch(new Request(new URL('/island.css', c.req.url))),
   ]);
   const blur = lqip.ok ? await lqip.json<{ wide?: string; tall?: string }>().catch(() => ({})) : {};
-  return new Response(landingShell(await res.text(), blur), {
+  const css = kit.ok ? await kit.text() : null;
+  return new Response(landingShell(await res.text(), blur, css), {
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
   });
 });

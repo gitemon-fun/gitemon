@@ -21,7 +21,6 @@ const esc = (s: string) =>
  * stable URL (a page cached for an hour never points at a stylesheet a deploy removed).
  */
 const HEAD = `<link rel="preload" href="/fonts/pixelify-sans.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/fonts/nunito.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/island.css">`;
 
 /** a type chip whose text colour is measured (V15-D10) */
@@ -201,7 +200,11 @@ const landingCard =
  * `/` for a signed-out visitor: the island app with the landing's title and share tags, a still picture
  * of the island that shows before the 3D world is ready (V14-D5), and the welcome card.
  */
-export function landingShell(app: string, lqip: { wide?: string; tall?: string } = {}): string {
+export function landingShell(
+  app: string,
+  lqip: { wide?: string; tall?: string } = {},
+  kit: string | null = null,
+): string {
   const d = esc(LANDING.description);
   // the tiny blurred pictures (made with the still pictures) paint with the page itself
   const ok = (u?: string) => (u && /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(u) ? u : null);
@@ -211,7 +214,13 @@ export function landingShell(app: string, lqip: { wide?: string; tall?: string }
     (wide ? `.poster{background:#0b0d10 url(${wide}) center/auto 100% no-repeat}` : '') +
     (tall ? `@media (orientation:portrait){.poster{background-image:url(${tall})}}` : '');
   const t = esc(LANDING.title);
+  // the kit inline (never a closing style tag inside it: it is our own file, checked anyway)
+  const inline = kit && !/<\/style/i.test(kit) ? kit : null;
   return app
+    .replace(
+      /<link rel="stylesheet" href="\/island\.css"\s*\/?>/,
+      inline ? `<style>${inline}</style>` : '$&',
+    )
     .replace(/<title>[^<]*<\/title>/, `<title>${t}</title>`)
     .replace(/(<meta\s+name="description"\s+content=")[^"]*(")/, `$1${d}$2`)
     .replace(/(<link\s+rel="canonical"\s+href=")[^"]*(")/, '$1https://gitemon.fun/$2')
