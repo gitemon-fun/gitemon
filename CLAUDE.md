@@ -42,6 +42,7 @@
 - A trusted fetcher (`scripts/drain.ts`, on a timer) hatches requested players, refreshes stale ones and runs the daily job (`scripts/daily.ts`: layout, legend spots, Merit House holders).
 - Signed-in players walk (tap or steer, daily step budget), log legends, get blessed, catch, keep a Dex, set a house sign.
 - 3D models and icons come from the private art repo (`scripts/models.sh`); a fresh clone falls back to simple shapes.
+- v15 Island UI: one kit, `apps/web/public/island.css` (served at `/island.css`), dresses the map and the Worker's pages alike — parchment, wood, pixel edges, a skin per building. Text colours on fills are measured (`readable()` in `packages/shared/src/ui.ts`, tests in `ui.test.ts`); no dark-mode variant.
 
 ## Authoritative decisions (mirror — ledger is `…/DECISIONS.md`)
 
