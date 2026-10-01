@@ -1,7 +1,23 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { STRIDE_TOY, TOY, TYPE_INFO, gaitPose, type Life, type MapGitemon } from '@gitemon/shared';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { art } from '@gitemon/art';
+import {
+  MARKS,
+  STRIDE_TOY,
+  TOY,
+  TYPE_INFO,
+  gaitPose,
+  lookOf,
+  lookPivots,
+  piecesFor,
+  type Life,
+  type Look,
+  type MapGitemon,
+  type TypeId,
+} from '@gitemon/shared';
+import { buildPieces, type Anchors } from './pieces';
 
 /**
  * v18 3D creature line (GRANDPLAN v18). One Meshy model per form — the mascot as a kitten, a winged fox
@@ -25,6 +41,11 @@ interface Rig {
   earR: THREE.Vector3;
   /** z of the back feet, the middle of the body, the front feet */
   zs: THREE.Vector3;
+  /** v19: the hip line, and where pieces sit */
+  hip: number;
+  anchors: Anchors;
+  /** v19: the way the face looks, as a yaw off +Z (Meshy's heads look a little to the side of the body) */
+  faceYaw: number;
 }
 
 /**
@@ -63,7 +84,26 @@ const BOW = 0.26;
  * The recolour, in the fragment shader: grey and white texels are multiplied by the body colour, the
  * saturated magenta gems take the gem colour with their own light and shade, and the dark eyes stay dark.
  */
-function recolour(mat: THREE.MeshLambertMaterial, body: THREE.Color, gem: THREE.Color, rig: Rig) {
+function recolour(
+  mat: THREE.MeshLambertMaterial,
+  body: THREE.Color,
+  gem: THREE.Color,
+  deep: THREE.Color,
+  markC: THREE.Color,
+  rig: Rig,
+  look: Look,
+) {
+  // v19 (01): where the turning points end up once the look reshapes the body
+  const v = (a: THREE.Vector3) => [a.x, a.y, a.z] as [number, number, number];
+  const lp = lookPivots(look, {
+    neck: v(rig.neck),
+    tailRoot: v(rig.tailRoot),
+    earL: v(rig.earL),
+    earR: v(rig.earR),
+    zs: v(rig.zs),
+    hip: rig.hip,
+  });
+  const V3 = (a: [number, number, number]) => new THREE.Vector3(...a);
   const walk: Walk = {
     uSteps: { value: 0 },
     uMoving: { value: 0 },
@@ -79,12 +119,24 @@ function recolour(mat: THREE.MeshLambertMaterial, body: THREE.Color, gem: THREE.
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uBody = { value: body };
     sh.uniforms.uGem = { value: gem };
+    sh.uniforms.uDeep = { value: deep };
+    sh.uniforms.uMarkC = { value: markC };
     Object.assign(sh.uniforms, walk, {
-      uNeck: { value: rig.neck },
-      uTailRoot: { value: rig.tailRoot },
-      uEarL: { value: rig.earL },
-      uEarR: { value: rig.earR },
-      uZs: { value: rig.zs },
+      // the life turns use the reshaped points; the reshape itself uses the model's own
+      uNeck: { value: V3(lp.neck) },
+      uTailRoot: { value: V3(lp.tailRoot) },
+      uEarL: { value: V3(lp.earL) },
+      uEarR: { value: V3(lp.earR) },
+      uZs: { value: V3(lp.zs) },
+      uZs0: { value: rig.zs },
+      uHip: { value: rig.hip },
+      uNeckY: { value: rig.neck.y },
+      uLift: { value: lp.lift },
+      uNeckShift: { value: lp.neckShift },
+      uLookA: { value: new THREE.Vector4(look.head, look.ear, look.tail, look.leg) },
+      uLookB: {
+        value: new THREE.Vector4(look.width, look.length, MARKS.indexOf(look.mark), look.markScale),
+      },
     });
     // the same turns for the normals (beginnormal) and the positions (begin_vertex)
     const turns = (v: string, pivot: boolean) => {
@@ -104,9 +156,14 @@ function recolour(mat: THREE.MeshLambertMaterial, body: THREE.Color, gem: THREE.
         `#include <common>
         attribute vec2 aLeg;
         attribute vec4 aPart;
-        uniform float uSteps, uMoving, uTail, uBreath, uSit, uBow;
+        attribute float aAcc;
+        uniform float uSteps, uMoving, uTail, uBreath, uSit, uBow, uHip, uLift, uNeckShift;
         uniform vec2 uHead, uEar;
-        uniform vec3 uNeck, uTailRoot, uEarL, uEarR, uZs;
+        uniform vec3 uNeck, uTailRoot, uEarL, uEarR, uZs, uZs0;
+        uniform vec4 uLookA, uLookB;
+        varying vec3 vRest;
+        varying float vHeadW;
+        varying float vAcc;
         vec3 tRotX( vec3 v, float a ) { float c = cos( a ), s = sin( a ); return vec3( v.x, c * v.y - s * v.z, s * v.y + c * v.z ); }
         vec3 tRotY( vec3 v, float a ) { float c = cos( a ), s = sin( a ); return vec3( c * v.x + s * v.z, v.y, -s * v.x + c * v.z ); }
         vec3 tRotZ( vec3 v, float a ) { float c = cos( a ), s = sin( a ); return vec3( c * v.x - s * v.y, s * v.x + c * v.y, v.z ); }`,
@@ -120,6 +177,24 @@ function recolour(mat: THREE.MeshLambertMaterial, body: THREE.Color, gem: THREE.
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
+        vRest = position;
+        vHeadW = aPart.x;
+        vAcc = aAcc;
+        // v19 (01): the type's look reshapes the rest pose before any motion. Body length about the body's
+        // middle (the head moves with the neck instead of stretching) and width; legs stretch below the hip
+        // line and everything above it shifts; then the head grows about the neck, the ears about their
+        // base, the tail about its root — the life turns below use the moved points (lookPivots).
+        {
+          float hW = aPart.x;
+          float zL = uZs0.y + ( transformed.z - uZs0.y ) * uLookB.y;
+          transformed.z = mix( zL, transformed.z + uNeckShift, hW );
+          transformed.x *= mix( uLookB.x, 1.0, hW );
+          transformed.y = transformed.y < uHip ? transformed.y * uLookA.w : transformed.y + uLift;
+          transformed = uNeck + ( transformed - uNeck ) * mix( 1.0, uLookA.x, hW );
+          vec3 eb = aPart.z > 0.0 ? uEarR : uEarL;
+          transformed = eb + ( transformed - eb ) * mix( 1.0, uLookA.y, abs( aPart.z ) );
+          transformed = uTailRoot + ( transformed - uTailRoot ) * mix( 1.0, uLookA.z, aPart.y );
+        }
         // legs: one step = one pair forward; the pair that moves forward lifts its feet
         float legPh = 3.14159265 * uSteps;
         transformed.z += uMoving * ${SWING.toFixed(4)} * sin( legPh ) * aLeg.x * aLeg.y;
@@ -139,7 +214,38 @@ function recolour(mat: THREE.MeshLambertMaterial, body: THREE.Color, gem: THREE.
     sh.fragmentShader = sh.fragmentShader
       .replace(
         '#include <common>',
-        '#include <common>\nuniform vec3 uBody;\nuniform vec3 uGem;\nuniform float uBlink;',
+        `#include <common>
+        uniform vec3 uBody, uGem, uDeep, uMarkC;
+        uniform float uBlink, uHip, uNeckY;
+        uniform vec3 uZs0;
+        uniform vec4 uLookB;
+        varying vec3 vRest;
+        varying float vHeadW;
+        varying float vAcc;
+        float tHash( vec3 p ) { return fract( sin( dot( p, vec3( 127.1, 311.7, 74.7 ) ) ) * 43758.5453 ); }
+        // v19 (01): the type's markings, from the rest position (so they stay on the body as it moves)
+        float tMark( vec3 p ) {
+          float kind = uLookB.z;
+          float sc = uLookB.w;
+          float body = ( 1.0 - vHeadW ) * smoothstep( uHip - 0.02, uHip + 0.06, p.y )
+            * ( 1.0 - smoothstep( uNeckY - 0.04, uNeckY + 0.02, p.y ) );
+          if ( kind < 0.5 ) return 0.0;
+          if ( kind < 1.5 ) return body * step( 0.58, fract( p.z * 7.0 * sc ) );
+          if ( kind < 2.5 ) {
+            vec3 q = p * 9.0 * sc;
+            vec3 c = floor( q );
+            vec3 o = vec3( tHash( c ), tHash( c + 3.1 ), tHash( c + 7.7 ) ) * 0.5 + 0.25;
+            float d = length( fract( q ) - o );
+            return body * step( 0.45, tHash( c + 1.3 ) ) * ( 1.0 - smoothstep( 0.2, 0.27, d ) );
+          }
+          if ( kind < 3.5 )
+            return body * smoothstep( uHip + 0.1, uHip + 0.17, p.y )
+              * smoothstep( uZs0.x - 0.08, uZs0.x, p.z ) * ( 1.0 - smoothstep( uZs0.z, uZs0.z + 0.08, p.z ) );
+          if ( kind < 4.5 ) return 1.0 - smoothstep( uHip * 0.45, uHip * 0.6, p.y );
+          if ( kind < 5.5 ) return -vHeadW * smoothstep( uZs0.z, uZs0.z + 0.12, p.z );
+          return -( 1.0 - vHeadW ) * ( 1.0 - smoothstep( uHip + 0.04, uHip + 0.12, p.y ) )
+            * step( uHip * 0.8, p.y );
+        }`,
       )
       .replace(
         '#include <map_fragment>',
@@ -157,12 +263,19 @@ function recolour(mat: THREE.MeshLambertMaterial, body: THREE.Color, gem: THREE.
             * smoothstep( 0.12, 0.25, c.r );
           float lum = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
           vec3 bodyC = c * uBody;
+          // markings: a deeper shade (positive) or a pale one (negative: mask, belly) on body texels only
+          float mk = tMark( vRest ) * ( 1.0 - gem ) * smoothstep( 0.3, 0.45, hi );
+          bodyC = mk > 0.0 ? mix( bodyC, c * uMarkC, mk * 0.9 ) : mix( bodyC, c * mix( uBody, vec3( 1.0 ), 0.75 ), -mk );
           vec3 gemC = uGem * clamp( lum * 2.6, 0.25, 1.4 );
-          diffuseColor.rgb *= mix( bodyC, gemC, gem );
+          vec3 col = mix( bodyC, gemC, gem );
+          // v19 (03): the pieces are flat colours, not the texture
+          if ( vAcc > 0.5 )
+            col = vAcc < 1.5 ? uGem : vAcc < 2.5 ? uDeep : vAcc < 3.5 ? uBody : vAcc < 4.5 ? vec3( 0.93, 0.88, 0.78 ) : uGem * 1.7;
+          diffuseColor.rgb *= col;
         #endif`,
       );
   };
-  mat.customProgramCacheKey = () => 'toy-recolour';
+  mat.customProgramCacheKey = () => 'toy-recolour-v19';
 }
 
 /** the motion's inputs, set every frame by the body that uses the material (applyLife) */
@@ -242,22 +355,48 @@ export class Toys {
     return this.src.has(f);
   }
 
-  /** a body of form `f` in this creature's colours, standing on its base, 1 unit tall, facing +Z */
+  /** v19 (03): the model of a form with a type's pieces merged in, built once per form and type */
+  private geos = new Map<string, THREE.BufferGeometry>();
+  private geoFor(f: Form, t: TypeId, look: Look, s: Src): THREE.BufferGeometry {
+    const key = `${f}:${t}`;
+    const have = this.geos.get(key);
+    if (have) return have;
+    const pieces = buildPieces(piecesFor(look, f), s.rig.anchors, s.rig.faceYaw);
+    let geo = s.geo;
+    if (pieces) {
+      pieces.setIndex([...Array(pieces.getAttribute('position').count).keys()]);
+      const merged = mergeGeometries([s.geo, pieces]);
+      if (!merged) console.warn(`toys: pieces for ${key} did not merge`);
+      geo = merged ?? s.geo;
+      geo.computeBoundingSphere();
+    }
+    this.geos.set(key, geo);
+    return geo;
+  }
+
+  /** a body of form `f` in this creature's colours and its type's look, standing on its base, 1 unit tall, facing +Z */
   make(f: Form, g: MapGitemon, shade: [number, number, number]): THREE.Mesh | null {
     const s = this.src.get(f);
     if (!s) return null;
     const t1 = TYPE_INFO[g.t1];
+    const look = lookOf(art.looks, g.t1);
     const body = new THREE.Color(t1.colors[1]).multiply(new THREE.Color(...shade));
     const gem = new THREE.Color(g.t2 && g.t2 !== g.t1 ? TYPE_INFO[g.t2].colors[0] : t1.colors[0]);
+    const deep = new THREE.Color(t1.colors[0]);
+    // markings: between the type's main and dark colours, so they read on the light body
+    const markC = new THREE.Color(t1.colors[0]).lerp(new THREE.Color(t1.colors[2]), 0.5);
     const mat = new THREE.MeshLambertMaterial({ map: s.map });
-    recolour(mat, body, gem, s.rig);
-    const mesh = new THREE.Mesh(s.geo, mat);
+    recolour(mat, body, gem, deep, markC, s.rig, look);
+    const mesh = new THREE.Mesh(this.geoFor(f, g.t1, look, s), mat);
     // like the v16 blocks: the crowd's blob shadow stays under it, so no shadow-map pass (budget, G4)
     mesh.receiveShadow = true;
     return mesh;
   }
 
   dispose() {
+    for (const [k, geo] of this.geos)
+      if (geo !== this.src.get(Number(k[0]) as Form)?.geo) geo.dispose();
+    this.geos.clear();
     for (const s of this.src.values()) {
       s.geo.dispose();
       s.map?.dispose();
@@ -278,13 +417,19 @@ function normalise(root: THREE.Object3D, form: Form): Src | null {
   // meshopt stores positions and normals as small normalised integers: turn them into floats first,
   // or the transform below is clamped to -1…1 and the body is pulled into streaks
   const geo = m.geometry.clone();
-  for (const name of ['position', 'normal']) {
+  // (v19: the uv too, so the pieces — plain floats — can be merged into the same geometry)
+  for (const name of ['position', 'normal', 'uv']) {
     const a = geo.getAttribute(name);
-    if (!a || a.array instanceof Float32Array) continue;
-    const f = new Float32Array(a.count * 3);
-    for (let k = 0; k < a.count; k++) f.set([a.getX(k), a.getY(k), a.getZ(k)], k * 3);
-    geo.setAttribute(name, new THREE.BufferAttribute(f, 3));
+    if (!a || (a.array instanceof Float32Array && !a.normalized)) continue;
+    const n = a.itemSize;
+    const f = new Float32Array(a.count * n);
+    for (let k = 0; k < a.count; k++)
+      f.set(n === 2 ? [a.getX(k), a.getY(k)] : [a.getX(k), a.getY(k), a.getZ(k)], k * n);
+    geo.setAttribute(name, new THREE.BufferAttribute(f, n));
   }
+  // only what the shader reads: extra attributes would stop the pieces merging
+  for (const name of Object.keys(geo.attributes))
+    if (!['position', 'normal', 'uv'].includes(name)) geo.deleteAttribute(name);
   geo.applyMatrix4(m.matrixWorld);
   const fit = () => {
     geo.computeBoundingBox();
@@ -296,6 +441,11 @@ function normalise(root: THREE.Object3D, form: Form): Src | null {
   fit();
   const feet = rigLegs(geo, form, fit);
   const rig = rigParts(geo, form, feet);
+  // v19 (03): the body's own vertices carry no piece colour
+  geo.setAttribute(
+    'aAcc',
+    new THREE.BufferAttribute(new Float32Array(geo.getAttribute('position').count), 1),
+  );
   geo.computeBoundingSphere();
   const mat = (
     Array.isArray(m.material) ? m.material[0] : m.material
@@ -311,7 +461,7 @@ function rigLegs(
   geo: THREE.BufferGeometry,
   form: Form,
   fit: () => void,
-): { zb: number; zf: number } | null {
+): { zb: number; zf: number; turn: number } | null {
   const pos = geo.getAttribute('position');
   const n = pos.count;
   const none = () => {
@@ -327,7 +477,8 @@ function rigLegs(
   const mid = (a: number[], b: number[]) => [(a[0]! + b[0]!) / 2, (a[1]! + b[1]!) / 2];
   const back = mid(feet[0]!, feet[1]!);
   const front = mid(feet[2]!, feet[3]!);
-  geo.rotateY(-Math.atan2(front[0]! - back[0]!, front[1]! - back[1]!));
+  const turn = Math.atan2(front[0]! - back[0]!, front[1]! - back[1]!);
+  geo.rotateY(-turn);
   fit();
   // the feet again, in the turned and centred model
   const g2: [number, number][] = [];
@@ -362,7 +513,7 @@ function rigLegs(
     out[k * 2 + 1] = Math.pow(1 - y / hip, 0.8) * (1 - t * t * (3 - 2 * t));
   }
   geo.setAttribute('aLeg', new THREE.BufferAttribute(out, 2));
-  return { zb: (bl[1] + br[1]) / 2, zf: (fl[1] + fr[1]) / 2 };
+  return { zb: (bl[1] + br[1]) / 2, zf: (fl[1] + fr[1]) / 2, turn };
 }
 
 /**
@@ -375,7 +526,7 @@ function rigLegs(
 function rigParts(
   geo: THREE.BufferGeometry,
   form: Form,
-  feet: { zb: number; zf: number } | null,
+  feet: { zb: number; zf: number; turn: number } | null,
 ): Rig {
   const pos = geo.getAttribute('position');
   const n = pos.count;
@@ -434,12 +585,71 @@ function rigParts(
     out.set([head, tail, Math.sign(x - tx) * earW, chest], k * 4);
   }
   geo.setAttribute('aPart', new THREE.BufferAttribute(out, 4));
+
+  // v19 (03): where pieces sit. The face looks where Meshy's front was before the body was turned onto +Z.
+  const faceYaw = -(feet?.turn ?? 0);
+  const face = new THREE.Vector3(Math.sin(faceYaw), 0, Math.cos(faceYaw));
+  let crownY = neckY;
+  let brow = new THREE.Vector3(tx, neckY + 0.2, tz + 0.1);
+  let browD = -Infinity;
+  for (let k = 0; k < n; k++) {
+    if (out[k * 4]! < 0.9) continue;
+    const x = pos.getX(k);
+    const y = pos.getY(k);
+    if (Math.abs(x - tx) < 0.05 && Math.abs(out[k * 4 + 2]!) < 0.05) crownY = Math.max(crownY, y);
+  }
+  const headMid = new THREE.Vector3(tx, (neckY + crownY) / 2, tz);
+  const p = new THREE.Vector3();
+  for (let k = 0; k < n; k++) {
+    if (out[k * 4]! < 0.9) continue;
+    p.set(pos.getX(k), pos.getY(k), pos.getZ(k));
+    if (p.y < headMid.y + 0.04 || p.y > crownY - 0.06) continue;
+    const d = p.clone().sub(headMid).dot(face);
+    if (d > browD) [browD, brow] = [d, p.clone()];
+  }
+  // the shoulders: the body's half-width just behind the front legs, at the top of the body
+  let half = 0.12;
+  for (let k = 0; k < n; k++) {
+    const y = pos.getY(k);
+    if (out[k * 4]! > 0.1 || y < hip || y > neckY || Math.abs(pos.getZ(k) - zf) > 0.08) continue;
+    half = Math.max(half, Math.abs(pos.getX(k)));
+  }
+  // the tail's tip: the tail point farthest from its root
+  let tip = new THREE.Vector3(0, hip + 0.15, zb - 0.3);
+  let tipD = -1;
+  for (let k = 0; k < n; k++) {
+    if (out[k * 4 + 1]! < 0.6) continue;
+    p.set(pos.getX(k), pos.getY(k), pos.getZ(k));
+    const d = p.distanceTo(tailRoot);
+    if (d > tipD) [tipD, tip] = [d, p.clone()];
+  }
+  // the back: over the hips, behind the mascot's own crystals — the top of the body there (crystal tips that
+  // rise above the neck line are not the body)
+  let backY = hip + 0.1;
+  for (let k = 0; k < n; k++) {
+    const y = pos.getY(k);
+    if (Math.abs(pos.getX(k)) > 0.05 || Math.abs(pos.getZ(k) - zb) > 0.05) continue;
+    if (out[k * 4]! > 0.05 || out[k * 4 + 1]! > 0.3 || y > neckY + 0.02) continue;
+    backY = Math.max(backY, y);
+  }
+
+  const anchors: Anchors = {
+    crown: new THREE.Vector3(tx, crownY - 0.03, tz),
+    brow: brow.addScaledVector(face, -0.01),
+    back: new THREE.Vector3(0, backY - 0.02, zb),
+    shoulder: new THREE.Vector3(half * 0.85, neckY - 0.06, zf - 0.02),
+    tail: tip,
+    tailDir: tip.clone().sub(tailRoot).normalize(),
+  };
   return {
     neck,
     tailRoot,
     earL: ear(-1),
     earR: ear(1),
     zs: new THREE.Vector3(zb, (zb + zf) / 2, zf),
+    hip,
+    anchors,
+    faceYaw,
   };
 }
 

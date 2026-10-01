@@ -1,4 +1,4 @@
-import type { Gait, Shape } from '@gitemon/shared';
+import type { Gait, Look, Shape, TypeId } from '@gitemon/shared';
 
 /**
  * An art set is one half-body template per shape (the left half; it is mirrored). Each template
@@ -33,6 +33,8 @@ export interface ArtSet {
   species?: Record<string, PixelSprite>;
   /** v10 (V10-D3): how each species moves, keyed like `species`; absent = hop. */
   gaits?: Record<string, Gait>;
+  /** v19 (V19-D2): how each type's 3D Gitemon differs from the base model; absent = the base model. */
+  looks?: Partial<Record<TypeId, Look>>;
   /** Big per-biome landmark sprites for the map, keyed by type. */
   landmarks?: Record<string, PixelSprite>;
 }
