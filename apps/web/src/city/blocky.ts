@@ -11,7 +11,7 @@ import {
   type Gait,
 } from '@gitemon/shared';
 import { CELL, gaitOf, specialAttr, speciesPixels, spriteKey, type Crowd } from './crowd';
-import type { Toys } from './toys';
+import type { Toys, Walk } from './toys';
 
 /**
  * v16 Pixel-block Gitemon (GRANDPLAN v16). Near the camera a creature's sprite gives way to its own
@@ -344,6 +344,12 @@ export class Blocky {
   ) {
     const steps = (m.steps * STRIDE[b.gait]) / STRIDE_TOY;
     const pose = gaitPose(TOY, steps, m.moving, size, time, b.phase);
+    // build 06: the legs swing in step (toys.ts vertex shader)
+    const walk = b.mat.userData.walk as Walk | undefined;
+    if (walk) {
+      walk.uSteps.value = steps;
+      walk.uMoving.value = m.moving;
+    }
     const breath = (1 - m.moving) * (Math.sin(time * 1.8 + b.phase) * 0.5 + 0.5) * 0.03;
     const walks = m.moving > 0 && (m.dx !== 0 || m.dz !== 0);
     // toward the camera = right × up; standing, turned a little off it so its shape shows
