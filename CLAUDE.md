@@ -43,6 +43,7 @@
 - Signed-in players walk (tap or steer, daily step budget), log legends, get blessed, catch, keep a Dex, set a house sign.
 - 3D models and icons come from the private art repo (`scripts/models.sh`); a fresh clone falls back to simple shapes.
 - v18 3D creature line: near the camera every player stands as a 3D model of its form (`apps/web/src/city/toys.ts`, models from the private art set), coloured per type in the shader, walking one shared toy walk (`gaitPose` 'toy'); without the art set the v16 pixel blocks stay.
+- v19 Variety and progression: each type's 3D look (proportions, markings, pieces at form 2 / 3) comes from `ArtSet.looks` in the private art set (`packages/shared/src/look.ts` = its shape); an evolution moment plays once per rise (`seen_form`, migration 0011); `/ladder` shows what work earns (`ladder.ts`); a rank earned on merit never looks like a legend.
 - v15 Island UI: one kit, `apps/web/public/island.css` (served at `/island.css`), dresses the map and the Worker's pages alike — parchment, wood, pixel edges, a skin per building. Text colours on fills are measured (`readable()` in `packages/shared/src/ui.ts`, tests in `ui.test.ts`); no dark-mode variant.
 
 ## Authoritative decisions (mirror — ledger is `…/DECISIONS.md`)
