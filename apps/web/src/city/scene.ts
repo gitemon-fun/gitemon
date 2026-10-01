@@ -941,6 +941,8 @@ export class CityScene {
       }
       if (best >= 0) {
         c.stop(best, this.clock);
+        // build 08: a 3D Gitemon is happy to be tapped
+        this.blocky?.cheer(best);
         const p = c.at(best);
         this.select(p);
         this.onPick(p);

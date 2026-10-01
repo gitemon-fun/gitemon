@@ -60,8 +60,11 @@ export const standingStep = (merit: number) => (merit >= 60 ? 1.12 : merit >= 35
  * leans into travel. Only the 3D bodies use it; sprites keep their species gait (GAITS is unchanged).
  */
 export const TOY = 'toy' as const;
-/** step length of the toy walk as a share of the creature's height */
-export const STRIDE_TOY = 0.5;
+/**
+ * step length of the toy walk as a share of the creature's (sprite) height — build 08: short steps, so the
+ * leg swing that matches it stays small and the feet seem to grip the ground
+ */
+export const STRIDE_TOY = 0.22;
 
 export interface GaitPose {
   /** how far it rises off the ground (world units) */

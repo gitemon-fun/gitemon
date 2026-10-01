@@ -4,14 +4,17 @@ import {
   PAPER_MAX,
   STRIDE,
   STRIDE_TOY,
-  TOY,
   gaitPose,
   hash32,
+  lifeCheer,
+  lifeInit,
+  lifeStep,
   paperTurn,
   type Gait,
+  type Life,
 } from '@gitemon/shared';
 import { CELL, gaitOf, specialAttr, speciesPixels, spriteKey, type Crowd } from './crowd';
-import type { Toys, Walk } from './toys';
+import { applyLife, type Toys } from './toys';
 
 /**
  * v16 Pixel-block Gitemon (GRANDPLAN v16). Near the camera a creature's sprite gives way to its own
@@ -27,10 +30,6 @@ const DEPTH = 0.18;
 const IDLE_TURN = 0.4;
 /** how often the near set is chosen again (ms) */
 const PICK_MS = 300;
-/** v18: a 3D body's height as a share of its sprite's height (the drawing has empty space round it) */
-const TOY_H = 0.8;
-/** v18: how fast a 3D body turns toward where it faces (per second) */
-const TURN_RATE = 8;
 
 interface Shape {
   geo: THREE.BufferGeometry;
@@ -45,8 +44,8 @@ interface Body {
   used: number;
   /** v18: a 3D body of the creature line (V18-D4); its texture is shared, never disposed here */
   toy: boolean;
-  /** v18: the way a 3D body faces now (yaw, radians), eased toward where it walks */
-  face: number;
+  /** v18 build 08: a 3D body's life (life.ts) — where it faces, its head, tail, ears, eyes, actions */
+  life: Life | null;
 }
 
 export class Blocky {
@@ -167,7 +166,7 @@ export class Blocky {
         fit: 1,
         used: 0,
         toy: true,
-        face: NaN,
+        life: null,
       };
       this.bodies.set(i, b);
       return b;
@@ -188,7 +187,7 @@ export class Blocky {
       fit: shape.fit,
       used: 0,
       toy: false,
-      face: 0,
+      life: null,
     };
     this.bodies.set(i, b);
     return b;
@@ -330,8 +329,10 @@ export class Blocky {
   }
 
   /**
-   * v18 (V18-D3): a 3D body walks the toy walk and faces the way it goes; standing, it turns to show a
-   * three-quarter view to the camera. The step phase is the sprite's, rescaled to the toy's stride.
+   * v18 (V18-D3, build 08): a 3D body walks the toy walk and faces the way it goes; standing, it turns to show
+   * a three-quarter view to the camera. Its life (life.ts) eases it in and out of walking and moves its head,
+   * tail, ears and eyes; applyLife (toys.ts) poses it. The step phase is the sprite's, rescaled to the toy's
+   * stride.
    */
   private stand(
     b: Body,
@@ -343,27 +344,19 @@ export class Blocky {
     upScale: number,
   ) {
     const steps = (m.steps * STRIDE[b.gait]) / STRIDE_TOY;
-    const pose = gaitPose(TOY, steps, m.moving, size, time, b.phase);
-    // build 06: the legs swing in step (toys.ts vertex shader)
-    const walk = b.mat.userData.walk as Walk | undefined;
-    if (walk) {
-      walk.uSteps.value = steps;
-      walk.uMoving.value = m.moving;
-    }
-    const breath = (1 - m.moving) * (Math.sin(time * 1.8 + b.phase) * 0.5 + 0.5) * 0.03;
     const walks = m.moving > 0 && (m.dx !== 0 || m.dz !== 0);
     // toward the camera = right × up; standing, turned a little off it so its shape shows
-    const want = walks
-      ? Math.atan2(m.dx, m.dz)
-      : Math.atan2(-right.z, right.x) + IDLE_TURN * (b.phase > Math.PI ? 1 : -1);
-    if (Number.isNaN(b.face)) b.face = want;
-    const d = Math.atan2(Math.sin(want - b.face), Math.cos(want - b.face));
-    b.face += d * Math.min(1, dt * TURN_RATE);
-    this.tmpE.set(pose.lean, b.face, pose.roll, 'YXZ');
-    b.mesh.quaternion.copy(this.tmpQ.setFromEuler(this.tmpE));
-    const h = size * TOY_H;
-    b.mesh.scale.set(pose.sx * h, pose.sy * (1 + breath) * h * upScale, pose.sx * h);
-    b.mesh.position.set(m.x, m.y + pose.lift, m.z);
+    const camYaw = Math.atan2(-right.z, right.x);
+    const want = walks ? Math.atan2(m.dx, m.dz) : camYaw + IDLE_TURN * (b.phase > Math.PI ? 1 : -1);
+    const L = (b.life ??= lifeInit(Math.floor(b.phase * 1e6), time, want));
+    lifeStep(L, { dt, time, moving: walks ? m.moving : 0, want, camYaw, steps });
+    applyLife(b.mesh, L, steps, size, { x: m.x, y: m.y, z: m.z }, upScale, time);
+  }
+
+  /** build 08: a tap on a creature — a 3D body wags and hops */
+  cheer(i: number) {
+    const L = this.bodies.get(i)?.life;
+    if (L) lifeCheer(L, this.lastTime);
   }
 
   /** free a body's own GPU things (a 3D body shares its geometry and texture with the others) */
