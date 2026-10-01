@@ -810,3 +810,19 @@ body.welcoming .hint {
     font-size: 24px;
   }
 }
+
+/* v19 build 02: the way to the next form, in the Me panel */
+.evo {
+  margin-top: 6px;
+}
+.evo-bar {
+  height: 8px;
+  border: 2px solid var(--ink, #3b2a1a);
+  background: #f3e6c4;
+  max-width: 220px;
+}
+.evo-bar span {
+  display: block;
+  height: 100%;
+  background: #6bbf59;
+}

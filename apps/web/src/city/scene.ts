@@ -1299,6 +1299,16 @@ export class CityScene {
   get walkerHome(): Spot | null {
     return this.walker?.home ?? null;
   }
+  /**
+   * v19 build 02: the evolution moment — the follow view comes close to your Gitemon, which rises and grows from
+   * its old form into its new one in a burst of light. Resolves when it is over (at once without a walker).
+   */
+  async evolve(from: 1 | 2 | 3): Promise<void> {
+    if (!this.walker || !this.blocky) return;
+    this.setFollow(true);
+    window.dispatchEvent(new CustomEvent('gitemon:sound', { detail: 'evolve' }));
+    await this.blocky.evolve(this.walker.i, from);
+  }
   /** plan a walk to (x, z); returns its length in metres, or null when there is no way there */
   planWalk(x: number, z: number): number | null {
     if (!this.walker || !this.walkable) return null;

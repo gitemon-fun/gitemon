@@ -1,7 +1,10 @@
 import {
+  LEGEND_SEATS,
   SHAPE_NAME,
   STAT_MEANING,
   TYPE_INFO,
+  levelRungs,
+  meritRungs,
   readable,
   type Stats,
   type TypeId,
@@ -187,7 +190,7 @@ const landingCard =
 <div class="welcome-creatures" aria-hidden="true">${'<span></span>'.repeat(9)}</div>
 <div class="welcome-btns"><a class="btn primary btn-big welcome-go" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn btn-big welcome-look" id="welcome-look" href="/map">Look around first</a></div>
 <ul class="welcome-beats">
-<li><img src="/ui/blessing.png" alt=""><span><b>Hatch.</b> Your languages pick your creature and its colours. No two look the same.</span></li>
+<li><img src="/ui/blessing.png" alt=""><span><b>Hatch.</b> Your languages pick your creature’s colours and shape, and it grows new pieces as it evolves.</span></li>
 <li><img src="/ui/steps.png" alt=""><span><b>Walk.</b> Explore nine lands round one town. Real GitHub work earns more steps each day.</span></li>
 <li><img src="/ui/log.png" alt=""><span><b>Find the legends.</b> 500 sealed legends sleep on the island until their own developer wakes them.</span></li>
 </ul>
@@ -250,16 +253,44 @@ export const howPage = () =>
       'Hatch from your public GitHub work, walk nine lands, find the sealed legends, earn a house. Power is not size.',
     path: '/how',
     body: `<section class="card px-frame prose"><h1>How Gitemon works</h1>
-<h2>Hatch</h2><p>Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you. Your main language picks the creature, your second language colours its markings, and each one moves in its own way: it hops, waddles, trots, slithers or floats.</p>
+<h2>Hatch</h2><p>Sign in with GitHub and your Gitemon hatches from your public profile. Nobody else can hatch you. Your main language picks the creature’s land, colours and shape, your second language colours its gems and markings, and each one walks in its own way.</p>
 <h2>Walk</h2><p>Tap the map to walk, or steer with WASD, the arrow keys or the thumb stick on a phone. Your Gitemon walks home when you stop. Real GitHub work (merged pull requests, reviews, active weeks) earns more steps each day.</p>
 <h2>Catch</h2><p>Walk up to another player's Gitemon and catch it. Worked together for real? It's a bonded catch.</p>
 <h2>Find the legends</h2><p>500 sealed legends belong to developers who shaped the tech world. They sleep on the island, nameless, until their own developer signs in and wakes or removes theirs. Every legend you walk past goes into your Legend Log. One is the legend of the day: stand near it and your Gitemon glows for six hours.</p>
-<h2>Status is earned</h2><p>Standing comes from <b>merit</b>: steady work over time, not volume. The plaza round the monument holds only the top 1&nbsp;% of players, and only at merit 75 or more. A Merit House needs merit 50, a mini-plaza seat 40, and a seat nobody has earned stays empty. Steady work also evolves your Gitemon (Form 2 at merit 40, Form 3 at 70), and it never evolves back.</p>
+<h2>Status is earned</h2><p>Standing comes from <b>merit</b>: steady work over time, not volume. The plaza round the monument holds only the top 1&nbsp;% of players, and only at merit 75 or more. A Merit House needs merit 50, a mini-plaza seat 40, and a seat nobody has earned stays empty. Steady work also evolves your Gitemon (Form 2 at merit 40, Form 3 at 70), and it never evolves back. <a href="/ladder">See the whole ladder</a>.</p>
 <h2>Belong</h2><p>Nine climate lands surround one town. Your language decides your land and your guild hall, and guilds compete each week on how many members walk and find legends. The top 3 players by merit in each land live in its Merit Houses, with a sign for what they build or who they hire.</p>
 <h2>Power is not size</h2><p>A Gitemon never grows because of raw volume. Only work other people confirmed counts: pull requests merged into <i>their</i> repos, reviews you gave, stars others gave you. Every stat is log-scaled with a ceiling. Commits to your own repos count for nothing on their own, so AI-generated volume changes nothing either. The scorer is open source: read it, and send a pull request if you think it's unfair.</p>
-<h2>Look around</h2><p>There are two views. The <b>map view</b> works like a city builder: drag to move the map, scroll or pinch to zoom, right-drag (or two fingers) to turn and tilt. Keys: WASD or the arrows move, Q&nbsp;/&nbsp;E turn, R&nbsp;/&nbsp;F tilt. The <b>walk view</b> puts the camera behind your Gitemon, like a third-person game: press the footsteps button or V, walk with WASD or the thumb stick, and drag to look round. V or the map button takes you back.</p>
+<h2>Look around</h2><p>There are two views. The <b>map view</b> works like a city builder: drag to move the map, scroll or pinch to zoom, right-drag (or two fingers) to turn and tilt. Keys: WASD or the arrows move, Q&nbsp;/&nbsp;E turn, R&nbsp;/&nbsp;F tilt. The <b>walk view</b> follows your Gitemon closely from a fixed angle: press the footsteps button or V, walk with WASD or the thumb stick, and turn the view a quarter at a time with Q&nbsp;/&nbsp;E or the turn button. V or the map button takes you back.</p>
 <h2>Privacy</h2><p>Gitemon never requests access to private repositories, never stores where you live, and never contacts anyone. Your private work counts only through the anonymous number GitHub itself shows on your profile, and only if you turned that setting on.</p>
 <div class="btns"><a class="btn primary" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn" href="/">Back to the island</a></div></section>`,
+  });
+
+/** v19 build 04 (V19-D1): the two ladders — what you are, and what steady work earns — from the code's numbers */
+export const ladderPage = () =>
+  layout({
+    title: 'The Gitemon ladder',
+    description:
+      'What your Gitemon is, and what steady work earns it: forms, size, seats, houses. Legends are never earned.',
+    path: '/ladder',
+    body: `<section class="card px-frame prose"><h1>The ladder</h1>
+<p>Gitemon has two ladders, and they never mix.</p>
+<h2>Who you are</h2><p>Given once, from your public work. Nothing you do later changes it.</p>
+<ul><li><b>Your type</b>: your main language. It picks your land, your colours and your Gitemon's shape.</li>
+<li><b>A legend</b>: ${(500).toLocaleString('en-US')} sealed legends belong to developers who shaped the tech world — ${LEGEND_SEATS.origin} Origin, ${LEGEND_SEATS.guardian} Guardians, ${LEGEND_SEATS.legendary} Legendary, ${LEGEND_SEATS.mythic} Mythic, ${LEGEND_SEATS.epic} Epic and ${LEGEND_SEATS.rare} Rare. A legend is never earned, bought or taken.</li></ul>
+<h2>What you earn</h2><p><b>Merit</b> is steady work over time, not volume. Everything here is kept once earned, and your Gitemon never evolves back.</p>
+<table class="rank"><tr><th>Merit</th><th>What it gives</th></tr>
+${meritRungs()
+  .map(
+    (r) =>
+      `<tr><td>${r.merit}</td><td>${esc(r.gives)}${r.rare ? ' <span class="dim">— only the best reach it</span>' : ''}</td></tr>`,
+  )
+  .join('')}
+</table>
+<p>A Gitemon can also evolve by its <b>level</b>, the strength your public work shows: ${levelRungs()
+      .map((r) => `${r.gives} at level ${r.level}`)
+      .join(', ')}. Whichever comes first counts.</p>
+<p>Your Me panel shows how far you are from your next form.</p>
+<div class="btns"><a class="btn primary" href="/map">Back to the island</a><a class="btn" href="/how">How Gitemon works</a></div></section>`,
   });
 
 /** v14.1: every third-party file with its source and licence */

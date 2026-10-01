@@ -65,6 +65,7 @@
     const onSound = (e: Event) => {
       if ((e as CustomEvent).detail === 'catch') sound.caught();
       if ((e as CustomEvent).detail === 'paper') sound.paper();
+      if ((e as CustomEvent).detail === 'evolve') sound.evolved();
     };
     window.addEventListener('gitemon:sound', onSound);
     scene.onFollow = (on) => {

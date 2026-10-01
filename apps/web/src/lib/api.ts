@@ -13,6 +13,8 @@ export interface Me extends MapGitemon {
   admin: boolean;
   bonus: number;
   town: { id: number; name: string } | null;
+  /** v19 build 02: the last form the player saw (the evolution moment plays when it is lower) */
+  seenForm?: number;
   catchesLeft: number;
 }
 export interface Detail {
@@ -87,6 +89,8 @@ export const api = {
   clearSign: () => del<{ ok: boolean }>('/api/sign'),
   reportSign: (id: number) => post<{ ok: boolean }>(`/api/sign/report/${id}`, {}),
   wake: () => post<{ ok: boolean; woken: boolean }>('/api/legend/wake', {}),
+  /** v19 build 02: the evolution moment was seen */
+  seenForm: () => post<{ ok: boolean }>('/api/me/seen-form', {}),
   removeLegend: () => post<{ ok: boolean }>('/api/legend/remove', {}),
   dex: () => get<{ dex: (MapGitemon & { bonded: boolean; caughtAt: string })[] }>('/api/dex'),
   towns: () => get<{ towns: Town[] }>('/api/towns'),

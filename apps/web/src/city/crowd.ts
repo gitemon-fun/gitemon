@@ -149,6 +149,8 @@ const GLOW: Record<string, [number, number, number]> = {
   epic: [0.35, 0.7, 1.0],
   rare: [0.4, 0.95, 0.55],
 };
+/** v19 build 05: the mark of a rank earned on merit (above the blessing's 2–4) */
+const EARNED = 5;
 /** [size multiplier, sealed flag, glow r, g, b] for one resident */
 export function specialAttr(g: MapGitemon): [number, number, number, number, number] {
   const sp = g.special;
@@ -159,6 +161,12 @@ export function specialAttr(g: MapGitemon): [number, number, number, number, num
     return [1 + Number(level ?? 0) * 0.08, 2 + Number(level ?? 0), r, gg, b];
   }
   if (!sp) return [1, 0, 0, 0, 0];
+  if (sp.earned) {
+    // v19 build 05 (G5): a rank earned on merit is never mistaken for a legend — half the legend's growth, and
+    // an outlined ring in the tier's colour (5) instead of the woken legend's glow (2)
+    const [r, gg, b] = GLOW[sp.tier]!;
+    return [1 + (SPECIAL_SCALE[sp.tier] - 1) * 0.5, EARNED, r, gg, b];
+  }
   const scale = sp.rank === 1 ? 3 : sp.rank <= 3 ? 2.3 : SPECIAL_SCALE[sp.tier];
   const [r, gg, b] = GLOW[sp.tier]!;
   // sealed = a glowing silhouette (1); a named legend — woken, or earned on merit (V7) — shows its own
@@ -499,7 +507,7 @@ export class Crowd {
           gaitPose(${CELL_W.toFixed(2)} * iTint.w * iSpec.x, size, moving, dirSign, lift, sx, sy, roll, lean, sway);
           vSealed = iSpec.y;
           vGlow = vec3(iSpec.z, iSpec.w, iGlowB);
-          float r = 0.62 * iTint.w * iSpec.x * uGrow * (iSpec.y > 1.5 ? 2.0 + (iSpec.y - 2.0) * 0.5 : iSpec.y > 0.5 ? 2.2 : 1.0);
+          float r = 0.62 * iTint.w * iSpec.x * uGrow * (iSpec.y > 4.5 ? 1.9 : iSpec.y > 1.5 ? 2.0 + (iSpec.y - 2.0) * 0.5 : iSpec.y > 0.5 ? 2.2 : 1.0);
           r *= 1.0 - 0.45 * clamp(lift / (0.35 * size), 0.0, 1.0);
           vP = position.xz;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(base + vec3(position.x * r, 0.08, position.z * r * 0.8), 1.0);
@@ -512,7 +520,9 @@ export class Crowd {
         void main() {
           float d = dot(vP, vP);
           if (d > 1.0) discard;
-          if (vSealed > 0.5) gl_FragColor = vec4(vGlow, 0.55 * (1.0 - d) * (1.0 - d));
+          // v19 build 05: an earned rank wears an outlined ring; a legend (or a blessing) a filled glow
+          if (vSealed > 4.5) gl_FragColor = vec4(vGlow, 0.8 * smoothstep(0.5, 0.66, d) * (1.0 - smoothstep(0.86, 1.0, d)));
+          else if (vSealed > 0.5) gl_FragColor = vec4(vGlow, 0.55 * (1.0 - d) * (1.0 - d));
           else gl_FragColor = vec4(0.0, 0.0, 0.0, 0.24 * (1.0 - d));
         }
       `,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lifeCheer, lifeInit, lifeStep, type Life } from '../src/life.js';
+import { EVOLVE_S, lifeCheer, lifeEvolve, lifeInit, lifeStep, type Life } from '../src/life.js';
 
 /** run `secs` of life at 30 frames a second; `moving` and `want` may change with time */
 function run(
@@ -63,5 +63,14 @@ describe('life (v18 build 08)', () => {
     const f = run(s, 1, 0.6);
     expect(Math.max(...f.map((x) => x.lift))).toBeGreaterThan(0.15);
     expect(Math.max(...f.map((x) => Math.abs(x.tail)))).toBeGreaterThan(0.25);
+  });
+  it('the evolution moment rises high, cannot be walked out of, and ends', () => {
+    const s = lifeInit(4, 0);
+    run(s, 0, 1);
+    lifeEvolve(s, 1);
+    const f = run(s, 1, EVOLVE_S + 0.3, () => 1);
+    expect(Math.max(...f.map((x) => x.lift))).toBeGreaterThan(0.4);
+    expect(f[Math.floor(f.length / 2)]!.action).toBe('evolve');
+    expect(f.at(-1)!.action).toBe('none');
   });
 });

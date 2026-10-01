@@ -24,6 +24,8 @@ export interface Row {
   t2: TypeId | null;
   shape: MapGitemon['sh'];
   form: 1 | 2 | 3;
+  /** v19 (0011): the last form the player saw (null = the form it has) */
+  seen_form?: number | null;
   shiny: number;
   machine: number;
   level: number;

@@ -185,3 +185,11 @@ describe('scorer', () => {
     expect(levelOf(computeStats(snap(), 0))).toBe(1);
   });
 });
+
+// v19 (V19-D3): the client's "way to the next form" uses the same level lines as the scorer
+describe('form level lines (v19)', () => {
+  it('match FORM_LEVEL in packages/shared', async () => {
+    const { FORM_LEVEL } = await import('@gitemon/shared');
+    expect([TUNING.form2Level, TUNING.form3Level]).toEqual([FORM_LEVEL[2], FORM_LEVEL[3]]);
+  });
+});

@@ -4,6 +4,8 @@
     SHAPE_NAME,
     STAT_MEANING,
     TYPE_INFO,
+    evolvedFrom,
+    nextForm,
     readable,
     type MapGitemon,
     type Stats,
@@ -357,6 +359,32 @@
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) scene?.snapHome();
     });
+    void maybeEvolve();
+  }
+  /**
+   * v19 build 02 (V19-D3): your Gitemon evolved since you last looked — the moment plays once, on any device
+   * (the server remembers the last form you saw), then the mascot says so.
+   */
+  /** v19 build 02: the way to your next form (Me panel) */
+  const nf = $derived(me ? nextForm(me.f, me.m ?? 0, me.lv) : null);
+  let evolveShown = false;
+  async function maybeEvolve() {
+    // ?walkdemo&evolve: the moment on the stand-in walker (Form 1 → 2), to try it without an account
+    const from = me
+      ? evolvedFrom(me.f, me.seenForm)
+      : demo && location.search.includes('evolve')
+        ? 1
+        : null;
+    if (!from || evolveShown || !scene) return;
+    evolveShown = true;
+    // let the island settle and the 3D bodies arrive first
+    await new Promise((r) => setTimeout(r, 2500));
+    await scene.evolve(from);
+    if (me) await api.seenForm();
+    say(
+      `Your Gitemon evolved — Form ${me?.f ?? 2}! It looks different now, and it shows on the island.`,
+    );
+    if (me) me = { ...me, seenForm: me.f };
   }
   /** near a legend: log it (V6-D3); near the legend of the day: be blessed (V6-D4) */
   async function checkLegends(x: number, z: number) {
@@ -911,10 +939,9 @@
         {detail?.name ? detail.name + ' · ' : ''}{picked.st === 'c' ? 'Claimed' : 'Wild'}{picked.s
           ? ' · ✦ Shiny'
           : ''}{#if picked.special}
-          · {picked.special.title ?? `${TIER_NAME[picked.special.tier]} legend`} · {picked.special
-            .earned
-            ? 'earned on merit'
-            : 'awake'}{/if}
+          · {picked.special.earned
+            ? `Earned ${TIER_NAME[picked.special.tier]} rank · earned on merit, not a legend`
+            : `${picked.special.title ?? `${TIER_NAME[picked.special.tier]} legend`} · awake`}{/if}
       </p>
       <div class="card-window" style="--ground:{groundOf(picked.t1)}">
         <Sprite g={picked} size={104} />
@@ -1078,6 +1105,18 @@
           <p class="dim small">
             {SHAPE_NAME[me.sh]} · <span class="form-text">Form {me.f} of 3</span>
           </p>
+          {#if nf}
+            <!-- v19 build 02: the way to the next form — the nearer of the two paths (V19-D3) -->
+            <div class="evo" title="Steady work (merit) or your level — whichever gets there first">
+              <div class="evo-bar"><span style="width:{Math.round(nf.share * 100)}%"></span></div>
+              <p class="dim small">
+                To Form {nf.to}: merit {Math.round(nf.merit.have)} / {nf.merit.need} · level {nf
+                  .level.have}
+                / {nf.level.need}
+              </p>
+              <p class="dim small"><a href="/ladder">What steady work earns</a></p>
+            </div>
+          {/if}
         </div>
       </div>
       {#if me.legend && !me.legend.woken}

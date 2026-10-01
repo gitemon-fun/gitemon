@@ -8,7 +8,7 @@
  * i.e. to its right); pitch positive nods down. Tail yaw positive swings the tail to the model's right.
  */
 
-export type Action = 'none' | 'sit' | 'bow' | 'hop';
+export type Action = 'none' | 'sit' | 'bow' | 'hop' | 'evolve';
 
 export interface Life {
   /** random state (mulberry32) */
@@ -153,6 +153,15 @@ export function lifeInit(seed: number, time: number, face = 0): Life {
   return s;
 }
 
+/** v19 build 02: how long the evolution moment's own action lasts (s) */
+export const EVOLVE_S = 2.4;
+
+/** v19 build 02: the evolution moment — crouch, rise into the air with a shiver, land, a big happy wag */
+export function lifeEvolve(s: Life, time: number) {
+  startAction(s, 'evolve', time, EVOLVE_S);
+  s.nextAction = time + EVOLVE_S + 8;
+}
+
 /** a tap on the creature: a happy wag and a small hop */
 export function lifeCheer(s: Life, time: number) {
   s.wagAt = time;
@@ -192,7 +201,7 @@ export function lifeStep(s: Life, i: LifeInput) {
   s.lift = 0;
 
   // ---- idle actions: sit, play bow, hop; any walking cancels them ----
-  if (walking && s.action !== 'none') s.action = 'none';
+  if (walking && s.action !== 'none' && s.action !== 'evolve') s.action = 'none';
   if (!walking && s.action === 'none' && s.still > ACTION_AFTER && time > s.nextAction) {
     const r = rand(s);
     if (r < 0.45) startAction(s, 'sit', time, between(s, 3, 6));
@@ -210,6 +219,20 @@ export function lifeStep(s: Life, i: LifeInput) {
   };
   s.sit = ease(s.sit, s.action === 'sit' ? hold(s.actionLen) : 0, 12, dt);
   s.bow = ease(s.bow, s.action === 'bow' ? pulse(at) : 0, 14, dt);
+  if (s.action === 'evolve') {
+    // crouch (0–15 %), rise and hang with a shiver (15–70 %), land (70–85 %), a happy wag after
+    const p = clamp(at, 0, 1);
+    s.lift = 0.45 * pulse(clamp((p - 0.12) / 0.66, 0, 1));
+    s.squash +=
+      p < 0.15
+        ? -0.16 * pulse(p / 0.15)
+        : p > 0.72 && p < 0.86
+          ? -0.12 * pulse((p - 0.72) / 0.14)
+          : 0.04;
+    s.roll += p > 0.2 && p < 0.7 ? 0.06 * Math.sin(time * 38) : 0;
+    s.lookPitch = -0.25;
+    if (p > 0.8) s.wagAt = Math.max(s.wagAt, time - 0.05);
+  }
   if (s.action === 'hop') {
     // crouch, jump, land
     const p = clamp(at, 0, 1);

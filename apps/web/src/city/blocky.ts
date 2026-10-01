@@ -6,7 +6,9 @@ import {
   STRIDE_TOY,
   gaitPose,
   hash32,
+  EVOLVE_S,
   lifeCheer,
+  lifeEvolve,
   lifeInit,
   lifeStep,
   paperTurn,
@@ -81,6 +83,19 @@ export class Blocky {
   /** v18: the 3D bodies arrived; the block bodies built before then are rebuilt as 3D */
   private toysOn = false;
   private lastTime = 0;
+  /**
+   * v19 build 02: the evolution moment in progress — the creature, the form it grows from, when it started
+   * (null until its 3D body stands), the old form's body that shrinks away, a burst of light, and who to tell
+   * when it is over
+   */
+  private evo: {
+    i: number;
+    from: 1 | 2 | 3;
+    at: number | null;
+    old: THREE.Mesh | null;
+    burst: THREE.Mesh;
+    done: () => void;
+  } | null = null;
 
   constructor(
     private crowd: Crowd,
@@ -156,7 +171,9 @@ export class Blocky {
     const g = this.crowd.at(i).g;
     // v18 (V18-D4): a player of the creature line stands as the 3D model of its form
     const tint = this.crowd.colourOf(i).tint;
-    const toy = this.toysOn && !g.special ? this.toys!.make(g.f, g, tint) : null;
+    // (v19: a rank earned on merit is still a player: it stands in its type's look)
+    const toy =
+      this.toysOn && (!g.special || g.special.earned) ? this.toys!.make(g.f, g, tint) : null;
     if (toy) {
       const b: Body = {
         mesh: toy,
@@ -282,6 +299,20 @@ export class Blocky {
       this.lastPick = now;
       this.pick(time, focus?.x ?? 0, focus?.z ?? 0, focus?.radius ?? 0, walker);
     }
+    // v19 build 02: the moment starts once its creature stands as a 3D body
+    const ev = this.evo;
+    if (ev && ev.at == null) {
+      const b = this.active.has(ev.i) ? this.bodies.get(ev.i) : undefined;
+      if (b?.toy) {
+        const g = this.crowd.at(ev.i).g;
+        ev.old = this.toys!.make(ev.from, g, this.crowd.colourOf(ev.i).tint);
+        if (ev.old) this.group.add(ev.old);
+        this.group.add(ev.burst);
+        ev.at = time;
+        b.life ??= lifeInit(Math.floor(b.phase * 1e6), time, 0);
+        lifeEvolve(b.life, time);
+      }
+    }
     for (const i of this.active) {
       const b = this.bodies.get(i);
       if (!b) continue;
@@ -351,6 +382,80 @@ export class Blocky {
     const L = (b.life ??= lifeInit(Math.floor(b.phase * 1e6), time, want));
     lifeStep(L, { dt, time, moving: walks ? m.moving : 0, want, camYaw, steps });
     applyLife(b.mesh, L, steps, size, { x: m.x, y: m.y, z: m.z }, upScale, time);
+    if (this.evo?.at != null && this.bodies.get(this.evo.i) === b)
+      this.evolving(b, L, steps, size, m, upScale, time);
+  }
+
+  /**
+   * v19 build 02: start the evolution moment for crowd index `i`, growing from form `from` into the form it has.
+   * The promise resolves when the moment is over (or at once when there is no 3D body to show it on).
+   */
+  evolve(i: number, from: 1 | 2 | 3): Promise<void> {
+    return new Promise((done) => {
+      if (!this.toys) return done();
+      const burst = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 16, 10),
+        new THREE.MeshBasicMaterial({
+          color: '#fff6c8',
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+        }),
+      );
+      burst.renderOrder = 12;
+      this.evo = { i, from, at: null, old: null, burst, done };
+    });
+  }
+
+  /** v19 build 02: one frame of the moment — the old form shrinks away as the new one grows in, in a burst */
+  private evolving(
+    b: Body,
+    L: Life,
+    steps: number,
+    size: number,
+    m: ReturnType<Crowd['motion']>,
+    upScale: number,
+    time: number,
+  ) {
+    const e = this.evo!;
+    const p = (time - e.at!) / EVOLVE_S;
+    const ss = (a: number, z: number, x: number) => {
+      const t = Math.min(1, Math.max(0, (x - a) / (z - a)));
+      return t * t * (3 - 2 * t);
+    };
+    // in the air (25–60 %): the old shrinks, the new grows with a small overshoot
+    const grow = ss(0.28, 0.62, p);
+    const newK = grow * (1 + 0.12 * Math.sin(Math.PI * grow));
+    const oldK = 1 - ss(0.22, 0.5, p);
+    if (e.old) {
+      applyLife(e.old, L, steps, size, { x: m.x, y: m.y, z: m.z }, upScale, time);
+      e.old.scale.multiplyScalar(Math.max(0.001, oldK));
+      e.old.visible = oldK > 0.01;
+    }
+    b.mesh.scale.multiplyScalar(Math.max(0.001, newK));
+    // the light: swells while the form changes, then fades
+    const glow = Math.sin(Math.PI * ss(0.18, 0.75, p));
+    const r = size * (0.25 + 0.4 * ss(0.18, 0.75, p));
+    e.burst.position.set(m.x, b.mesh.position.y + size * 0.4, m.z);
+    e.burst.scale.setScalar(r);
+    (e.burst.material as THREE.MeshBasicMaterial).opacity = 0.32 * glow;
+    if (p >= 1) this.endEvolve();
+  }
+
+  private endEvolve() {
+    const e = this.evo;
+    if (!e) return;
+    this.evo = null;
+    if (e.old) {
+      this.group.remove(e.old);
+      (e.old.material as THREE.Material).dispose();
+    }
+    this.group.remove(e.burst);
+    e.burst.geometry.dispose();
+    (e.burst.material as THREE.Material).dispose();
+    e.done();
   }
 
   /** build 08: a tap on a creature — a 3D body wags and hops */
@@ -377,6 +482,7 @@ export class Blocky {
   }
 
   dispose() {
+    this.endEvolve();
     this.group.remove(this.ghost);
     (this.ghost.material as THREE.Material).dispose();
     for (const i of this.active) this.crowd.setShown(i, true);

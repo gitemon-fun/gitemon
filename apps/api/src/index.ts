@@ -39,6 +39,7 @@ import { ogPng, spritePng } from './og.js';
 import {
   creditsPage,
   howPage,
+  ladderPage,
   landingShell,
   messagePage,
   privacyPage,
@@ -267,8 +268,18 @@ app.get('/api/me', async (c) => {
       bonus: await bonusLevels(c.env.DB, p.id),
       town,
       catchesLeft: Math.max(0, limits(c.env).dailyCatches - (used?.n ?? 0)),
+      // v19 build 02 (V19-D3): the last form the player saw — the evolution moment plays when it is lower
+      seenForm: r.seen_form ?? r.form,
     },
   });
+});
+
+/** v19 build 02: the player saw their evolution moment — their own row only */
+app.post('/api/me/seen-form', async (c) => {
+  const p = c.get('player');
+  if (!p) return c.json({ error: 'signin' }, 401);
+  await c.env.DB.prepare('UPDATE gitemon SET seen_form = form WHERE id = ?').bind(p.id).run();
+  return c.json({ ok: true });
 });
 
 app.get('/api/chunk/:cx/:cy', async (c) => {
@@ -1104,6 +1115,7 @@ app.get('/', async (c) => {
   });
 });
 app.get('/how', (c) => html(c, howPage(), 200, 3600));
+app.get('/ladder', (c) => html(c, ladderPage(), 200, 3600));
 app.get('/credits', (c) => html(c, creditsPage(), 200, 3600));
 app.get('/privacy', (c) => html(c, privacyPage(), 200, 3600));
 app.get('/terms', (c) => html(c, termsPage(), 200, 3600));

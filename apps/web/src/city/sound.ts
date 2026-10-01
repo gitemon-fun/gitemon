@@ -165,6 +165,15 @@ export class Soundscape {
     src.stop(t + 0.14);
   }
 
+  /** v19 build 02: an evolution — a long rising run, then the catch sound as the new form lands */
+  evolved() {
+    if (!this.on || !this.ctx || !this.master) return;
+    [0, 2, 4, 5, 7, 9, 11, 12, 16, 19, 24].forEach((st, i) =>
+      this.tone(392 * 2 ** (st / 12), 0.16, i * 0.11, 0.45),
+    );
+    setTimeout(() => this.caught(), 1500);
+  }
+
   /** a small rising arpeggio: a catch, a sighting, a blessing */
   chime() {
     if (!this.on || !this.ctx || !this.master) return;
