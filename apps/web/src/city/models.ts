@@ -15,7 +15,7 @@ import {
 } from '@gitemon/shared';
 import type { Placed } from './crowd';
 import type { Home } from './load';
-import { modelUrl, prefetched } from './assets';
+import { fadeIn, modelUrl, prefetched } from './assets';
 import { plotHeight } from './town';
 
 /**
@@ -76,7 +76,12 @@ export interface Pieces {
    * one (its own colours, standing on its base at the origin) that can walk
    */
   legends: Map<number, { obj: THREE.Object3D; fresh: () => Promise<THREE.Object3D | null> }>;
+  /** v19 build 11: resolves when the island's heart stands (town, monument, gates, bridges, legends) */
+  core: Promise<void>;
 }
+
+/** v19 build 11: the pieces the first view must not be without; the far ones fade in after */
+const CORE = /^(monument|origin|guardian-|legend-|house-|svc-|lm-|gate|bridge)/;
 
 /**
  * v14.1: at most 6 model downloads at once. Started together (~50), Chrome fails the last ones with
@@ -228,6 +233,11 @@ export async function loadPieces(
   isl: Island,
   placed: Placed[],
   homes: Map<number, Home> = new Map(),
+  /**
+   * v19 build 11: `ready` gets the (empty) pieces at once so the scene can show each one as it arrives;
+   * `piece` is told after every arrival
+   */
+  live?: { ready: (p: Pieces) => void; piece: () => void },
 ): Promise<Pieces | null> {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
@@ -251,8 +261,18 @@ export async function loadPieces(
     solids: [],
     props: null,
     legends: new Map(),
+    core: Promise.resolve(),
   };
+  let coreDone!: () => void;
+  out.core = new Promise<void>((r) => (coreDone = r));
+  const coreJobs: Promise<void>[] = [];
+  live?.ready(out);
   const jobs: Promise<void>[] = [];
+  /** v19 build 11: a piece is in — it fades in, and the scene is told */
+  const arrived = (o: THREE.Object3D) => {
+    fadeIn(o);
+    live?.piece();
+  };
   const put = (
     key: Key,
     h: number,
@@ -263,26 +283,28 @@ export async function loadPieces(
     then?: (o: THREE.Object3D) => void,
     maxW = Infinity,
     solid = false,
-  ) =>
-    jobs.push(
-      load(loader, key).then((src) => {
-        if (!src) return;
-        const o = place(src, h, x, y, z, yaw, maxW);
-        group.add(o);
-        then?.(o);
-        // v11 (V11-D7): a solid piece blocks walking over the inner part of its base
-        if (solid) {
-          const b = new THREE.Box3().setFromObject(o);
-          const r = 0.55 * Math.min(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5;
-          out.solids.push({
-            x: (b.min.x + b.max.x) / 2,
-            z: (b.min.z + b.max.z) / 2,
-            r: Math.max(0.9, r),
-            top: b.max.y,
-          });
-        }
-      }),
-    );
+  ) => {
+    const job = load(loader, key).then((src) => {
+      if (!src) return;
+      const o = place(src, h, x, y, z, yaw, maxW);
+      group.add(o);
+      then?.(o);
+      arrived(o);
+      // v11 (V11-D7): a solid piece blocks walking over the inner part of its base
+      if (solid) {
+        const b = new THREE.Box3().setFromObject(o);
+        const r = 0.55 * Math.min(b.max.x - b.min.x, b.max.z - b.min.z) * 0.5;
+        out.solids.push({
+          x: (b.min.x + b.max.x) / 2,
+          z: (b.min.z + b.max.z) / 2,
+          r: Math.max(0.9, r),
+          top: b.max.y,
+        });
+      }
+    });
+    jobs.push(job);
+    if (CORE.test(key)) coreJobs.push(job);
+  };
 
   // ---- the top 10 legends (V8-D1): the model belongs to the rank; sealed = stone (V8-D3) ----
   placed.forEach((p, i) => {
@@ -385,14 +407,17 @@ export async function loadPieces(
       p.w + (p.kind === 'hall' ? 1.5 : 0.6),
     );
   });
-  for (const [key, list] of houses)
-    jobs.push(
-      load(loader, key).then((src) => {
-        if (!src) return;
-        group.add(instanced(src, list));
-        out.town = true;
-      }),
-    );
+  for (const [key, list] of houses) {
+    const job = load(loader, key).then((src) => {
+      if (!src) return;
+      const o = instanced(src, list);
+      group.add(o);
+      out.town = true;
+      arrived(o);
+    });
+    jobs.push(job);
+    coreJobs.push(job);
+  }
 
   // ---- gates: one at every region's gate in the town wall, facing out ----
   for (const g of isl.regions) {
@@ -489,10 +514,12 @@ export async function loadPieces(
         }
         group.add(props);
         out.props = props;
+        arrived(props);
       })
       .catch(() => undefined),
   );
 
+  void Promise.all(coreJobs).then(() => coreDone());
   await Promise.all(jobs);
   return out;
 }

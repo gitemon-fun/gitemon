@@ -622,7 +622,8 @@
         await search(undefined, house ? 4 : 3.2);
       } else if (me && !me.hidden && town.byId.has(me.id)) show(me, 2.6);
       else scene!.flyTo(0, 0, homeZoom());
-      void reveal(pieces);
+      // v19 build 11: the picture lifts when the island's heart stands; far pieces fade in after
+      void reveal(Promise.race([pieces, scene!.core]));
     })();
     return () => scene?.destroy();
   });

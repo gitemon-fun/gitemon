@@ -1,3 +1,4 @@
+import type * as THREE from 'three';
 /**
  * v19 build 11: the 3D files start downloading the moment the page starts, most needed first, instead of after
  * the island is built (they started at 6.9 s on a phone network). Their addresses carry the art set's content
@@ -88,3 +89,39 @@ export function prefetchModels() {
 
 /** the bytes of a model if its download was started early (null = load it the usual way) */
 export const prefetched = (key: string) => bytes.get(key) ?? null;
+
+/**
+ * v19 build 11: pieces fade in as they arrive instead of popping. A material fades (all copies of one model
+ * together, since they arrive together); the scene's loop moves each from 0 to 1 over FADE_MS.
+ */
+export const FADE_MS = 450;
+export const fading = new Map<THREE.Material, { t0: number; wasTransparent: boolean }>();
+export function fadeIn(o: THREE.Object3D) {
+  const now = performance.now();
+  o.traverse((m) => {
+    const mesh = m as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    for (const mat of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      if (fading.has(mat) || mat.userData.faded) continue;
+      fading.set(mat, { t0: now, wasTransparent: mat.transparent });
+      mat.transparent = true;
+      mat.opacity = 0;
+      mat.needsUpdate = true;
+    }
+  });
+}
+/** one frame of every fade; true while any is still running */
+export function stepFades(now: number): boolean {
+  for (const [mat, f] of fading) {
+    const k = Math.min(1, (now - f.t0) / FADE_MS);
+    mat.opacity = k * k * (3 - 2 * k);
+    if (k >= 1) {
+      mat.opacity = 1;
+      mat.transparent = f.wasTransparent;
+      mat.userData.faded = true;
+      mat.needsUpdate = true;
+      fading.delete(mat);
+    }
+  }
+  return fading.size > 0;
+}

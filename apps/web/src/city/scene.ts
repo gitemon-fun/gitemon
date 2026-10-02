@@ -33,6 +33,7 @@ import { Crowd, type Placed } from './crowd';
 import { Blocky } from './blocky';
 import { Toys } from './toys';
 import type { Pieces } from './models';
+import { stepFades } from './assets';
 import { buildTown, plotHeight, type Town } from './town';
 import { airField } from './air';
 import { recoverFromSkew, report } from '../lib/clientlog';
@@ -1552,6 +1553,11 @@ export class CityScene {
 
   // ---- sculpted pieces (v8 build 05) ---------------------------------------------------------------
 
+  /** v19 build 11: resolves when the island's heart stands (or at once without the art set) */
+  // (declared before `core`: a class field declared after it would reset what its initialiser set)
+  private coreDone: () => void = () => undefined;
+  readonly core: Promise<void> = new Promise<void>((r) => (this.coreDone = r));
+
   /** load the 3D models; each one replaces its code-built piece or sprite as it arrives */
   async addPieces(city: Island, placed: Placed[], homes: Map<number, Home> = new Map()) {
     const t0 = performance.now();
@@ -1565,22 +1571,44 @@ export class CityScene {
       return;
     }
     const { loadPieces } = mod;
-    const pcs = await loadPieces(city, placed, homes);
-    if (!pcs) return;
-    this.scene.add(pcs.group);
-    this.piecesGroup = pcs.group;
-    this.lightPieces();
-    if (pcs.monument && this.town) this.town.monument.visible = false;
-    if (pcs.landmarks && this.town) for (const l of this.town.landmarks) l.visible = false;
-    if (pcs.town && this.town) this.town.plots.visible = false;
-    for (const i of pcs.replaced) this.crowd?.hide(i);
+    // v19 build 11: the pieces show one by one as they arrive (each fades in); the code-built stand-ins go at
+    // once, under the still picture, so nothing swaps in view; the picture lifts when the heart stands
+    const hidden = new Set<number>();
+    const pcs = await loadPieces(city, placed, homes, {
+      ready: (p) => {
+        this.scene.add(p.group);
+        this.piecesGroup = p.group;
+        this.legendModels = p.legends;
+        if (this.town) {
+          this.town.monument.visible = false;
+          for (const l of this.town.landmarks) l.visible = false;
+          this.town.plots.visible = false;
+        }
+        void p.core.then(() => this.coreDone());
+      },
+      piece: () => {
+        // a legend's model stands: its sprite steps aside
+        for (const i of this.legendModels?.keys() ?? [])
+          if (!hidden.has(i)) {
+            hidden.add(i);
+            this.crowd?.hide(i);
+          }
+        this.lightPieces();
+        this.renderer.shadowMap.needsUpdate = true;
+        this.dirty = true;
+      },
+    });
+    if (!pcs) {
+      this.coreDone();
+      return;
+    }
+    for (const i of pcs.replaced) if (!hidden.has(i)) this.crowd?.hide(i);
     // v14.1: the street props are detail — hidden at far zoom like the windows and lamps
     if (pcs.props) {
       pcs.props.visible = this.detailOn;
       this.detail.push(pcs.props);
     }
     this.bob = pcs.bob;
-    this.legendModels = pcs.legends;
     // v11 (V11-D7): the solid pieces block walking once they stand there
     this.solids = pcs.solids;
     this.walkable?.setSolids(pcs.solids);
@@ -1636,6 +1664,11 @@ export class CityScene {
     if (!animate && !this.dirty && !this.anim && !this.walker?.walk && !this.steering && !turning)
       return;
     if (now - this.last < 32) return; // ~30 fps is plenty for a city and kind to phones
+    // v19 build 11: pieces fading in keep the frames coming
+    if (stepFades(performance.now())) {
+      this.dirty = true;
+      this.renderer.shadowMap.needsUpdate = true;
+    }
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     // v12: Q / E turn steadily; the ⟳ quarter turn eases in
