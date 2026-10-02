@@ -18,6 +18,9 @@ import {
   twoFingerMode,
   wrapAngle,
   bridgeLift,
+  lifeInit,
+  lifeStep,
+  type Life,
   bridgesOf,
   gridHeight,
   type Bridge,
@@ -29,6 +32,7 @@ import type { Home } from './load';
 import { Crowd, type Placed } from './crowd';
 import { Blocky } from './blocky';
 import { Toys } from './toys';
+import type { Pieces } from './models';
 import { buildTown, plotHeight, type Town } from './town';
 import { airField } from './air';
 import { recoverFromSkew, report } from '../lib/clientlog';
@@ -1066,6 +1070,21 @@ export class CityScene {
   private envMap: THREE.Texture | null = null;
   /** the Meshy pieces (their PBR materials take the environment map) */
   private piecesGroup: THREE.Object3D | null = null;
+  /** v19 try mode: the top-10 legends' models (Pieces.legends) */
+  private legendModels: Pieces['legends'] | null = null;
+  /**
+   * v19 try mode (admin only, nothing sent to the server): the creature you control instead of your own — its
+   * own crowd index, your own one to go back to, what was changed to show it, and a top-10 legend's walking model
+   */
+  private trying: {
+    i: number;
+    own: number;
+    sealedG: Placed['g'] | null;
+    statue: THREE.Object3D | null;
+    body: THREE.Object3D | null;
+    life: Life | null;
+    last: number;
+  } | null = null;
   /**
    * Only the PBR materials (the Meshy pieces) take the sky's light: in this three.js the scene-wide
    * environment also lights Lambert materials, which washed the terrain and the town out.
@@ -1300,6 +1319,104 @@ export class CityScene {
     return this.walker?.home ?? null;
   }
   /**
+   * v19 try mode (admin only): take control of another creature — any player, or a legend — in this browser
+   * only. A sealed legend shows its own colours; a top-10 legend walks as its own model. Nothing is sent to the
+   * server and nothing is stored: stopTry() puts everything back.
+   */
+  async tryAs(i: number): Promise<boolean> {
+    const c = this.crowd;
+    if (!c || !this.walker || !this.walkCity || i < 0 || i >= c.size) return false;
+    const own = this.trying?.own ?? this.walker.i;
+    if (this.trying) this.stopTry(false);
+    if (i === own) return true;
+    const p = c.at(i);
+    const t: NonNullable<CityScene['trying']> = {
+      i,
+      own,
+      sealedG: null,
+      statue: null,
+      body: null,
+      life: null,
+      last: this.clock,
+    };
+    if (p.g.special?.sealed) {
+      // its own colours while you try it
+      t.sealedG = p.g;
+      p.g = { ...p.g, special: { ...p.g.special, sealed: false } };
+      c.setSealedLook(i, 2);
+    }
+    const lm = this.legendModels?.get(i);
+    if (lm) {
+      t.statue = lm.obj;
+      t.body = await lm.fresh();
+      if (t.body) {
+        lm.obj.visible = false;
+        this.scene.add(t.body);
+        // its plinth no longer blocks the way (it walks off it)
+        this.walkable?.setSolids(
+          this.solids.filter((s) => Math.hypot(s.x - p.spot.x, s.z - p.spot.z) > 3),
+        );
+      }
+    }
+    this.trying = t;
+    this.enableWalker(this.walkCity, i);
+    this.setFollow(true);
+    this.dirty = true;
+    return true;
+  }
+
+  /** v19 try mode: back to your own Gitemon; the tried one goes back where it stood */
+  stopTry(back = true) {
+    const t = this.trying;
+    const c = this.crowd;
+    if (!t || !c) return;
+    this.trying = null;
+    const home = this.walker?.home;
+    if (home) c.setPos(t.i, home.x, home.z, home.y);
+    if (t.sealedG) {
+      c.at(t.i).g = t.sealedG;
+      c.setSealedLook(t.i, 1);
+    }
+    if (t.body) {
+      this.scene.remove(t.body);
+      t.body.traverse((o) => (o as THREE.Mesh).geometry?.dispose?.());
+    }
+    if (t.statue) t.statue.visible = true;
+    this.walkable?.setSolids(this.solids);
+    if (back && this.walkCity) this.enableWalker(this.walkCity, t.own);
+    this.dirty = true;
+  }
+  get tryingIndex(): number | null {
+    return this.trying?.i ?? null;
+  }
+
+  /** v19 try mode: a top-10 legend's model walks where its creature is, with the toy walk's body motion */
+  private stepTryBody(right: THREE.Vector3) {
+    const t = this.trying;
+    const c = this.crowd;
+    if (!t?.body || !c) return;
+    const dt = Math.min(0.1, Math.max(0, this.clock - t.last));
+    t.last = this.clock;
+    const m = c.motion(t.i, this.clock, right);
+    const camYaw = Math.atan2(-right.z, right.x);
+    const walks = m.moving > 0 && (m.dx !== 0 || m.dz !== 0);
+    const want = walks ? Math.atan2(m.dx, m.dz) : (t.life?.face ?? camYaw);
+    const L = (t.life ??= lifeInit(t.i * 7919, this.clock, want));
+    lifeStep(L, {
+      dt,
+      time: this.clock,
+      moving: walks ? m.moving : 0,
+      want,
+      camYaw,
+      steps: m.steps,
+    });
+    const bob = Math.abs(Math.sin(Math.PI * m.steps)) * 0.12 * L.mov;
+    t.body.position.set(m.x, m.y + bob + L.lift * 3, m.z);
+    t.body.rotation.set(L.lean * 0.5, L.face, L.roll * 0.5, 'YXZ');
+    t.body.scale.set(1, 1 + L.squash * 0.5, 1);
+  }
+
+  /**
    * v19 build 02: the evolution moment — the follow view comes close to your Gitemon, which rises and grows from
    * its old form into its new one in a burst of light. Resolves when it is over (at once without a walker).
    */
@@ -1463,6 +1580,7 @@ export class CityScene {
       this.detail.push(pcs.props);
     }
     this.bob = pcs.bob;
+    this.legendModels = pcs.legends;
     // v11 (V11-D7): the solid pieces block walking once they stand there
     this.solids = pcs.solids;
     this.walkable?.setSolids(pcs.solids);
@@ -1585,6 +1703,7 @@ export class CityScene {
         // v17 (V17-D4): in the follow view your Gitemon shows through the houses in front of it
         this.modeT > 0.5 ? (this.walker?.i ?? null) : null,
       );
+      this.stepTryBody(right);
     }
     const t = performance.now();
     this.renderer.render(this.scene, this.camera);

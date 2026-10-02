@@ -611,6 +611,13 @@ export class Crowd {
     spec.needsUpdate = true;
   }
 
+  /** v19 try mode: draw one resident as sealed (1, a glowing silhouette) or named (2, its own colours) */
+  setSealedLook(i: number, sealed: number) {
+    const spec = this.sprites.geometry.getAttribute('iSpec') as THREE.InstancedBufferAttribute;
+    spec.setY(i, sealed);
+    spec.needsUpdate = true;
+  }
+
   /** v16: show or hide one sprite (a pixel-block body stands in its place); its blob shadow stays */
   setShown(i: number, on: boolean) {
     this.show.setX(i, on ? 1 : 0);

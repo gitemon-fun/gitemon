@@ -826,3 +826,19 @@ body.welcoming .hint {
   height: 100%;
   background: #6bbf59;
 }
+
+/* v19 try mode banner (admins only) */
+.trying {
+  position: fixed;
+  top: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  background: #fff6dc;
+  font-size: 14px;
+  max-width: calc(100vw - 32px);
+}

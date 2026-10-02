@@ -70,6 +70,11 @@ export interface Pieces {
   solids: { x: number; z: number; r: number; top: number }[];
   /** v14.1 (V14-D15): the street props — small, so the renderer hides them at far zoom */
   props: THREE.Object3D | null;
+  /**
+   * v19 try mode (admin only): the top-10 legends' models by crowd index, and a way to make a fresh copy of
+   * one (its own colours, standing on its base at the origin) that can walk
+   */
+  legends: Map<number, { obj: THREE.Object3D; fresh: () => Promise<THREE.Object3D | null> }>;
 }
 
 /**
@@ -233,6 +238,7 @@ export async function loadPieces(
     town: false,
     solids: [],
     props: null,
+    legends: new Map(),
   };
   const jobs: Promise<void>[] = [];
   const put = (
@@ -303,6 +309,16 @@ export async function loadPieces(
           });
         if (sp.rank === 1) out.bob.push({ obj: o, y: o.position.y });
         out.replaced.push(i);
+        out.legends.set(i, {
+          obj: o,
+          fresh: () =>
+            load(loader, key).then((src) => {
+              if (!src) return null;
+              const g = new THREE.Group();
+              g.add(place(src, h, 0, 0, 0, 0));
+              return g;
+            }),
+        });
       },
       Infinity,
       sp.rank > 3,

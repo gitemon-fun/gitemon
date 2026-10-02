@@ -337,24 +337,27 @@
         say('No way there on foot.');
         return true;
       }
-      if (!toHome && len > budgetLeft()) {
+      if (!toHome && tryingId == null && len > budgetLeft()) {
         say(
           `Not enough steps today: ${Math.round(budgetLeft())} m left. Real GitHub work earns more.`,
         );
         return true;
       }
       scene!.walkTo(x, z);
-      if (!toHome) walked += len;
+      if (!toHome && tryingId == null) walked += len;
       armIdle();
       return true;
     };
     // v8: steering (keys / thumb stick) spends the same step budget as tapped walks
-    scene.canSteer = (m) => budgetLeft() >= m;
+    // (v19 try mode spends no steps and logs nothing)
+    scene.canSteer = (m) => tryingId != null || budgetLeft() >= m;
     scene.onSteer = (m) => {
-      walked += m;
+      if (tryingId == null) walked += m;
       armIdle();
     };
-    scene.onWalk = (x, z) => checkLegends(x, z);
+    scene.onWalk = (x, z) => {
+      if (tryingId == null) void checkLegends(x, z);
+    };
     armIdle();
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) scene?.snapHome();
@@ -365,6 +368,27 @@
    * v19 build 02 (V19-D3): your Gitemon evolved since you last looked — the moment plays once, on any device
    * (the server remembers the last form you saw), then the mascot says so.
    */
+  /**
+   * v19 try mode (admins only): control another Gitemon — a player or a legend — in this browser only. Nothing
+   * is sent to the server: no steps spent, no sightings, no blessings.
+   */
+  let tryingId = $state<number | null>(null);
+  let tryingName = $state('');
+  async function tryPicked(g: MapGitemon) {
+    if (!me?.admin || !town || !scene) return;
+    const i = town.placed.findIndex((p) => p.g.id === g.id);
+    if (i < 0 || !(await scene.tryAs(i))) return;
+    tryingId = g.id;
+    tryingName = g.special
+      ? (g.special.title ?? `${TIER_NAME[g.special.tier]} legend`)
+      : g.login || 'this Gitemon';
+    picked = null;
+    detail = null;
+  }
+  function stopTrying() {
+    scene?.stopTry();
+    tryingId = null;
+  }
   /** v19 build 02: the way to your next form (Me panel) */
   const nf = $derived(me ? nextForm(me.f, me.m ?? 0, me.lv) : null);
   let evolveShown = false;
@@ -716,6 +740,14 @@
   />
 {/if}
 
+{#if tryingId != null}
+  <!-- v19 try mode banner (admins only) -->
+  <div class="trying px-frame">
+    <span>Trying <b>{tryingName}</b> — only you see this.</span>
+    <button class="gold" onclick={stopTrying}>Stop</button>
+  </div>
+{/if}
+
 {#if failed}
   <div class="hint px-frame dialogue">
     <img src="/favicon.png" alt="" /><span>The island could not load. Try again in a minute.</span>
@@ -912,6 +944,12 @@
       A sealed legend. It belongs to a developer who shaped the tech world. It wakes only when they sign
       in.
     </p>
+    {#if me?.admin && walking && picked.id !== tryingId}
+      <div class="actions">
+        <!-- v19 try mode: only for admins, only in this browser -->
+        <button class="sky" onclick={() => tryPicked(picked!)}>Try this legend</button>
+      </div>
+    {/if}
   </section>
 {:else if picked}
   <section
@@ -994,6 +1032,10 @@
           {/if}
         {/if}
         <a class="btn sky" href={'/' + picked.login}>Profile</a>
+        {#if me?.admin && walking && picked.id !== tryingId}
+          <!-- v19 try mode: only for admins, only in this browser -->
+          <button class="sky" onclick={() => tryPicked(picked!)}>Try it</button>
+        {/if}
       </div>
     </div>
   </section>
