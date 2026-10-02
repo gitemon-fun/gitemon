@@ -32,6 +32,10 @@ const ORDER = [
   'svc-legend-hall',
   'svc-notice-board',
   'svc-market',
+  // the guild halls stand in town: part of the heart the still picture waits for
+  ...['frost', 'marsh', 'bloom', 'tide', 'jungle', 'volcano', 'canyon', 'crystal', 'savanna'].map(
+    (r) => `lm-${r}`,
+  ),
   ...[4, 5, 6, 7, 8, 9, 10].map((r) => `legend-${r}`),
   ...[
     'town',
@@ -45,17 +49,9 @@ const ORDER = [
     'crystal',
     'savanna',
   ].map((r) => `wonder-${r}`),
-  ...[
-    'frost',
-    'marsh',
-    'bloom',
-    'tide',
-    'jungle',
-    'volcano',
-    'canyon',
-    'crystal',
-    'savanna',
-  ].flatMap((r) => [`lm-${r}`, `set-${r}`]),
+  ...['frost', 'marsh', 'bloom', 'tide', 'jungle', 'volcano', 'canyon', 'crystal', 'savanna'].map(
+    (r) => `set-${r}`,
+  ),
   'props',
 ];
 
