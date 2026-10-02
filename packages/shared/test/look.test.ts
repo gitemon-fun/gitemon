@@ -71,3 +71,24 @@ describe('look (v19)', () => {
     },
   );
 });
+
+// v19 build 10: the 3D portrait of a Gitemon
+import { portraitPath } from '../src/index.js';
+describe('portrait (v19 build 10)', () => {
+  it('a player by type, form and gem; a sealed legend keeps its secret', () => {
+    expect(portraitPath({ t1: 'prism', t2: 'tide', f: 2 }, 'v1')).toBe(
+      '/portraits/prism-2-tide.webp?v=v1',
+    );
+    expect(portraitPath({ t1: 'prism', t2: 'prism', f: 3 }, 'v1')).toBe(
+      '/portraits/prism-3-none.webp?v=v1',
+    );
+    const sp = { key: 'k', rank: 2, tier: 'legendary', title: null, species: null } as const;
+    expect(
+      portraitPath({ t1: 'prism', t2: null, f: 3, special: { ...sp, sealed: true } }, 'v1'),
+    ).toBeNull();
+    expect(
+      portraitPath({ t1: 'prism', t2: null, f: 3, special: { ...sp, sealed: false } }, 'v1'),
+    ).toBe('/portraits/legend-2.webp?v=v1');
+    expect(portraitPath({ t1: 'prism', t2: null, f: 1 }, '')).toBeNull();
+  });
+});

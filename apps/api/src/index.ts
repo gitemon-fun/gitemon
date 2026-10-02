@@ -20,6 +20,7 @@ import {
   cleanProject,
   type Snapshot,
   type TypeId,
+  portraitPath,
 } from '@gitemon/shared';
 import type { AppEnv } from './env.js';
 import { limits } from './env.js';
@@ -35,7 +36,7 @@ import {
 } from './auth.js';
 import { safeEqual } from './crypto.js';
 import { bonusLevels, checkBonded, doCatch, foundTown, joinTown, leaveTown } from './game.js';
-import { ogPng, spritePng } from './og.js';
+import { ogPng, readPortrait, spritePng } from './og.js';
 import {
   creditsPage,
   appShell,
@@ -1075,10 +1076,18 @@ app.get('/og/:file', async (c) => {
   return edgeCached(c, 86400, async () => {
     const r = await byId(c.env.DB, Number(m[1]));
     if (!r || r.hidden) return new Response('not found', { status: 404 });
-    const key = `og/${SCORER_VERSION}/${art.id}/${r.id}-${r.level}-${r.form}-${r.t1}-${r.t2 ?? ''}.png`;
+    // v19 build 10: the card shows the 3D portrait (a new key, so the old pixel cards are made again)
+    const key = `og/${SCORER_VERSION}/${art.id}/p${PORTRAITS_V}/${r.id}-${r.level}-${r.form}-${r.t1}-${r.t2 ?? ''}.png`;
     const stored = await c.env.BUCKET.get(key);
     if (stored) return new Response(stored.body, { headers: { 'content-type': 'image/png' } });
-    const png = ogPng({ ...spriteParams(r), login: r.login, level: r.level });
+    let portrait = null;
+    if (PORTRAITS_V) {
+      const bin = await c.env.STATIC.fetch(
+        new Request(new URL(`/portraits/og/${r.t1}-${r.form}-none.bin`, c.req.url)),
+      );
+      if (bin.ok) portrait = await readPortrait(await bin.arrayBuffer()).catch(() => null);
+    }
+    const png = ogPng({ ...spriteParams(r), login: r.login, level: r.level }, undefined, portrait);
     c.executionCtx.waitUntil(
       c.env.BUCKET.put(key, png, { httpMetadata: { contentType: 'image/png' } }),
     );
@@ -1106,6 +1115,11 @@ function withCaching(res: Response, path: string, v: string | undefined) {
   out.headers.set('cache-control', rule);
   return out;
 }
+
+/** v19 build 10: the portraits' content version (wrangler --define at deploy; empty in local runs) */
+declare const __PORTRAITS_V__: string | undefined;
+// (typeof is safe when the define is absent, as in local runs)
+const PORTRAITS_V: string = typeof __PORTRAITS_V__ === 'string' ? __PORTRAITS_V__ : '';
 
 // ---- pages ----------------------------------------------------------------------------------------------
 
@@ -1182,7 +1196,13 @@ app.get('*', async (c) => {
       : null;
     return html(
       c,
-      profilePage(r, await bonusLevels(c.env.DB, r.id), town, r.caught_count),
+      profilePage(
+        r,
+        await bonusLevels(c.env.DB, r.id),
+        town,
+        r.caught_count,
+        portraitPath({ t1: r.t1, t2: r.t2, f: r.form }, PORTRAITS_V),
+      ),
       200,
       60,
     );

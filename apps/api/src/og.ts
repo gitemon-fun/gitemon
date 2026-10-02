@@ -96,7 +96,41 @@ export interface OgInput extends SpriteParams {
 }
 
 /** 600x315 share card (pixel art; kept small so it renders inside the Worker CPU budget). */
-export function ogPng(o: OgInput, artSet: ArtSet = art): Uint8Array {
+/** v19 build 10: a 3D portrait as indexed pixels (see .claude/tools/toys/og_portraits.py): 0 = clear */
+export interface IndexedPortrait {
+  w: number;
+  h: number;
+  palette: string[];
+  px: Uint8Array;
+}
+
+/** read a packed portrait: b'GP' · u16 w · u16 h · u8 n · n×RGB · deflate-raw(indices) */
+export async function readPortrait(buf: ArrayBuffer): Promise<IndexedPortrait | null> {
+  const b = new Uint8Array(buf);
+  if (b.length < 7 || b[0] !== 71 || b[1] !== 80) return null;
+  const dv = new DataView(buf);
+  const w = dv.getUint16(2, true);
+  const h = dv.getUint16(4, true);
+  const n = b[6]!;
+  const palette: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const o = 7 + i * 3;
+    palette.push(
+      '#' + [b[o]!, b[o + 1]!, b[o + 2]!].map((v) => v.toString(16).padStart(2, '0')).join(''),
+    );
+  }
+  const raw = new Blob([b.slice(7 + n * 3)])
+    .stream()
+    .pipeThrough(new DecompressionStream('deflate-raw'));
+  const px = new Uint8Array(await new Response(raw).arrayBuffer());
+  return px.length === w * h ? { w, h, palette, px } : null;
+}
+
+export function ogPng(
+  o: OgInput,
+  artSet: ArtSet = art,
+  portrait: IndexedPortrait | null = null,
+): Uint8Array {
   const W = 600;
   const H = 315;
   const sp = compose(artSet, o);
@@ -109,21 +143,33 @@ export function ogPng(o: OgInput, artSet: ArtSet = art): Uint8Array {
     '#aab2bd',
     info.colors[0],
     '#1a1d23',
-    ...sp.palette,
+    ...(portrait ? portrait.palette : sp.palette),
   ];
   const c = new Canvas(W, H, 0);
   c.rect(0, H - 44, W, 44, 1);
-  // sprite scaled to about 192 px
-  const N = sp.size;
-  const S = Math.max(1, Math.floor(192 / N));
   const sx = 36;
-  const sy = Math.floor((H - 44 - N * S) / 2);
-  for (let y = 0; y < N; y++)
-    for (let x = 0; x < N; x++) {
-      const v = sp.px[y * N + x]!;
-      if (v) c.rect(sx + x * S, sy + y * S, S, S, OFF + v);
-    }
-  const tx = sx + N * S + 28;
+  let tx: number;
+  if (portrait) {
+    // v19 build 10: the 3D portrait (its palette after the card's own six colours; index 0 = clear)
+    const sy = Math.floor((H - 44 - portrait.h) / 2);
+    for (let y = 0; y < portrait.h; y++)
+      for (let x = 0; x < portrait.w; x++) {
+        const v = portrait.px[y * portrait.w + x]!;
+        if (v) c.rect(sx + x, sy + y, 1, 1, OFF + v - 1);
+      }
+    tx = sx + portrait.w + 24;
+  } else {
+    // sprite scaled to about 192 px
+    const N = sp.size;
+    const S = Math.max(1, Math.floor(192 / N));
+    const sy = Math.floor((H - 44 - N * S) / 2);
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        const v = sp.px[y * N + x]!;
+        if (v) c.rect(sx + x * S, sy + y * S, S, S, OFF + v);
+      }
+    tx = sx + N * S + 28;
+  }
   const maxW = W - tx - 24;
   const login = o.login;
   const ls = Canvas.width(login, 4) <= maxW ? 4 : Canvas.width(login, 3) <= maxW ? 3 : 2;

@@ -6,6 +6,7 @@
     TYPE_INFO,
     evolvedFrom,
     nextForm,
+    portraitPath,
     readable,
     type MapGitemon,
     type Stats,
@@ -86,12 +87,22 @@
     w.querySelectorAll('.welcome-creatures span').forEach((el, i) => {
       const g = SHOWCASE[i];
       if (!g || el.firstChild) return;
-      const src = sprite(g);
-      const c = document.createElement('canvas');
-      c.width = src.width;
-      c.height = src.height;
-      c.getContext('2d')!.drawImage(src, 0, 0);
-      el.appendChild(c);
+      // v19 build 10: the 3D portrait when the art set is here; the pixel sprite otherwise
+      const url = portraitPath(g, typeof __PORTRAITS_V__ === 'string' ? __PORTRAITS_V__ : '');
+      if (url) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = '';
+        img.decoding = 'async';
+        el.appendChild(img);
+      } else {
+        const src = sprite(g);
+        const c = document.createElement('canvas');
+        c.width = src.width;
+        c.height = src.height;
+        c.getContext('2d')!.drawImage(src, 0, 0);
+        el.appendChild(c);
+      }
       (el as HTMLElement).style.animationDelay = `${i * 0.2}s`;
     });
     document.getElementById('welcome-look')?.addEventListener('click', (e) => {

@@ -32,6 +32,14 @@ done < <(sed -n "s/^ *'\{0,1\}\([a-z0-9-]*\)'\{0,1\}: '\([^']*\.glb\)'.*/\1|\2/p
 # v19 build 11: one content version for every model, so their addresses can be cached for a year
 ( cd "$OUT" && sha1sum *.glb | sha1sum | cut -c1-10 ) > "$OUT/version.txt"
 echo "models: $n copied ($(du -sh "$OUT" | cut -f1)), version $(cat "$OUT/version.txt")"
+# v19 build 10: the 3D portraits (cards, Me, Dex, profile pages), versioned like the models
+if [[ -d ../gitemon-art/portraits ]]; then
+  rm -rf apps/web/public/portraits && mkdir -p apps/web/public/portraits
+  cp ../gitemon-art/portraits/*.webp apps/web/public/portraits/
+  [[ -d ../gitemon-art/portraits/og ]] && cp -r ../gitemon-art/portraits/og apps/web/public/portraits/
+  ( cd apps/web/public/portraits && sha1sum *.webp | sha1sum | cut -c1-10 ) > apps/web/public/portraits/version.txt
+  echo "portraits: $(ls apps/web/public/portraits/*.webp | wc -l), version $(cat apps/web/public/portraits/version.txt)"
+fi
 if [[ -d ../gitemon-art/ui ]]; then
   rm -rf apps/web/public/ui && mkdir -p apps/web/public/ui
   cp ../gitemon-art/ui/*.png apps/web/public/ui/

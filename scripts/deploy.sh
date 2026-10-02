@@ -27,4 +27,6 @@ sed -e "s|__D1_ID__|$GITEMON_D1_ID|" \
 
 cd apps/api
 npx wrangler d1 migrations apply gitemon --remote -c wrangler.deploy.toml
-npx wrangler deploy -c wrangler.deploy.toml
+# v19 build 10: the portraits' content version reaches the Worker (profile cards, share cards)
+PV=$(cat ../web/public/portraits/version.txt 2>/dev/null || true)
+npx wrangler deploy -c wrangler.deploy.toml --define "__PORTRAITS_V__:\"$PV\""

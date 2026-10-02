@@ -58,7 +58,14 @@ ${HEAD}</head><body class="page">
 </body></html>`;
 }
 
-export function profilePage(r: Row, bonus: number, town: string | null, caughtBy: number) {
+export function profilePage(
+  r: Row,
+  bonus: number,
+  town: string | null,
+  caughtBy: number,
+  /** v19 build 10: the 3D portrait's address (null = the pixel sprite) */
+  portrait: string | null = null,
+) {
   const t1 = TYPE_INFO[r.t1];
   const t2 = r.t2 ? TYPE_INFO[r.t2] : null;
   const stats = JSON.parse(r.stats) as Stats;
@@ -74,7 +81,7 @@ export function profilePage(r: Row, bonus: number, town: string | null, caughtBy
     .join('');
   const body = `
 <section class="card px-frame hero">
-  <div class="card-window" style="--ground:${t1.colors[1]}"><img src="/sprite/${r.id}.png?s=8&a=${art.id}&v=${r.scorer_version}${r.form}${r.shiny}" width="160" height="160" alt="${esc(r.login)}'s Gitemon, a ${t1.name} ${SHAPE_NAME[r.shape]}"></div>
+  <div class="card-window" style="--ground:${t1.colors[1]}"><img src="${portrait ?? `/sprite/${r.id}.png?s=8&a=${art.id}&v=${r.scorer_version}${r.form}${r.shiny}`}" width="160" height="160" alt="${esc(r.login)}'s Gitemon, a ${t1.name} ${SHAPE_NAME[r.shape]}"></div>
   <div class="who">
     <h1>${esc(r.login)}</h1>
     <p class="sub">${name}${wild ? 'Wild Gitemon' : 'Claimed Gitemon'}${r.shiny ? ' · ✦ Shiny' : ''}${r.machine ? ' · Agent account' : ''}</p>

@@ -690,3 +690,9 @@ body.page {
     padding: 18px 16px 16px;
   }
 }
+
+/* v19 build 10: 3D portraits are smooth pictures, not pixel art */
+.card-window > img[src*='/portraits/'],
+img.portrait {
+  image-rendering: auto;
+}

@@ -15,10 +15,12 @@ const placeholder = fileURLToPath(
 // v19 build 11: the models' content version (scripts/models.sh), so their addresses can be cached for a year
 const modelsV = fileURLToPath(new URL('./public/models/version.txt', import.meta.url));
 const MODELS_V = existsSync(modelsV) ? readFileSync(modelsV, 'utf8').trim() : '';
+const portraitsV = fileURLToPath(new URL('./public/portraits/version.txt', import.meta.url));
+const PORTRAITS_V = existsSync(portraitsV) ? readFileSync(portraitsV, 'utf8').trim() : '';
 
 export default defineConfig({
   plugins: [svelte()],
-  define: { __MODELS_V__: JSON.stringify(MODELS_V) },
+  define: { __MODELS_V__: JSON.stringify(MODELS_V), __PORTRAITS_V__: JSON.stringify(PORTRAITS_V) },
   resolve: { alias: { '@gitemon/art': existsSync(real) ? real : placeholder } },
   build: { rollupOptions: { input: ['app.html'] }, target: 'es2022' },
   // local development talks to the live API

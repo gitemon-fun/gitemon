@@ -692,6 +692,11 @@ body.welcoming .hint {
   height: 100%;
   image-rendering: pixelated;
 }
+.welcome-creatures img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
 @keyframes welcome-bob {
   0%,
   100% {
