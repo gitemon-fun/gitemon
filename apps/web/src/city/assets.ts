@@ -61,19 +61,27 @@ const ORDER = [
 const bytes = new Map<string, Promise<ArrayBuffer | null>>();
 let started = false;
 
-/** start every download now, at most 6 at once (Chrome fails ~50 at once), in ORDER */
+/**
+ * start every download now, at most 6 at once (Chrome fails ~50 at once), in ORDER. Every key gets its promise
+ * at once, so a loader that asks before its turn waits for this download instead of starting a second one.
+ */
 export function prefetchModels() {
   if (started || !MODELS_V) return;
   started = true;
-  const queue = [...ORDER];
+  const queue: { key: string; done: (b: ArrayBuffer | null) => void }[] = [];
+  for (const key of ORDER) {
+    let done!: (b: ArrayBuffer | null) => void;
+    bytes.set(key, new Promise<ArrayBuffer | null>((r) => (done = r)));
+    queue.push({ key, done });
+  }
   const next = (): Promise<void> => {
-    const key = queue.shift();
-    if (!key) return Promise.resolve();
-    const p = fetch(modelUrl(key))
+    const job = queue.shift();
+    if (!job) return Promise.resolve();
+    return fetch(modelUrl(job.key))
       .then((r) => (r.ok ? r.arrayBuffer() : null))
-      .catch(() => null);
-    bytes.set(key, p);
-    return p.then(next);
+      .catch(() => null)
+      .then((b) => job.done(b))
+      .then(next);
   };
   for (let k = 0; k < 6; k++) void next();
 }
