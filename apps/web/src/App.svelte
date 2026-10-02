@@ -13,6 +13,7 @@
   } from '@gitemon/shared';
   import { api, ERRORS, type Detail, type Me, type Town } from './lib/api';
   import { CityScene } from './city/scene';
+  import { prefetchModels } from './city/assets';
   import { loadCity, type LoadedCity } from './city/load';
   import {
     CATCH_M,
@@ -546,6 +547,8 @@
   }
 
   onMount(() => {
+    // v19 build 11: the 3D files start downloading now, while the island's data loads
+    prefetchModels();
     wakeWelcome();
     scene = new CityScene(host, (p) => select(p ? p.g : null));
     scene.onBuilding = (k) => void openBuilding(k);

@@ -38,6 +38,7 @@ import { bonusLevels, checkBonded, doCatch, foundTown, joinTown, leaveTown } fro
 import { ogPng, spritePng } from './og.js';
 import {
   creditsPage,
+  appShell,
   howPage,
   ladderPage,
   landingShell,
@@ -1085,14 +1086,40 @@ app.get('/og/:file', async (c) => {
   });
 });
 
+/**
+ * v19 build 11: how long browsers may keep a static file. Vite's /assets/ names carry a content hash and the
+ * 3D files carry a content version (?v=, scripts/models.sh): both never change, so a year. Pictures, fonts and
+ * sounds a week, refreshed in the background. Everything else (the pages' HTML) keeps its own rule.
+ */
+function withCaching(res: Response, path: string, v: string | undefined) {
+  if (res.status !== 200) return res;
+  const year = 'public, max-age=31536000, immutable';
+  const rule = path.startsWith('/assets/')
+    ? year
+    : (path.startsWith('/models/') || path.startsWith('/portraits/')) && v
+      ? year
+      : /\.(png|webp|jpg|svg|woff2?|ogg|mp3|glb|hdr|json)$/.test(path)
+        ? 'public, max-age=604800, stale-while-revalidate=2592000'
+        : null;
+  if (!rule) return res;
+  const out = new Response(res.body, res);
+  out.headers.set('cache-control', rule);
+  return out;
+}
+
 // ---- pages ----------------------------------------------------------------------------------------------
 
 const SPA = new Set(['/map', '/dex', '/towns', '/me']);
 const CITY = new Set(['/city']);
 
 async function spa(c: Context<AppEnv>) {
-  const res = await c.env.STATIC.fetch(new Request(new URL('/app.html', c.req.url)));
-  return new Response(res.body, {
+  const [res, lqip] = await Promise.all([
+    c.env.STATIC.fetch(new Request(new URL('/app.html', c.req.url))),
+    c.env.STATIC.fetch(new Request(new URL('/poster-lqip.json', c.req.url))),
+  ]);
+  // v19 build 11: the still picture covers the island until its 3D pieces stand
+  const blur = lqip.ok ? await lqip.json<{ wide?: string; tall?: string }>().catch(() => ({})) : {};
+  return new Response(appShell(await res.text(), blur), {
     status: 200,
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
   });
@@ -1127,7 +1154,7 @@ app.get('*', async (c) => {
   if (CITY.has(path)) return c.redirect('/map', 301);
   if (path.includes('.') || path.startsWith('/assets/')) {
     const res = await c.env.STATIC.fetch(c.req.raw);
-    if (res.status !== 404) return res;
+    if (res.status !== 404) return withCaching(res, path, c.req.query('v'));
     return html(c, messagePage(404, 'Not found', 'There is nothing at this address.'), 404, 60);
   }
   const seg = decodeURIComponent(path.slice(1).replace(/\/$/, ''));

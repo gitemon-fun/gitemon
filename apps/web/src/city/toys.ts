@@ -18,6 +18,7 @@ import {
   type TypeId,
 } from '@gitemon/shared';
 import { buildPieces, type Anchors } from './pieces';
+import { modelUrl, prefetched } from './assets';
 
 /**
  * v18 3D creature line (GRANDPLAN v18). One Meshy model per form — the mascot as a kitten, a winged fox
@@ -340,7 +341,13 @@ export class Toys {
     loader.setMeshoptDecoder(MeshoptDecoder);
     this.loading = Promise.all(
       ([1, 2, 3] as Form[]).map(async (f) => {
-        const gltf = await loader.loadAsync(`/models/toy-${f}.glb`).catch(() => null);
+        // v19 build 11: the bytes may already be on their way since the page started
+        const early = prefetched(`toy-${f}`);
+        const gltf = await (
+          early
+            ? early.then((b) => (b ? loader.parseAsync(b, '') : null))
+            : loader.loadAsync(modelUrl(`toy-${f}`))
+        ).catch(() => null);
         if (!gltf) return;
         const src = normalise(gltf.scene, f);
         if (!src) return;

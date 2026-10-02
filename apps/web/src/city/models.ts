@@ -15,6 +15,7 @@ import {
 } from '@gitemon/shared';
 import type { Placed } from './crowd';
 import type { Home } from './load';
+import { modelUrl, prefetched } from './assets';
 import { plotHeight } from './town';
 
 /**
@@ -98,7 +99,13 @@ const cache = new Map<Key, Promise<THREE.Group | null>>();
 function load(loader: GLTFLoader, key: Key): Promise<THREE.Group | null> {
   let p = cache.get(key);
   if (!p) {
-    p = slot(() => loader.loadAsync(`/models/${key}.glb`))
+    // v19 build 11: the bytes may already be on their way since the page started
+    const early = prefetched(key);
+    p = (
+      early
+        ? early.then((b) => (b ? loader.parseAsync(b, '') : Promise.reject(new Error('missing'))))
+        : slot(() => loader.loadAsync(modelUrl(key)))
+    )
       .then((g) => {
         g.scene.traverse((o) => {
           const m = o as THREE.Mesh;
@@ -225,8 +232,13 @@ export async function loadPieces(
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   // no art set here (a fresh clone): keep the code-built world
-  const probe = await fetch('/models/monument.glb', { method: 'HEAD' }).catch(() => null);
-  if (!probe?.ok) return null;
+  const early = prefetched('monument');
+  if (
+    early
+      ? !(await early)
+      : !(await fetch(modelUrl('monument'), { method: 'HEAD' }).catch(() => null))?.ok
+  )
+    return null;
 
   const group = new THREE.Group();
   const out: Pieces = {
@@ -457,7 +469,12 @@ export async function loadPieces(
 
   // ---- v14.1 (V14-D15): street props — one file, a scene per prop, each prop drawn instanced ----
   jobs.push(
-    slot(() => loader.loadAsync('/models/props.glb'))
+    (prefetched('props')
+      ? prefetched('props')!.then((b) =>
+          b ? loader.parseAsync(b, '') : Promise.reject(new Error('missing')),
+        )
+      : slot(() => loader.loadAsync(modelUrl('props')))
+    )
       .then((g) => {
         const byKey = new Map<string, [number, number, number, number, number, number][]>();
         for (const p of townProps(isl)) {

@@ -245,6 +245,31 @@ export function landingShell(
     );
 }
 
+/**
+ * v19 build 11: every other app address (/map, /me, a signed-in /) shows the same still picture of the island
+ * until the 3D pieces stand, instead of the bare code-built world popping into the real one.
+ */
+export function appShell(app: string, lqip: { wide?: string; tall?: string } = {}): string {
+  const ok = (u?: string) => (u && /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(u) ? u : null);
+  const wide = ok(lqip.wide);
+  const tall = ok(lqip.tall);
+  const blur =
+    (wide ? `.poster{background:#0b0d10 url(${wide}) center/auto 100% no-repeat}` : '') +
+    (tall ? `@media (orientation:portrait){.poster{background-image:url(${tall})}}` : '');
+  return app
+    .replace(
+      '</head>',
+      '<link rel="preload" as="image" href="/poster-tall.webp" media="(orientation: portrait)">' +
+        '<link rel="preload" as="image" href="/poster-wide.webp" media="(orientation: landscape)">' +
+        (blur ? `<style>${blur}</style>` : '') +
+        '</head>',
+    )
+    .replace(
+      '<div id="app"></div>',
+      '<div id="app"></div><div class="poster" id="poster"><picture><source media="(orientation: portrait)" srcset="/poster-tall.webp"><img src="/poster-wide.webp" alt="" fetchpriority="high"></picture></div>',
+    );
+}
+
 /** v14 (V14-D8): the rules, one tap from the welcome card */
 export const howPage = () =>
   layout({
