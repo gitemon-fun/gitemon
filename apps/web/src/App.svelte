@@ -1008,7 +1008,7 @@
             : `${picked.special.title ?? `${TIER_NAME[picked.special.tier]} legend`} · awake`}{/if}
       </p>
       <div class="card-window" style="--ground:{groundOf(picked.t1)}">
-        <Sprite g={picked} size={104} />
+        <Sprite g={picked} size={150} />
       </div>
       <div class="chips">
         <span class="chip" style={chip(picked.t1)}>{TYPE_INFO[picked.t1].name}</span>
