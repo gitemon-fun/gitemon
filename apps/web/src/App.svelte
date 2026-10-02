@@ -13,7 +13,7 @@
   } from '@gitemon/shared';
   import { api, ERRORS, type Detail, type Me, type Town } from './lib/api';
   import { CityScene } from './city/scene';
-  import { prefetchModels } from './city/assets';
+  import { loadState, prefetchModels } from './city/assets';
   import { loadCity, type LoadedCity } from './city/load';
   import {
     CATCH_M,
@@ -111,6 +111,17 @@
   async function reveal(pieces: Promise<unknown>) {
     const poster = document.getElementById('poster');
     if (!poster || !scene) return;
+    // v19 build 11: a loading bar on the picture, so a slow network never looks frozen
+    const bar = document.createElement('div');
+    bar.className = 'poster-load';
+    bar.innerHTML = '<span>Loading the island…</span><i><b></b></i>';
+    poster.appendChild(bar);
+    const fill = bar.querySelector('b') as HTMLElement;
+    const tick = setInterval(() => {
+      const k = loadState.total ? loadState.done / loadState.total : 0;
+      fill.style.width = `${Math.round(10 + 90 * k)}%`;
+    }, 200);
+    void pieces.finally(() => clearInterval(tick));
     await Promise.race([pieces, new Promise((r) => setTimeout(r, 8000))]);
     await scene.nextFrame();
     await scene.nextFrame();

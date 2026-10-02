@@ -1665,10 +1665,10 @@ export class CityScene {
       return;
     if (now - this.last < 32) return; // ~30 fps is plenty for a city and kind to phones
     // v19 build 11: pieces fading in keep the frames coming
-    if (stepFades(performance.now())) {
-      this.dirty = true;
-      this.renderer.shadowMap.needsUpdate = true;
-    }
+    const [fadingNow, faded] = stepFades(performance.now());
+    if (fadingNow) this.dirty = true;
+    // the static shadow map is redrawn once a piece has fully faded in, not every frame (costly on phones)
+    if (faded) this.renderer.shadowMap.needsUpdate = this.dirty = true;
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     // v12: Q / E turn steadily; the ⟳ quarter turn eases in

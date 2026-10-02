@@ -70,6 +70,7 @@ export function prefetchModels() {
   if (started || !MODELS_V) return;
   started = true;
   const queue: { key: string; done: (b: ArrayBuffer | null) => void }[] = [];
+  loadState.total = ORDER.length;
   for (const key of ORDER) {
     let done!: (b: ArrayBuffer | null) => void;
     bytes.set(key, new Promise<ArrayBuffer | null>((r) => (done = r)));
@@ -81,11 +82,17 @@ export function prefetchModels() {
     return fetch(modelUrl(job.key))
       .then((r) => (r.ok ? r.arrayBuffer() : null))
       .catch(() => null)
-      .then((b) => job.done(b))
+      .then((b) => {
+        loadState.done++;
+        job.done(b);
+      })
       .then(next);
   };
   for (let k = 0; k < 6; k++) void next();
 }
+
+/** v19 build 11: how many of the early downloads have finished, for the loading bar on the still picture */
+export const loadState = { done: 0, total: 0 };
 
 /** the bytes of a model if its download was started early (null = load it the usual way) */
 export const prefetched = (key: string) => bytes.get(key) ?? null;
@@ -110,8 +117,9 @@ export function fadeIn(o: THREE.Object3D) {
     }
   });
 }
-/** one frame of every fade; true while any is still running */
-export function stepFades(now: number): boolean {
+/** one frame of every fade: [still running, how many finished this frame] */
+export function stepFades(now: number): [boolean, number] {
+  let finished = 0;
   for (const [mat, f] of fading) {
     const k = Math.min(1, (now - f.t0) / FADE_MS);
     mat.opacity = k * k * (3 - 2 * k);
@@ -121,7 +129,8 @@ export function stepFades(now: number): boolean {
       mat.userData.faded = true;
       mat.needsUpdate = true;
       fading.delete(mat);
+      finished++;
     }
   }
-  return fading.size > 0;
+  return [fading.size > 0, finished];
 }

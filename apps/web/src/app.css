@@ -842,3 +842,34 @@ body.welcoming .hint {
   font-size: 14px;
   max-width: calc(100vw - 32px);
 }
+
+/* v19 build 11: the loading bar on the still picture */
+.poster-load {
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  font: 700 14px var(--pixel, sans-serif);
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+.poster-load i {
+  display: block;
+  width: 180px;
+  height: 8px;
+  border: 2px solid #3b2a1e;
+  background: #f3e6c4;
+}
+.poster-load b {
+  display: block;
+  height: 100%;
+  width: 10%;
+  background: #6bbf59;
+  transition: width 0.2s;
+}
+body.welcoming .poster-load {
+  bottom: 6%;
+}

@@ -76,12 +76,12 @@ export interface Pieces {
    * one (its own colours, standing on its base at the origin) that can walk
    */
   legends: Map<number, { obj: THREE.Object3D; fresh: () => Promise<THREE.Object3D | null> }>;
-  /** v19 build 11: resolves when the island's heart stands (town, monument, gates, bridges, legends) */
+  /** v19 build 11: resolves when the island's heart stands (town, monument, the Origin and Guardians, gates, bridges) */
   core: Promise<void>;
 }
 
 /** v19 build 11: the pieces the first view must not be without; the far ones fade in after */
-const CORE = /^(monument|origin|guardian-|legend-|house-|svc-|lm-|gate|bridge)/;
+const CORE = /^(monument|origin|guardian-|house-|svc-|lm-|gate|bridge)/;
 
 /**
  * v14.1: at most 6 model downloads at once. Started together (~50), Chrome fails the last ones with
