@@ -186,7 +186,7 @@ export const LANDING = {
 const landingCard =
   () => `<section class="welcome px-frame" id="welcome" aria-label="Welcome to Gitemon">
 <h1>Every developer is a creature.</h1>
-<p class="welcome-sub">Sign in with GitHub and your public work hatches into a pixel Gitemon on one shared island.</p>
+<p class="welcome-sub">Sign in with GitHub and your public work hatches into a Gitemon on one shared island.</p>
 <div class="welcome-creatures" aria-hidden="true">${'<span></span>'.repeat(9)}</div>
 <div class="welcome-btns"><a class="btn primary btn-big welcome-go" href="/auth/login?next=/map">Sign in with GitHub</a><a class="btn btn-big welcome-look" id="welcome-look" href="/map">Look around first</a></div>
 <ul class="welcome-beats">
